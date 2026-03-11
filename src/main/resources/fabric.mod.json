@@ -18,19 +18,12 @@
 		"main": [
 			"alliesandfoes.Alliesandfoes"
 		],
-		"client": [
-			"alliesandfoes.AlliesandfoesClient"
-		],
 		"fabric-datagen": [
 			"alliesandfoes.AlliesandfoesDataGenerator"
 		]
 	},
 	"mixins": [
-		"alliesandfoes.mixins.json",
-		{
-			"config": "alliesandfoes.client.mixins.json",
-			"environment": "client"
-		}
+		"alliesandfoes.mixins.json"
 	],
 	"depends": {
 		"fabricloader": ">=0.18.4",
