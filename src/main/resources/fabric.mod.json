@@ -16,10 +16,10 @@
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"alliesandfoes.Alliesandfoes"
+			"net.cnn_r.alliesandfoes.Alliesandfoes"
 		],
 		"fabric-datagen": [
-			"alliesandfoes.AlliesandfoesDataGenerator"
+			"net.cnn_r.alliesandfoes.AlliesandfoesDataGenerator"
 		]
 	},
 	"mixins": [
