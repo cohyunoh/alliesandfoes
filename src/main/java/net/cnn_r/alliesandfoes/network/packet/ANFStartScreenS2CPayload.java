@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes.network.packet;
 
 import net.cnn_r.alliesandfoes.Alliesandfoes;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -15,5 +16,12 @@ public record ANFStartScreenS2CPayload() implements CustomPacketPayload {
     @Override
     public @NonNull Type<? extends CustomPacketPayload> type() {
         return ID;
+    }
+
+    public static void register() {
+        PayloadTypeRegistry.playS2C().register(
+                ANFStartScreenS2CPayload.ID,
+                ANFStartScreenS2CPayload.CODEC
+        );
     }
 }

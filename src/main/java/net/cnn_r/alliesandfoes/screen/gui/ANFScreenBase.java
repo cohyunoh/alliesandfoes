@@ -1,4 +1,4 @@
-package net.cnn_r.alliesandfoes.client.gui;
+package net.cnn_r.alliesandfoes.screen.gui;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
