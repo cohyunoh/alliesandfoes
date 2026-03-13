@@ -1,15 +1,15 @@
 package alliesandfoes;
-// Imports for Fabric
+
+//Default Imports for Fabric
 import net.fabricmc.api.ModInitializer;
-import com.mojang.brigadier.CommandDispatcher;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
-import net.minecraft.server.command.CommandManager;
-import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import static net.minecraft.server.command.CommandManager.*;
+
 //Imports from mod
-import alliesandfoes.command.StartCommand;
+import alliesandfoes.command.*;
 
 public class Alliesandfoes implements ModInitializer {
 	public static final String MOD_ID = "alliesandfoes";
@@ -25,8 +25,7 @@ public class Alliesandfoes implements ModInitializer {
 		// However, some things (like resources) may still be uninitialized.
 		// Proceed with mild caution
 		LOGGER.info("Hello Fabric world!");
-		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-			StartCommand.register(dispatcher);
-		});
+		CommandRegistrationCallback.EVENT.register(StartCommand::register);
+		CommandRegistrationCallback.EVENT.register(TeamsCommand::register);
 	}
 }
