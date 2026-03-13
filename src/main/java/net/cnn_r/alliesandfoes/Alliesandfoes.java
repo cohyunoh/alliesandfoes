@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes;
 
 //Default Imports for Fabric
+import net.cnn_r.alliesandfoes.network.ANFNetworking;
 import net.cnn_r.alliesandfoes.network.packet.ANFStartScreenS2CPayload;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -18,6 +19,5 @@ public class Alliesandfoes implements ModInitializer {
 	public void onInitialize() {
 		CommandRegistrationCallback.EVENT.register(StartCommand::register);
 		CommandRegistrationCallback.EVENT.register(TeamsCommand::register);
-		PayloadTypeRegistry.playS2C().register(ANFStartScreenS2CPayload.ID, ANFStartScreenS2CPayload.CODEC);
 	}
 }

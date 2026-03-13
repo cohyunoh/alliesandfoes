@@ -1,18 +1,23 @@
 package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.client.gui.ANFScreenBase;
+import net.cnn_r.alliesandfoes.network.ANFNetworking;
 import net.cnn_r.alliesandfoes.network.packet.ANFStartScreenS2CPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.network.chat.Component;
 
 public class AlliesandfoesClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
+        PayloadTypeRegistry.playS2C().register(
+                ANFStartScreenS2CPayload.ID,
+                ANFStartScreenS2CPayload.CODEC
+        );
         ClientPlayNetworking.registerGlobalReceiver(ANFStartScreenS2CPayload.ID, (payload, context) -> {
-            ANFScreenBase startscreen = new ANFScreenBase(Component.literal("Start Screen"));
             context.client().execute(() -> {
-                        context.client().setScreen(startscreen);
+                        context.client().setScreen(new ANFScreenBase(Component.literal("Start Screen")));
             });
         });
     }

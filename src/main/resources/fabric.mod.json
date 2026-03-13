@@ -18,6 +18,9 @@
 		"main": [
 			"net.cnn_r.alliesandfoes.Alliesandfoes"
 		],
+		"client": [
+			"net.cnn_r.alliesandfoes.AlliesandfoesClient"
+		],
 		"fabric-datagen": [
 			"net.cnn_r.alliesandfoes.AlliesandfoesDataGenerator"
 		]
