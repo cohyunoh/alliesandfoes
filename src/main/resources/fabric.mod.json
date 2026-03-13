@@ -3,9 +3,9 @@
 	"id": "alliesandfoes",
 	"version": "${version}",
 	"name": "alliesandfoes",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "A mod that separates players into teams in survival multiplayer servers and allows for a more competitive yet vanilla-like gameplay.",
 	"authors": [
-		"Me!"
+		"cnn_r"
 	],
 	"contact": {
 		"homepage": "https://fabricmc.net/",
