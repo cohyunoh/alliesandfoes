@@ -10,7 +10,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         //Registers
-        ANFStartScreenS2CPayload.register();
+        //ANFStartScreenS2CPayload.register();
         ClientPlayNetworking.registerGlobalReceiver(ANFStartScreenS2CPayload.ID, (payload, context) -> {
             context.client().execute(() -> {
                         context.client().setScreen(new ANFScreenBase(Component.literal("Start Screen")));
