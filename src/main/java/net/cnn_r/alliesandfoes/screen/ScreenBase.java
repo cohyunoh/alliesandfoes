@@ -1,4 +1,4 @@
-package net.cnn_r.alliesandfoes.screen.gui;
+package net.cnn_r.alliesandfoes.screen;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -6,8 +6,8 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 
-public class ANFScreenBase extends Screen {
-    public ANFScreenBase(Component title) {
+public class ScreenBase extends Screen {
+    public ScreenBase(Component title) {
         super(title);
     }
     @Override

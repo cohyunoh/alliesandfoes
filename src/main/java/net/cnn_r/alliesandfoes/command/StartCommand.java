@@ -1,6 +1,6 @@
 package net.cnn_r.alliesandfoes.command;
 
-import net.cnn_r.alliesandfoes.network.ANFNetworking;
+import net.cnn_r.alliesandfoes.network.AlliesandfoesNetworking;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
@@ -16,7 +16,9 @@ public class StartCommand {
         dispatcher
                 .register(literal("anf")
                         .then(literal("start")
-                                .executes(StartCommand::execute)
+                                .requires(source -> source.getServer() != null &&
+                                        source.getServer().getPlayerList().isOp(source.getPlayer().nameAndId()))
+                                    .executes(StartCommand::execute)
                         )
                 );
     }
@@ -24,7 +26,7 @@ public class StartCommand {
     private static int execute(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         MinecraftServer server = context.getSource().getServer();
         // Send a custom packet to all player
-        ANFNetworking.sendOpenStartScreenPacket(server);
+        AlliesandfoesNetworking.sendOpenStartScreenPacket(server);
         context.getSource().sendSuccess(() -> Component.literal("Opening start screen..."), false);
         return 1;
     }
