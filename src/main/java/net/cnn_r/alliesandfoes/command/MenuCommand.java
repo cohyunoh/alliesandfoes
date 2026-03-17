@@ -11,23 +11,22 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import static net.minecraft.commands.Commands.*;
 
-public class StartCommand {
+public class MenuCommand {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext registryAccess, CommandSelection environment) {
         dispatcher
                 .register(literal("anf")
-                        .then(literal("start")
-                                .requires(source -> source.getServer() != null &&
-                                        source.getServer().getPlayerList().isOp(source.getPlayer().nameAndId()))
-                                    .executes(StartCommand::execute)
+                        .then(literal("menu")
+                                //.requires(source -> source.getServer() != null &&
+                                //        source.getServer().getPlayerList().isOp(source.getPlayer().nameAndId()))
+                                    .executes(MenuCommand::execute)
                         )
                 );
     }
-
     private static int execute(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         MinecraftServer server = context.getSource().getServer();
         // Send a custom packet to all player
         AlliesandfoesNetworking.sendOpenStartScreenPacket(server);
-        context.getSource().sendSuccess(() -> Component.literal("Opening start screen..."), false);
+        context.getSource().sendSuccess(() -> Component.literal("Opening menu screen..."), false);
         return 1;
     }
 

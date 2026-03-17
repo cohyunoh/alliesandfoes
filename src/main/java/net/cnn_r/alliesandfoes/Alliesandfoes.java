@@ -12,7 +12,7 @@ public class Alliesandfoes implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		StartScreenS2CPayload.register();
-		CommandRegistrationCallback.EVENT.register(StartCommand::register);
+		CommandRegistrationCallback.EVENT.register(MenuCommand::register);
 		CommandRegistrationCallback.EVENT.register(TeamsCommand::register);
 	}
 }
