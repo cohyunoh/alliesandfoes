@@ -16,9 +16,7 @@ public class MenuCommand {
         dispatcher
                 .register(literal("anf")
                         .then(literal("menu")
-                                //.requires(source -> source.getServer() != null &&
-                                //        source.getServer().getPlayerList().isOp(source.getPlayer().nameAndId()))
-                                    .executes(MenuCommand::execute)
+                            .executes(MenuCommand::execute)
                         )
                 );
     }

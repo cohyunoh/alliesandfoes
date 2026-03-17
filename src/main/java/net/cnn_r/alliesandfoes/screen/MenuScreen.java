@@ -1,10 +1,8 @@
 package net.cnn_r.alliesandfoes.screen;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.permissions.Permissions;
 
 public class MenuScreen extends ScreenBase {
