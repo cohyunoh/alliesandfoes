@@ -3,7 +3,8 @@
 	"package": "net.cnn_r.alliesandfoes.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
-		"ExampleMixin"
+      "InventoryScreenMixin",
+		"AbstractRecipeBookScreenAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1
