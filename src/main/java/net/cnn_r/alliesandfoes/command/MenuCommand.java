@@ -4,6 +4,8 @@ import net.cnn_r.alliesandfoes.network.AlliesandfoesNetworking;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import net.cnn_r.alliesandfoes.screen.MenuScreen;
+import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands.CommandSelection;
@@ -22,8 +24,8 @@ public class MenuCommand {
     }
     private static int execute(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         MinecraftServer server = context.getSource().getServer();
-        // Send a custom packet to all player
-        AlliesandfoesNetworking.sendOpenStartScreenPacket(server);
+        //Send a custom packet to player
+        AlliesandfoesNetworking.sendOpenMenuScreenPacket(server,context);
         context.getSource().sendSuccess(() -> Component.literal("Opening menu screen..."), false);
         return 1;
     }
