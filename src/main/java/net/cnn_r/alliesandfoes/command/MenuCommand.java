@@ -11,6 +11,9 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands.CommandSelection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.permissions.Permission;
+import net.minecraft.server.permissions.Permissions;
+
 import static net.minecraft.commands.Commands.*;
 
 public class MenuCommand {
@@ -18,7 +21,8 @@ public class MenuCommand {
         dispatcher
                 .register(literal("anf")
                         .then(literal("menu")
-                            .executes(MenuCommand::execute)
+                                .requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_ADMIN))
+                                    .executes(MenuCommand::execute)
                         )
                 );
     }
