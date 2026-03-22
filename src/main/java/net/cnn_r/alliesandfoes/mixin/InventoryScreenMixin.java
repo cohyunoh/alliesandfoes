@@ -16,21 +16,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(InventoryScreen.class)
 public abstract class InventoryScreenMixin extends AbstractRecipeBookScreen<InventoryMenu> {
-	@Unique
-    private Button teamsWidget;
 
-	public InventoryScreenMixin(InventoryMenu recipeBookMenu, RecipeBookComponent<?> recipeBookComponent, Inventory inventory, Component component) {
+    public InventoryScreenMixin(InventoryMenu recipeBookMenu, RecipeBookComponent<?> recipeBookComponent, Inventory inventory, Component component) {
 		super(recipeBookMenu, recipeBookComponent, inventory, component);
 	}
 
 	@Inject(at = @At("RETURN"), method = "init")
 	private void addCustomButtons(CallbackInfo info) {
-		teamsWidget = Button.builder(Component.literal("View Teams"), (btn) -> {
-			// When the button is clicked, we can display a toast to the screen.
-			this.minecraft.getToastManager().addToast(
-					SystemToast.multiline(this.minecraft, SystemToast.SystemToastId.NARRATOR_TOGGLE, Component.nullToEmpty("Allies and Foes"), Component.nullToEmpty("Viewing Teams"))
-			);
-		}).bounds((this.width / 2) - (96/2), this.height-((this.height - this.imageHeight) / 2), 96, 20).build();
+        // When the button is clicked, we can display a toast to the screen.
+        Button teamsWidget = Button.builder(Component.literal("View Teams"), (btn) -> {
+            // When the button is clicked, we can display a toast to the screen.
+            this.minecraft.getToastManager().addToast(
+                    SystemToast.multiline(this.minecraft, SystemToast.SystemToastId.NARRATOR_TOGGLE, Component.nullToEmpty("Allies and Foes"), Component.nullToEmpty("Viewing Teams"))
+            );
+        }).bounds((this.width / 2) - (96 / 2), this.height - ((this.height - this.imageHeight) / 2), 96, 20).build();
 		this.addRenderableWidget(teamsWidget);
 	}
 }

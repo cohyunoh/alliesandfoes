@@ -5,9 +5,9 @@ import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.permissions.Permissions;
 
-public class MenuScreen extends ScreenBase {
+public class CreateScreen extends ScreenBase {
 
-    public MenuScreen(Component title) {
+    public CreateScreen(Component title) {
         super(title);
     }
 
