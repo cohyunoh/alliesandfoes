@@ -13,12 +13,14 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class MapScreen extends Screen {
     private static final int BLOCK_PIXEL_SIZE = 2;
     private static final int CHUNK_SIZE = 16 * BLOCK_PIXEL_SIZE;
-    private int MAP_SIZE_X;
-    private int MAP_SIZE_Z;
-    private ChunkAccess[][] chunks;
+    private final Map<ChunkPos, int[][]> chunkColorCache = new HashMap<>();
+    private final int CACHE_RADIUS = this.width/CHUNK_SIZE;
 
     public MapScreen(Component title) {
         super(title);
@@ -26,9 +28,6 @@ public class MapScreen extends Screen {
 
     @Override
     protected void init() {
-        MAP_SIZE_X = this.width / BLOCK_PIXEL_SIZE;
-        MAP_SIZE_Z = this.height / BLOCK_PIXEL_SIZE;
-        chunks = new ChunkAccess[MAP_SIZE_X][MAP_SIZE_Z];
         // When the button is clicked, we can display a toast to the screen.
         Button createAllianceWidget = Button.builder(Component.literal("Create Alliance"), (btn) -> {
             // When the button is clicked, we can display a toast to the screen.
@@ -48,7 +47,6 @@ public class MapScreen extends Screen {
         this.addRenderableWidget(createAllianceWidget);
         //this.addRenderableWidget(viewAllianceWidget);
         assert this.minecraft.player != null;
-        captureChunks(this.minecraft.player);
     }
 
     @Override
@@ -69,21 +67,11 @@ public class MapScreen extends Screen {
 
         renderChunk(context, chunk, width/2-8, height/2-8);
 
-
+        cleanCache(this.minecraft.player.chunkPosition());
     }
 
-    public void captureChunks(Player player) {
-        ChunkPos playerChunkPos = player.chunkPosition();
-        for (int x = 0; x < MAP_SIZE_X/64; x++) {
-            for (int z = 0; z < MAP_SIZE_Z/64; z++) {
-                ChunkPos tempChunkPos = new ChunkPos(playerChunkPos.x - (MAP_SIZE_X/2 - x), playerChunkPos.z - (MAP_SIZE_Z/2 - z));
-                assert this.minecraft.level != null;
-                chunks[x][z] = this.minecraft.level.getChunk(tempChunkPos.x, tempChunkPos.z, ChunkStatus.FULL);
-            }
-        }
-    }
-
-    public void renderChunk(GuiGraphics context, ChunkAccess chunk, int startX, int startY) {
+    private int[][] generateChunkColors(ChunkAccess chunk) {
+        int[][] colors = new int[16][16];
 
         int baseX = chunk.getPos().getMinBlockX();
         int baseZ = chunk.getPos().getMinBlockZ();
@@ -103,6 +91,31 @@ public class MapScreen extends Screen {
 
                 int color = getBlockColor(state, heightPos);
 
+                colors[x][z] = color;
+            }
+        }
+
+        return colors;
+    }
+
+    private int[][] getChunkColors(ChunkAccess chunk) {
+
+        ChunkPos pos = chunk.getPos();
+
+        if (!chunkColorCache.containsKey(pos)) {
+            chunkColorCache.put(pos, generateChunkColors(chunk));
+        }
+
+        return chunkColorCache.get(pos);
+    }
+
+    public void renderChunk(GuiGraphics context, ChunkAccess chunk, int startX, int startY) {
+
+        int[][] colors = getChunkColors(chunk);
+
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+
                 int drawX = startX + x * BLOCK_PIXEL_SIZE;
                 int drawY = startY + z * BLOCK_PIXEL_SIZE;
 
@@ -111,7 +124,7 @@ public class MapScreen extends Screen {
                         drawY,
                         drawX + BLOCK_PIXEL_SIZE,
                         drawY + BLOCK_PIXEL_SIZE,
-                        color
+                        colors[x][z]
                 );
             }
         }
@@ -144,5 +157,12 @@ public class MapScreen extends Screen {
         }
 
         return state;
+    }
+
+    private void cleanCache(ChunkPos playerChunk) {
+        chunkColorCache.keySet().removeIf(pos ->
+                Math.abs(pos.x - playerChunk.x) > CACHE_RADIUS ||
+                        Math.abs(pos.z - playerChunk.z) > CACHE_RADIUS
+        );
     }
 }
