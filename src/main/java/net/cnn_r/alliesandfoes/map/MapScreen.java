@@ -6,8 +6,13 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -18,10 +23,11 @@ public class MapScreen extends Screen {
     private ChunkCache cache;
     private ChunkScanner scanner;
 
-    // 1 texture pixel = 1 world block column
-    private static final int BLOCK_PIXEL_SIZE = 2;
+    private double cameraBlockX;
+    private double cameraBlockZ;
+    private boolean followPlayer = true;
 
-    // visible texture size in map pixels, not screen pixels
+    private static final int BLOCK_PIXEL_SIZE = 2;
     private static final int TEXTURE_SIZE = 512;
 
     public MapScreen() {
@@ -33,7 +39,12 @@ public class MapScreen extends Screen {
         this.mapTexture = new MapTexture(TEXTURE_SIZE);
         this.renderer = new MapRenderer(this.mapTexture);
         this.cache = new ChunkCache();
-        this.scanner = new ChunkScanner(this.cache,minecraft.level);
+        this.scanner = new ChunkScanner(this.cache, this.minecraft.level);
+
+        if (this.minecraft.player != null) {
+            this.cameraBlockX = this.minecraft.player.getX();
+            this.cameraBlockZ = this.minecraft.player.getZ();
+        }
 
         Button createAllianceWidget = Button.builder(Component.literal("Create Alliance"), (btn) -> {
             this.minecraft.getToastManager().addToast(
@@ -61,19 +72,27 @@ public class MapScreen extends Screen {
             return;
         }
 
-        // request scans for chunks around the player
-        ChunkPos playerChunk = player.chunkPosition();
+        if (this.followPlayer) {
+            this.cameraBlockX = player.getX();
+            this.cameraBlockZ = player.getZ();
+        }
 
-        int chunksVisibleX = Math.max(2, (int) Math.ceil((double) this.width / (16.0 * BLOCK_PIXEL_SIZE)) + 2);
-        int chunksVisibleZ = Math.max(2, (int) Math.ceil((double) this.height / (16.0 * BLOCK_PIXEL_SIZE)) + 2);
+        int centerWorldX = (int) Math.floor(this.cameraBlockX);
+        int centerWorldZ = (int) Math.floor(this.cameraBlockZ);
+        ChunkPos centerChunk = new ChunkPos(centerWorldX >> 4, centerWorldZ >> 4);
+
+        double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
+
+        int chunksVisibleX = Math.max(2, (int) Math.ceil((double) this.width / (16.0 * scale)) + 2);
+        int chunksVisibleZ = Math.max(2, (int) Math.ceil((double) this.height / (16.0 * scale)) + 2);
 
         int chunkRadiusX = chunksVisibleX / 2;
         int chunkRadiusZ = chunksVisibleZ / 2;
 
         for (int dx = -chunkRadiusX; dx <= chunkRadiusX; dx++) {
             for (int dz = -chunkRadiusZ; dz <= chunkRadiusZ; dz++) {
-                int cx = playerChunk.x + dx;
-                int cz = playerChunk.z + dz;
+                int cx = centerChunk.x + dx;
+                int cz = centerChunk.z + dz;
 
                 ChunkPos pos = new ChunkPos(cx, cz);
 
@@ -86,45 +105,128 @@ public class MapScreen extends Screen {
             }
         }
 
-        // rebuild the visible texture from cached chunk data
-        this.rebuildVisibleTexture(player);
-
-        // draw the map
+        this.rebuildVisibleTexture();
         this.renderer.render(context, this.width, this.height, BLOCK_PIXEL_SIZE);
-
-        // player marker
-        int markerX = this.width / 2;
-        int markerY = this.height / 2;
-        context.fill(markerX - 2, markerY - 2, markerX + 2, markerY + 2, 0xFFFF0000);
-
-
-        /*
-        // Show the number of cached chunks
-        context.drawString(
-                this.font,
-                "Cached chunks: " + this.cache.size(),
-                20,
-                50,
-                0xFFFFFFFF
-        );
-         */
-
+        this.renderVisiblePlayers(context, level);
         super.render(context, mouseX, mouseY, delta);
     }
 
-    private void rebuildVisibleTexture(Player player) {
-        this.mapTexture.clear(0xFF202040);
+    @Override
+    public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
+        if (click.button() == 0) {
+            this.setDragging(true);
+            this.followPlayer = false;
+            return true;
+        }
+        return super.mouseClicked(click, doubled);
+    }
 
-        double playerBlockX = player.getX();
-        double playerBlockZ = player.getZ();
+    @Override
+    public boolean mouseReleased(MouseButtonEvent click) {
+        if (click.button() == 0) {
+            this.setDragging(false);
+            return true;
+        }
+        return super.mouseReleased(click);
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent click, double offsetX, double offsetY) {
+        if (this.isDragging() && click.button() == 0) {
+            double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
+            this.cameraBlockX -= offsetX / scale;
+            this.cameraBlockZ -= offsetY / scale;
+            return true;
+        }
+        return super.mouseDragged(click, offsetX, offsetY);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        float oldZoom = this.renderer.getZoom();
+        float zoomFactor = verticalAmount > 0 ? 1.15f : 1.0f / 1.15f;
+        float newZoom = Math.max(0.5f, Math.min(6.0f, oldZoom * zoomFactor));
+
+        if (newZoom == oldZoom) {
+            return true;
+        }
+
+        int textureCenter = this.mapTexture.getSize() / 2;
+
+        int oldLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int oldTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        double oldScale = BLOCK_PIXEL_SIZE * oldZoom;
+
+        double worldUnderMouseX = this.cameraBlockX + ((mouseX - oldLeft) / oldScale - textureCenter);
+        double worldUnderMouseZ = this.cameraBlockZ + ((mouseY - oldTop) / oldScale - textureCenter);
+
+        this.renderer.setZoom(newZoom);
+
+        int newLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int newTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        double newScale = BLOCK_PIXEL_SIZE * newZoom;
+
+        this.cameraBlockX = worldUnderMouseX - ((mouseX - newLeft) / newScale - textureCenter);
+        this.cameraBlockZ = worldUnderMouseZ - ((mouseY - newTop) / newScale - textureCenter);
+
+        this.followPlayer = false;
+        return true;
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent input) {
+        int key = input.key();
+        int modifiers = input.modifiers();
+
+        int panAmount = (modifiers & 1) != 0 ? 64 : 16;
+
+        switch (key) {
+            case 263 -> { // left
+                this.cameraBlockX -= panAmount;
+                this.followPlayer = false;
+                return true;
+            }
+            case 262 -> { // right
+                this.cameraBlockX += panAmount;
+                this.followPlayer = false;
+                return true;
+            }
+            case 265 -> { // up
+                this.cameraBlockZ -= panAmount;
+                this.followPlayer = false;
+                return true;
+            }
+            case 264 -> { // down
+                this.cameraBlockZ += panAmount;
+                this.followPlayer = false;
+                return true;
+            }
+            case 82 -> { // R
+                if (this.minecraft.player != null) {
+                    this.cameraBlockX = this.minecraft.player.getX();
+                    this.cameraBlockZ = this.minecraft.player.getZ();
+                    this.followPlayer = true;
+                }
+                return true;
+            }
+        }
+
+        return super.keyPressed(input);
+    }
+
+    private void rebuildVisibleTexture() {
+        this.mapTexture.clear(0xFF202020);
+
+        int centerWorldX = (int) Math.floor(this.cameraBlockX);
+        int centerWorldZ = (int) Math.floor(this.cameraBlockZ);
 
         int textureCenterX = this.mapTexture.getSize() / 2;
         int textureCenterY = this.mapTexture.getSize() / 2;
 
-        int minChunkX = ((int) Math.floor(playerBlockX) - textureCenterX) >> 4;
-        int maxChunkX = ((int) Math.floor(playerBlockX) + textureCenterX) >> 4;
-        int minChunkZ = ((int) Math.floor(playerBlockZ) - textureCenterY) >> 4;
-        int maxChunkZ = ((int) Math.floor(playerBlockZ) + textureCenterY) >> 4;
+        int minChunkX = (centerWorldX - textureCenterX) >> 4;
+        int maxChunkX = (centerWorldX + textureCenterX) >> 4;
+        int minChunkZ = (centerWorldZ - textureCenterY) >> 4;
+        int maxChunkZ = (centerWorldZ + textureCenterY) >> 4;
 
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
@@ -143,8 +245,8 @@ public class MapScreen extends Screen {
                         int worldX = chunkMinWorldX + localX;
                         int worldZ = chunkMinWorldZ + localZ;
 
-                        int texX = textureCenterX + (worldX - (int) Math.floor(playerBlockX));
-                        int texY = textureCenterY + (worldZ - (int) Math.floor(playerBlockZ));
+                        int texX = textureCenterX + (worldX - centerWorldX);
+                        int texY = textureCenterY + (worldZ - centerWorldZ);
 
                         if (texX < 0 || texY < 0 || texX >= this.mapTexture.getSize() || texY >= this.mapTexture.getSize()) {
                             continue;
@@ -157,9 +259,104 @@ public class MapScreen extends Screen {
             }
         }
 
-        this.mapTexture.setPixel(this.mapTexture.getSize() / 2 + 20, this.mapTexture.getSize() / 2, 0xFFFFFFFF);
-
         this.mapTexture.upload();
+    }
+
+    private void renderPlayerHead(GuiGraphics context, AbstractClientPlayer player, int screenX, int screenY, int headSize) {
+        Identifier skin = player.getSkin().body().texturePath();
+
+        // Base face
+        context.blit(
+                RenderPipelines.GUI_TEXTURED,
+                skin,
+                screenX - headSize / 2,
+                screenY - headSize / 2,
+                8.0F,
+                8.0F,
+                headSize,
+                headSize,
+                8,
+                8,
+                64,
+                64
+        );
+
+        // Hat / outer layer
+        context.blit(
+                RenderPipelines.GUI_TEXTURED,
+                skin,
+                screenX - headSize / 2,
+                screenY - headSize / 2,
+                40.0F,
+                8.0F,
+                headSize,
+                headSize,
+                8,
+                8,
+                64,
+                64
+        );
+
+        // Name
+        context.drawString(
+                this.font, player.getName(),
+                screenX + headSize / 2 + 2,
+                screenY - 4,
+                0xFFFFFFFF
+        );
+    }
+
+    private void renderVisiblePlayers(GuiGraphics context, ClientLevel level) {
+        int centerChunkX = ((int) Math.floor(this.cameraBlockX)) >> 4;
+        int centerChunkZ = ((int) Math.floor(this.cameraBlockZ)) >> 4;
+
+        int textureSize = this.mapTexture.getSize();
+        int textureCenter = textureSize / 2;
+        double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
+
+        int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+
+        int visibleChunkRadius = Math.max(1, (textureSize / 16) / 2 + 1);
+
+        for (Player player : level.players()) {
+            if (!(player instanceof AbstractClientPlayer clientPlayer)) {
+                continue;
+            }
+
+            int playerChunkX = ((int) Math.floor(player.getX())) >> 4;
+            int playerChunkZ = ((int) Math.floor(player.getZ())) >> 4;
+
+            // Ignore players far outside the current map window
+            if (Math.abs(playerChunkX - centerChunkX) > visibleChunkRadius
+                    || Math.abs(playerChunkZ - centerChunkZ) > visibleChunkRadius) {
+                continue;
+            }
+
+            // Only render if that chunk is actually cached/scanned
+            ChunkPos playerChunk = new ChunkPos(playerChunkX, playerChunkZ);
+            if (!this.cache.hasChunk(playerChunk)) {
+                continue;
+            }
+
+            double texX = textureCenter + (player.getX() - this.cameraBlockX);
+            double texY = textureCenter + (player.getZ() - this.cameraBlockZ);
+
+            int screenX = mapLeft + (int) Math.round(texX * scale);
+            int screenY = mapTop + (int) Math.round(texY * scale);
+
+            int headSize = Math.max(8, Math.round(8 * this.renderer.getZoom()));
+
+            // Skip if the marker is completely off the visible map
+            if (screenX + headSize < mapLeft
+                    || screenY + headSize < mapTop
+                    || screenX - headSize > mapLeft + this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE)
+                    || screenY - headSize > mapTop + this.renderer.getDrawHeight(BLOCK_PIXEL_SIZE)) {
+                continue;
+            }
+
+            this.renderPlayerHead(context, clientPlayer, screenX, screenY, headSize);
+        }
     }
 
     @Override
