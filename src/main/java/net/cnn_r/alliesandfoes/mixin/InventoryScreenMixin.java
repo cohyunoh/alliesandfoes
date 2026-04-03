@@ -1,9 +1,8 @@
 package net.cnn_r.alliesandfoes.mixin;
 
-import net.cnn_r.alliesandfoes.screen.MapScreen;
+import net.cnn_r.alliesandfoes.map.MapScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.inventory.AbstractRecipeBookScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.gui.screens.recipebook.RecipeBookComponent;
@@ -11,7 +10,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.InventoryMenu;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -28,7 +26,7 @@ public abstract class InventoryScreenMixin extends AbstractRecipeBookScreen<Inve
         // When the button is clicked, we can display a toast to the screen.
         Button teamsWidget = Button.builder(Component.literal("View Map"), (btn) -> {
             // When the button is clicked, open map screen
-			Minecraft.getInstance().setScreen(new MapScreen(Component.literal("Menu")));
+			Minecraft.getInstance().setScreen(new MapScreen());
         }).bounds((this.width / 2) - (96 / 2), this.height - ((this.height - this.imageHeight) / 2), 96, 20).build();
 		this.addRenderableWidget(teamsWidget);
 	}
