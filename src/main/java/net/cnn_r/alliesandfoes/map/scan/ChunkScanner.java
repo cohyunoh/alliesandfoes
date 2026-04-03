@@ -140,6 +140,11 @@ public class ChunkScanner {
     private int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
+
+    public ClientLevel getLevel() {
+        return this.level;
+    }
+
     public void shutdown() {
         this.executor.shutdownNow();
     }

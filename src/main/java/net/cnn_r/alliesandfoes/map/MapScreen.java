@@ -38,8 +38,8 @@ public class MapScreen extends Screen {
     protected void init() {
         this.mapTexture = new MapTexture(TEXTURE_SIZE);
         this.renderer = new MapRenderer(this.mapTexture);
-        this.cache = new ChunkCache();
-        this.scanner = new ChunkScanner(this.cache, this.minecraft.level);
+        this.cache = MapState.getCache();
+        this.scanner = MapState.getScanner();
 
         if (this.minecraft.player != null) {
             this.cameraBlockX = this.minecraft.player.getX();
@@ -362,9 +362,6 @@ public class MapScreen extends Screen {
     @Override
     public void removed() {
         super.removed();
-        if (this.scanner != null) {
-            this.scanner.shutdown();
-        }
     }
 
     @Override
