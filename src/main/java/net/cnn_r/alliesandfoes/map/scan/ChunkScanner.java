@@ -55,8 +55,10 @@ public class ChunkScanner {
                 int worldX = pos.getMinBlockX() + localX;
                 int worldZ = pos.getMinBlockZ() + localZ;
 
-                // Visible surface, not motion-blocking terrain
                 int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX, worldZ);
+                int northY = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX, worldZ - 1);
+                int westY = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX - 1, worldZ);
+
 
                 if (y <= level.getMinY()) {
                     pixels[localX + localZ * 16] = 0xFF000000;
@@ -66,7 +68,6 @@ public class ChunkScanner {
                 BlockPos.MutableBlockPos blockPos = new BlockPos.MutableBlockPos(worldX, y - 1, worldZ);
                 BlockState state = level.getBlockState(blockPos);
 
-                // Preserve visible fluids
                 if (!state.is(Blocks.WATER) && !state.is(Blocks.LAVA)) {
                     for (int i = 0; i < 6; i++) {
                         if (!shouldSkipTopBlock(state)) {
@@ -83,6 +84,12 @@ public class ChunkScanner {
                 }
 
                 int color = BlockColorResolver.getColor(state, level, blockPos);
+
+                int shade = y - ((northY + westY) / 2);
+                shade = clamp(shade, -2, 2);
+
+                color = applyShading(color, shade);
+
                 pixels[localX + localZ * 16] = color;
             }
         }
@@ -115,7 +122,24 @@ public class ChunkScanner {
                 || state.is(Blocks.DEAD_BUSH)
                 || state.is(Blocks.SNOW);
     }
+    private int applyShading(int color, int shade) {
+        int a = (color >> 24) & 0xFF;
+        int r = (color >> 16) & 0xFF;
+        int g = (color >> 8) & 0xFF;
+        int b = color & 0xFF;
 
+        int amount = shade * 12; // strength of shading
+
+        r = clamp(r + amount, 0, 255);
+        g = clamp(g + amount, 0, 255);
+        b = clamp(b + amount, 0, 255);
+
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
     public void shutdown() {
         this.executor.shutdownNow();
     }
