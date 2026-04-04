@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes.map;
 
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
+import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -10,18 +11,18 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.client.resources.DefaultPlayerSkin;
+import net.minecraft.resources.Identifier;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.chunk.LevelChunk;
 
 public class MapScreen extends Screen {
     private MapTexture mapTexture;
     private MapRenderer renderer;
     private ChunkCache cache;
-    private ChunkScanner scanner;
+    private PlayerMarkerCache playerMarkerCache;
 
     private double cameraBlockX;
     private double cameraBlockZ;
@@ -33,17 +34,25 @@ public class MapScreen extends Screen {
     public MapScreen() {
         super(Component.literal("World Map"));
     }
-
+// OVERRIDES
     @Override
     protected void init() {
         this.mapTexture = new MapTexture(TEXTURE_SIZE);
         this.renderer = new MapRenderer(this.mapTexture);
-        this.cache = MapState.getCache();
-        this.scanner = MapState.getScanner();
+        this.cache = MapState.getChunkCache();
+        ChunkScanner scanner = MapState.getScanner();
+        this.playerMarkerCache = MapState.getPlayerMarkerCache();
+        MapPersistence.load(this.cache, getMapId());
 
         if (this.minecraft.player != null) {
             this.cameraBlockX = this.minecraft.player.getX();
             this.cameraBlockZ = this.minecraft.player.getZ();
+        }
+
+        if (this.minecraft.player != null) {
+            this.cameraBlockX = this.minecraft.player.getX();
+            this.cameraBlockZ = this.minecraft.player.getZ();
+            this.syncZoomToLoadedRadius(this.minecraft.player);
         }
 
         Button createAllianceWidget = Button.builder(Component.literal("Create Alliance"), (btn) -> {
@@ -75,34 +84,7 @@ public class MapScreen extends Screen {
         if (this.followPlayer) {
             this.cameraBlockX = player.getX();
             this.cameraBlockZ = player.getZ();
-        }
-
-        int centerWorldX = (int) Math.floor(this.cameraBlockX);
-        int centerWorldZ = (int) Math.floor(this.cameraBlockZ);
-        ChunkPos centerChunk = new ChunkPos(centerWorldX >> 4, centerWorldZ >> 4);
-
-        double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
-
-        int chunksVisibleX = Math.max(2, (int) Math.ceil((double) this.width / (16.0 * scale)) + 2);
-        int chunksVisibleZ = Math.max(2, (int) Math.ceil((double) this.height / (16.0 * scale)) + 2);
-
-        int chunkRadiusX = chunksVisibleX / 2;
-        int chunkRadiusZ = chunksVisibleZ / 2;
-
-        for (int dx = -chunkRadiusX; dx <= chunkRadiusX; dx++) {
-            for (int dz = -chunkRadiusZ; dz <= chunkRadiusZ; dz++) {
-                int cx = centerChunk.x + dx;
-                int cz = centerChunk.z + dz;
-
-                ChunkPos pos = new ChunkPos(cx, cz);
-
-                if (!this.cache.hasChunk(pos) && !this.scanner.isQueued(pos)) {
-                    LevelChunk chunk = level.getChunkSource().getChunk(cx, cz, false);
-                    if (chunk != null) {
-                        this.scanner.requestScan(chunk);
-                    }
-                }
-            }
+            this.syncZoomToLoadedRadius(player);
         }
 
         this.rebuildVisibleTexture();
@@ -214,6 +196,35 @@ public class MapScreen extends Screen {
         return super.keyPressed(input);
     }
 
+
+
+    @Override
+    public void removed() {
+        super.removed();
+        MapPersistence.save(this.cache, getMapId());
+    }
+
+    @Override
+    public boolean isPauseScreen() {
+        return false;
+    }
+
+    // HELPERS
+    private Identifier getSkinForMarker(net.cnn_r.alliesandfoes.map.data.PlayerMarker marker) {
+        ClientLevel level = this.minecraft.level;
+
+        if (level != null) {
+            for (Player player : level.players()) {
+                if (player.getUUID().equals(marker.uuid) && player instanceof AbstractClientPlayer clientPlayer) {
+                    return clientPlayer.getSkin().body().texturePath();
+                }
+            }
+        }
+
+        return DefaultPlayerSkin.get(marker.uuid).body().texturePath();
+    }
+
+    // Renderers
     private void rebuildVisibleTexture() {
         this.mapTexture.clear(0xFF202020);
 
@@ -262,10 +273,8 @@ public class MapScreen extends Screen {
         this.mapTexture.upload();
     }
 
-    private void renderPlayerHead(GuiGraphics context, AbstractClientPlayer player, int screenX, int screenY, int headSize) {
-        Identifier skin = player.getSkin().body().texturePath();
-
-        // Base face
+    private void renderPlayerHead(GuiGraphics context, Identifier skin, String name, int screenX, int screenY, int headSize) {
+        // face
         context.blit(
                 RenderPipelines.GUI_TEXTURED,
                 skin,
@@ -281,7 +290,7 @@ public class MapScreen extends Screen {
                 64
         );
 
-        // Hat / outer layer
+        // hat layer
         context.blit(
                 RenderPipelines.GUI_TEXTURED,
                 skin,
@@ -297,13 +306,30 @@ public class MapScreen extends Screen {
                 64
         );
 
-        // Name
-        context.drawString(
-                this.font, player.getName(),
-                screenX + headSize / 2 + 2,
-                screenY - 4,
-                0xFFFFFFFF
-        );
+        int textColor = 0xFFFFFFFF;
+        int bgColor = 0x80000000;
+
+        int textWidth = this.font.width(name);
+        int textX = screenX - textWidth / 2;
+        int textY = screenY - headSize / 2 - 10;
+        if (headSize >= 10) {
+            // background behind the name
+            context.fill(
+                    textX - 2,
+                    textY - 1,
+                    textX + textWidth + 2,
+                    textY + 9,
+                    bgColor
+            );
+
+            context.drawString(
+                    this.font,
+                    name,
+                    textX,
+                    textY,
+                    textColor
+            );
+        }
     }
 
     private void renderVisiblePlayers(GuiGraphics context, ClientLevel level) {
@@ -319,35 +345,30 @@ public class MapScreen extends Screen {
 
         int visibleChunkRadius = Math.max(1, (textureSize / 16) / 2 + 1);
 
-        for (Player player : level.players()) {
-            if (!(player instanceof AbstractClientPlayer clientPlayer)) {
-                continue;
-            }
+        for (var marker : this.playerMarkerCache.values()) {
+            int playerChunkX = ((int) Math.floor(marker.x)) >> 4;
+            int playerChunkZ = ((int) Math.floor(marker.z)) >> 4;
 
-            int playerChunkX = ((int) Math.floor(player.getX())) >> 4;
-            int playerChunkZ = ((int) Math.floor(player.getZ())) >> 4;
-
-            // Ignore players far outside the current map window
             if (Math.abs(playerChunkX - centerChunkX) > visibleChunkRadius
                     || Math.abs(playerChunkZ - centerChunkZ) > visibleChunkRadius) {
                 continue;
             }
 
-            // Only render if that chunk is actually cached/scanned
             ChunkPos playerChunk = new ChunkPos(playerChunkX, playerChunkZ);
+
+            // only show marker if that terrain exists in the map cache
             if (!this.cache.hasChunk(playerChunk)) {
                 continue;
             }
 
-            double texX = textureCenter + (player.getX() - this.cameraBlockX);
-            double texY = textureCenter + (player.getZ() - this.cameraBlockZ);
+            double texX = textureCenter + (marker.x - this.cameraBlockX);
+            double texY = textureCenter + (marker.z - this.cameraBlockZ);
 
             int screenX = mapLeft + (int) Math.round(texX * scale);
             int screenY = mapTop + (int) Math.round(texY * scale);
 
             int headSize = Math.max(8, Math.round(8 * this.renderer.getZoom()));
 
-            // Skip if the marker is completely off the visible map
             if (screenX + headSize < mapLeft
                     || screenY + headSize < mapTop
                     || screenX - headSize > mapLeft + this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE)
@@ -355,17 +376,34 @@ public class MapScreen extends Screen {
                 continue;
             }
 
-            this.renderPlayerHead(context, clientPlayer, screenX, screenY, headSize);
+            Identifier skin = this.getSkinForMarker(marker);
+            this.renderPlayerHead(context, skin, marker.name, screenX, screenY, headSize);
         }
     }
 
-    @Override
-    public void removed() {
-        super.removed();
+    private String getMapId() {
+        if (this.minecraft.hasSingleplayerServer()) {
+            String levelName = this.minecraft.getSingleplayerServer().getWorldData().getLevelName();
+            return "singleplayer_" + levelName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        }
+
+        if (this.minecraft.getCurrentServer() != null) {
+            String ip = this.minecraft.getCurrentServer().ip;
+            return "server_" + ip.replaceAll("[^a-zA-Z0-9._-]", "_");
+        }
+
+        return "unknown";
     }
 
-    @Override
-    public boolean isPauseScreen() {
-        return false;
+    private void syncZoomToLoadedRadius(Player player) {
+        ChunkPos center = player.chunkPosition();
+        int loadedRadius = Math.max(2, MapState.getLoadedRadiusAround(center));
+        int blocksAcross = (loadedRadius * 2 + 1) * 16;
+
+        float zoomX = (float) this.width / (blocksAcross * BLOCK_PIXEL_SIZE);
+        float zoomY = (float) this.height / (blocksAcross * BLOCK_PIXEL_SIZE);
+        float zoom = Math.max(0.5f, Math.min(6.0f, Math.min(zoomX, zoomY)));
+
+        this.renderer.setZoom(zoom);
     }
 }
