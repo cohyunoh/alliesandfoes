@@ -12,11 +12,15 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.resources.DefaultPlayerSkin;
-import net.minecraft.resources.Identifier;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class MapScreen extends Screen {
     private MapTexture mapTexture;
@@ -28,19 +32,25 @@ public class MapScreen extends Screen {
     private double cameraBlockZ;
     private boolean followPlayer = true;
 
+    private ChunkPos hoveredChunk;
+
     private static final int BLOCK_PIXEL_SIZE = 2;
     private static final int TEXTURE_SIZE = 512;
+
+    private static final int CHUNK_BORDER_COLOR = 0x66FFFFFF;
+    private static final int HOVERED_CHUNK_FILL_COLOR = 0x55FFFF00;
+    private static final int HOVERED_CHUNK_BORDER_COLOR = 0xFFFFFF00;
 
     public MapScreen() {
         super(Component.literal("World Map"));
     }
-// OVERRIDES
+
+    // OVERRIDES
     @Override
     protected void init() {
         this.mapTexture = new MapTexture(TEXTURE_SIZE);
         this.renderer = new MapRenderer(this.mapTexture);
         this.cache = MapState.getChunkCache();
-        ChunkScanner scanner = MapState.getScanner();
         this.playerMarkerCache = MapState.getPlayerMarkerCache();
         MapPersistence.load(this.cache, getMapId());
 
@@ -89,8 +99,13 @@ public class MapScreen extends Screen {
 
         this.rebuildVisibleTexture();
         this.renderer.render(context, this.width, this.height, BLOCK_PIXEL_SIZE);
+
+        this.hoveredChunk = this.getChunkAtMouse(mouseX, mouseY);
+
+        this.renderChunkOverlays(context);
         this.renderVisiblePlayers(context, level);
         super.render(context, mouseX, mouseY, delta);
+        this.renderHoveredChunkTooltip(context, mouseX, mouseY);
     }
 
     @Override
@@ -196,8 +211,6 @@ public class MapScreen extends Screen {
         return super.keyPressed(input);
     }
 
-
-
     @Override
     public void removed() {
         super.removed();
@@ -222,6 +235,31 @@ public class MapScreen extends Screen {
         }
 
         return DefaultPlayerSkin.get(marker.uuid).body().texturePath();
+    }
+
+    private ChunkPos getChunkAtMouse(int mouseX, int mouseY) {
+        int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int drawWidth = this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE);
+        int drawHeight = this.renderer.getDrawHeight(BLOCK_PIXEL_SIZE);
+
+        if (mouseX < mapLeft || mouseY < mapTop || mouseX >= mapLeft + drawWidth || mouseY >= mapTop + drawHeight) {
+            return null;
+        }
+
+        double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
+        int textureCenter = this.mapTexture.getSize() / 2;
+
+        double texX = (mouseX - mapLeft) / scale;
+        double texY = (mouseY - mapTop) / scale;
+
+        double worldX = this.cameraBlockX + (texX - textureCenter);
+        double worldZ = this.cameraBlockZ + (texY - textureCenter);
+
+        int blockX = (int) Math.floor(worldX);
+        int blockZ = (int) Math.floor(worldZ);
+
+        return new ChunkPos(blockX >> 4, blockZ >> 4);
     }
 
     // Renderers
@@ -273,6 +311,78 @@ public class MapScreen extends Screen {
         this.mapTexture.upload();
     }
 
+    private void renderChunkOverlays(GuiGraphics context) {
+        int centerWorldX = (int) Math.floor(this.cameraBlockX);
+        int centerWorldZ = (int) Math.floor(this.cameraBlockZ);
+
+        int textureCenterX = this.mapTexture.getSize() / 2;
+        int textureCenterY = this.mapTexture.getSize() / 2;
+
+        int minChunkX = (centerWorldX - textureCenterX) >> 4;
+        int maxChunkX = (centerWorldX + textureCenterX) >> 4;
+        int minChunkZ = (centerWorldZ - textureCenterY) >> 4;
+        int maxChunkZ = (centerWorldZ + textureCenterY) >> 4;
+
+        int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int drawWidth = this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE);
+        int drawHeight = this.renderer.getDrawHeight(BLOCK_PIXEL_SIZE);
+
+        context.enableScissor(mapLeft, mapTop, mapLeft + drawWidth, mapTop + drawHeight);
+
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+
+                if (!this.cache.hasChunk(pos)) {
+                    continue;
+                }
+
+                this.renderChunkOverlay(context, pos, pos.equals(this.hoveredChunk));
+            }
+        }
+
+        context.disableScissor();
+    }
+
+    private void renderChunkOverlay(GuiGraphics context, ChunkPos pos, boolean hovered) {
+        double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
+        int textureCenter = this.mapTexture.getSize() / 2;
+
+        int chunkMinWorldX = pos.getMinBlockX();
+        int chunkMinWorldZ = pos.getMinBlockZ();
+
+        double texX = textureCenter + (chunkMinWorldX - this.cameraBlockX);
+        double texY = textureCenter + (chunkMinWorldZ - this.cameraBlockZ);
+
+        int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int drawWidth = this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE);
+        int drawHeight = this.renderer.getDrawHeight(BLOCK_PIXEL_SIZE);
+
+        int x1 = mapLeft + (int) Math.round(texX * scale);
+        int y1 = mapTop + (int) Math.round(texY * scale);
+        int size = Math.max(1, (int) Math.round(16 * scale));
+
+        int x2 = x1 + size;
+        int y2 = y1 + size;
+
+        if (x2 < mapLeft || y2 < mapTop || x1 > mapLeft + drawWidth || y1 > mapTop + drawHeight) {
+            return;
+        }
+
+        if (hovered) {
+            context.fill(x1, y1, x2, y2, HOVERED_CHUNK_FILL_COLOR);
+        }
+
+        int borderColor = hovered ? HOVERED_CHUNK_BORDER_COLOR : CHUNK_BORDER_COLOR;
+
+        context.hLine(x1, x2 - 1, y1, borderColor);
+        context.hLine(x1, x2 - 1, y2 - 1, borderColor);
+        context.vLine(x1, y1, y2 - 1, borderColor);
+        context.vLine(x2 - 1, y1, y2 - 1, borderColor);
+    }
+
     private void renderPlayerHead(GuiGraphics context, Identifier skin, String name, int screenX, int screenY, int headSize) {
         // face
         context.blit(
@@ -313,7 +423,6 @@ public class MapScreen extends Screen {
         int textX = screenX - textWidth / 2;
         int textY = screenY - headSize / 2 - 10;
         if (headSize >= 10) {
-            // background behind the name
             context.fill(
                     textX - 2,
                     textY - 1,
@@ -356,7 +465,6 @@ public class MapScreen extends Screen {
 
             ChunkPos playerChunk = new ChunkPos(playerChunkX, playerChunkZ);
 
-            // only show marker if that terrain exists in the map cache
             if (!this.cache.hasChunk(playerChunk)) {
                 continue;
             }
@@ -379,6 +487,23 @@ public class MapScreen extends Screen {
             Identifier skin = this.getSkinForMarker(marker);
             this.renderPlayerHead(context, skin, marker.name, screenX, screenY, headSize);
         }
+    }
+
+    private void renderHoveredChunkTooltip(GuiGraphics context, int mouseX, int mouseY) {
+        if (this.hoveredChunk == null) {
+            return;
+        }
+
+        if (!this.cache.hasChunk(this.hoveredChunk)) {
+            return;
+        }
+
+        List<FormattedCharSequence> lines = new ArrayList<>();
+        lines.add(Component.literal("Chunk: [" + this.hoveredChunk.x + ", " + this.hoveredChunk.z + "]").getVisualOrderText());
+        lines.add(Component.literal("X: " + this.hoveredChunk.getMinBlockX() + " to " + this.hoveredChunk.getMaxBlockX()).getVisualOrderText());
+        lines.add(Component.literal("Z: " + this.hoveredChunk.getMinBlockZ() + " to " + this.hoveredChunk.getMaxBlockZ()).getVisualOrderText());
+
+        context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
     }
 
     private String getMapId() {
