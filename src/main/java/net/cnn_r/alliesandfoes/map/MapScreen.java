@@ -1,14 +1,17 @@
 package net.cnn_r.alliesandfoes.map;
 
+import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
+import net.cnn_r.alliesandfoes.network.RequestAllianceCreationScreenPayload;
+import net.cnn_r.alliesandfoes.network.RequestAllianceViewPayload;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -37,6 +40,7 @@ public class MapScreen extends Screen {
     private boolean followPlayer = true;
 
     private ChunkPos hoveredChunk;
+    private Button allianceButton;
 
     private static final int BLOCK_PIXEL_SIZE = 2;
     private static final int TEXTURE_SIZE = 512;
@@ -71,18 +75,28 @@ public class MapScreen extends Screen {
             this.syncZoomToLoadedRadius(this.minecraft.player);
         }
 
-        Button createAllianceWidget = Button.builder(Component.literal("Create Alliance"), (btn) -> {
-            this.minecraft.getToastManager().addToast(
-                    SystemToast.multiline(
-                            this.minecraft,
-                            SystemToast.SystemToastId.NARRATOR_TOGGLE,
-                            Component.nullToEmpty("Allies and Foes"),
-                            Component.nullToEmpty("Creating Alliance")
-                    )
-            );
+        this.allianceButton = Button.builder(getAllianceButtonText(), (btn) -> {
+            if (AllianceClientState.isInAlliance()) {
+                ClientPlayNetworking.send(new RequestAllianceViewPayload());
+            } else {
+                ClientPlayNetworking.send(new RequestAllianceCreationScreenPayload());
+            }
         }).bounds(20, 20, 120, 20).build();
 
-        this.addRenderableWidget(createAllianceWidget);
+        this.addRenderableWidget(this.allianceButton);
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+
+        if (this.allianceButton != null) {
+            this.allianceButton.setMessage(getAllianceButtonText());
+        }
+    }
+
+    private Component getAllianceButtonText() {
+        return Component.literal(AllianceClientState.isInAlliance() ? "View Alliance" : "Create Alliance");
     }
 
     @Override
@@ -527,6 +541,7 @@ public class MapScreen extends Screen {
             this.renderPlayerHead(context, skin, marker.name, screenX, screenY, headSize);
         }
     }
+
     private void renderStructureHeatmapOverlay(GuiGraphics context, ChunkPos pos) {
         if (this.renderer.getZoom() < STRUCTURE_HEATMAP_ZOOM_THRESHOLD) {
             return;
@@ -609,32 +624,6 @@ public class MapScreen extends Screen {
                             .append(Component.literal(" (" + breakdown.getWaterValue() + ")"))
                             .getVisualOrderText()
             );
-            /*
-            lines.add(
-                    Component.literal("Ores: ")
-                            .append(Component.literal(String.valueOf(breakdown.getOreValue())).withColor(getOreColor(breakdown.getOreValue())))
-                            .append(Component.literal("  "))
-                            .append(Component.literal("D:" + breakdown.getDiamondOreCount()).withColor(0x55FFFF))
-                            .append(Component.literal(" "))
-                            .append(Component.literal("E:" + breakdown.getEmeraldOreCount()).withColor(0x55FF55))
-                            .append(Component.literal(" "))
-                            .append(Component.literal("I:" + breakdown.getIronOreCount()).withColor(0xD8AF93))
-                            .append(Component.literal(" "))
-                            .append(Component.literal("G:" + breakdown.getGoldOreCount()).withColor(0xFFD700))
-                            .getVisualOrderText()
-            );
-            */
-            /*
-            if (!breakdown.getStructures().isEmpty()) {
-                lines.add(
-                        Component.literal("Structures: ")
-                                .append(Component.literal(String.valueOf(breakdown.getStructureValue())).withColor(getStructureColor(breakdown.getStructureValue())))
-                                .append(Component.literal("  "))
-                                .append(Component.literal(formatStructureList(breakdown.getStructures())).withColor(getStructureColor(breakdown.getStructureValue())))
-                                .getVisualOrderText()
-                );
-            }
-            */
         } else {
             lines.add(Component.literal("Value data missing - awaiting rescan").withColor(0xFFAA55).getVisualOrderText());
         }
@@ -667,6 +656,7 @@ public class MapScreen extends Screen {
 
         this.renderer.setZoom(zoom);
     }
+
     private String formatDisplayName(String rawName) {
         if (rawName == null || rawName.isEmpty()) {
             return "Unknown";
@@ -791,13 +781,13 @@ public class MapScreen extends Screen {
 
     private int getStructureColor(int structureValue) {
         if (structureValue >= 8) {
-            return 0x33CCFF; // bright cyan
+            return 0x33CCFF;
         }
         if (structureValue >= 5) {
-            return 0x3399FF; // blue
+            return 0x3399FF;
         }
         if (structureValue >= 1) {
-            return 0x6666FF; // purple-blue
+            return 0x6666FF;
         }
         return 0xAAAAAA;
     }

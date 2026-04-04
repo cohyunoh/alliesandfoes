@@ -1,18 +1,27 @@
 package net.cnn_r.alliesandfoes;
 
+import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
+import net.cnn_r.alliesandfoes.screen.AllianceCreateScreen;
+import net.cnn_r.alliesandfoes.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
+import net.cnn_r.alliesandfoes.network.AllianceCreateResultPayload;
+import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
+import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
+import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
 import net.cnn_r.alliesandfoes.network.ChunkStructurePayload;
 import net.cnn_r.alliesandfoes.network.PlayerPositionsPayload;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.ChunkPos;
 
 public class AlliesandfoesClient implements ClientModInitializer {
     private static final int STRUCTURE_REFRESH_RADIUS = 2;
+
     @Override
     public void onInitializeClient() {
         ClientPlayNetworking.registerGlobalReceiver(PlayerPositionsPayload.TYPE, (payload, context) -> {
@@ -68,6 +77,54 @@ public class AlliesandfoesClient implements ClientModInitializer {
                         }
                     }
                 }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceCreationScreenPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                if (payload.alreadyInAlliance()) {
+                    AllianceClientState.setAllianceState(true, payload.currentAllianceName());
+
+                    if (context.client().player != null) {
+                        context.client().player.displayClientMessage(
+                                Component.literal("You are already in alliance: " + payload.currentAllianceName()),
+                                false
+                        );
+                    }
+                    return;
+                }
+
+                context.client().setScreen(new AllianceCreateScreen(
+                        context.client().screen,
+                        payload.candidates()
+                ));
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceStatePayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                AllianceClientState.setAllianceState(payload.inAlliance(), payload.allianceName());
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceCreateResultPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                if (context.client().player != null) {
+                    context.client().player.displayClientMessage(Component.literal(payload.message()), false);
+                }
+
+                if (payload.success() && context.client().screen instanceof AllianceCreateScreen allianceScreen) {
+                    allianceScreen.onClose();
+                }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceViewPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                context.client().setScreen(new AllianceViewScreen(
+                        context.client().screen,
+                        payload
+                ));
             });
         });
 

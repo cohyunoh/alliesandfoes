@@ -1,7 +1,15 @@
 package net.cnn_r.alliesandfoes;
 
+import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.network.AllianceCreateResultPayload;
+import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
+import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
+import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
 import net.cnn_r.alliesandfoes.network.ChunkStructurePayload;
+import net.cnn_r.alliesandfoes.network.CreateAlliancePayload;
 import net.cnn_r.alliesandfoes.network.PlayerPositionsPayload;
+import net.cnn_r.alliesandfoes.network.RequestAllianceCreationScreenPayload;
+import net.cnn_r.alliesandfoes.network.RequestAllianceViewPayload;
 import net.cnn_r.alliesandfoes.structure.StructureChunkValueCalculator;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
@@ -9,6 +17,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
@@ -21,6 +30,45 @@ public class Alliesandfoes implements ModInitializer {
 	public void onInitialize() {
 		PayloadTypeRegistry.playS2C().register(PlayerPositionsPayload.TYPE, PlayerPositionsPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(ChunkStructurePayload.TYPE, ChunkStructurePayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(AllianceCreationScreenPayload.TYPE, AllianceCreationScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(AllianceStatePayload.TYPE, AllianceStatePayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(AllianceCreateResultPayload.TYPE, AllianceCreateResultPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(AllianceViewPayload.TYPE, AllianceViewPayload.STREAM_CODEC);
+
+		PayloadTypeRegistry.playC2S().register(RequestAllianceCreationScreenPayload.TYPE, RequestAllianceCreationScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playC2S().register(CreateAlliancePayload.TYPE, CreateAlliancePayload.STREAM_CODEC);
+		PayloadTypeRegistry.playC2S().register(RequestAllianceViewPayload.TYPE, RequestAllianceViewPayload.STREAM_CODEC);
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.get(context.server()).sendCreationScreen(context.server(),context.player());
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(CreateAlliancePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.CreationResult result = AllianceManager.get(context.server())
+						.createAlliance(context.server(),context.player(), payload.allianceName(), payload.invitedPlayers());
+
+				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
+
+				if (!result.success()) {
+					AllianceManager.get(context.server()).sendCreationScreen(context.server(),context.player());
+					return;
+				}
+
+				context.player().displayClientMessage(
+						Component.literal("Created alliance: " + result.alliance().getName()),
+						false
+				);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceViewPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.get(context.server()).sendViewScreen(context.server(),context.player());
+			});
+		});
 
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			List<ServerPlayer> players = server.getPlayerList().getPlayers();
@@ -69,6 +117,8 @@ public class Alliesandfoes implements ModInitializer {
 			ServerPlayer player = handler.player;
 			ServerLevel level = player.level();
 			ChunkPos center = player.chunkPosition();
+
+			AllianceManager.get(server).syncPlayer(player);
 
 			for (int chunkX = center.x - 8; chunkX <= center.x + 8; chunkX++) {
 				for (int chunkZ = center.z - 8; chunkZ <= center.z + 8; chunkZ++) {
