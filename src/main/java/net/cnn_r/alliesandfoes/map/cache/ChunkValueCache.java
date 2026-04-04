@@ -3,6 +3,7 @@ package net.cnn_r.alliesandfoes.map.cache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.minecraft.world.level.ChunkPos;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -19,6 +20,10 @@ public class ChunkValueCache {
 
     public boolean has(ChunkPos pos) {
         return this.values.containsKey(pos);
+    }
+
+    public Collection<ChunkValueData> values() {
+        return this.values.values();
     }
 
     public void clear() {

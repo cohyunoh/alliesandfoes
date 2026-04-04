@@ -39,7 +39,10 @@ public class ChunkScanner {
     public void requestScan(LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
 
-        if (this.cache.hasChunk(pos) || !this.queued.add(pos)) {
+        boolean hasMapColors = this.cache.hasChunk(pos);
+        boolean hasValueData = this.chunkValueCache.has(pos);
+
+        if ((hasMapColors && hasValueData) || !this.queued.add(pos)) {
             return;
         }
 

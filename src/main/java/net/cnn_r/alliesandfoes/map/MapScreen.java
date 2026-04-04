@@ -59,7 +59,7 @@ public class MapScreen extends Screen {
         this.chunkValueCache = MapState.getChunkValueCache();
         ChunkScanner scanner = MapState.getScanner();
         this.playerMarkerCache = MapState.getPlayerMarkerCache();
-        MapPersistence.load(this.cache, getMapId());
+        MapPersistence.load(this.cache, this.chunkValueCache, getMapId());
 
         if (this.minecraft.player != null) {
             this.cameraBlockX = this.minecraft.player.getX();
@@ -218,7 +218,7 @@ public class MapScreen extends Screen {
     @Override
     public void removed() {
         super.removed();
-        MapPersistence.save(this.cache, getMapId());
+        MapPersistence.save(this.cache, this.chunkValueCache, getMapId());
     }
 
     @Override
@@ -571,7 +571,7 @@ public class MapScreen extends Screen {
                 );
             }
         } else {
-            lines.add(Component.literal("Value data not scanned yet").withColor(0xAAAAAA).getVisualOrderText());
+            lines.add(Component.literal("Value data missing - awaiting rescan").withColor(0xFFAA55).getVisualOrderText());
         }
 
         context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);

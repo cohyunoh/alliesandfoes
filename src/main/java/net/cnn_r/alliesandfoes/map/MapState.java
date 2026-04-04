@@ -57,10 +57,18 @@ public class MapState {
     }
 
     public static void onChunkLoaded(LevelChunk chunk) {
-        loadedChunks.add(chunk.getPos());
+        ChunkPos pos = chunk.getPos();
+        loadedChunks.add(pos);
 
         ChunkScanner scanner = getScanner();
-        if (scanner != null && !getChunkCache().hasChunk(chunk.getPos()) && !scanner.isQueued(chunk.getPos())) {
+        if (scanner == null || scanner.isQueued(pos)) {
+            return;
+        }
+
+        boolean hasMapColors = getChunkCache().hasChunk(pos);
+        boolean hasValueData = getChunkValueCache().has(pos);
+
+        if (!hasMapColors || !hasValueData) {
             scanner.requestScan(chunk);
         }
     }
