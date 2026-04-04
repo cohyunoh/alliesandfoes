@@ -13,6 +13,5 @@ public class Alliesandfoes implements ModInitializer {
 	public void onInitialize() {
 		MenuScreenS2CPayload.register();
 		CommandRegistrationCallback.EVENT.register(CreateCommand::register);
-		CommandRegistrationCallback.EVENT.register(TeamsCommand::register);
 	}
 }

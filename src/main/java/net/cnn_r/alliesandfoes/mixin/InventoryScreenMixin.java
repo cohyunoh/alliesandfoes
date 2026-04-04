@@ -9,7 +9,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.InventoryMenu;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -22,7 +21,7 @@ public abstract class InventoryScreenMixin extends AbstractRecipeBookScreen<Inve
 	}
 
 	@Inject(at = @At("RETURN"), method = "init")
-	private void addCustomButtons(CallbackInfo info) {
+	private void addCustomButton(CallbackInfo info) {
         // When the button is clicked, we can display a toast to the screen.
         Button teamsWidget = Button.builder(Component.literal("View Teams"), (btn) -> {
             // When the button is clicked, we can display a toast to the screen.
