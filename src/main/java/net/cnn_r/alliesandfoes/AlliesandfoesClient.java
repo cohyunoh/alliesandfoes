@@ -5,9 +5,9 @@ import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.network.packet.PlayerPositionsPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.cnn_r.alliesandfoes.map.MapState;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.cnn_r.alliesandfoes.keybind.KeyBindings;
+
 
 public class AlliesandfoesClient implements ClientModInitializer {
     @Override
@@ -37,5 +37,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
         ClientChunkEvents.CHUNK_UNLOAD.register((world, chunk) -> {
             MapState.onChunkUnloaded(chunk.getPos());
         });
+
+        KeyBindings.register();
+
     }
 }
