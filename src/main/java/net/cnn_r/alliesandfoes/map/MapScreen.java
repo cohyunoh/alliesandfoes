@@ -132,32 +132,47 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
-        if (click.button() == 0) {
+        if (super.mouseClicked(click, doubled)) {
+            return true;
+        }
+
+        if (click.button() == 0 && isMouseOverMap(click.x(), click.y())) {
             this.setDragging(true);
             this.followPlayer = false;
             return true;
         }
-        return super.mouseClicked(click, doubled);
+
+        return false;
     }
 
     @Override
     public boolean mouseReleased(MouseButtonEvent click) {
-        if (click.button() == 0) {
+        if (super.mouseReleased(click)) {
+            return true;
+        }
+
+        if (click.button() == 0 && this.isDragging()) {
             this.setDragging(false);
             return true;
         }
-        return super.mouseReleased(click);
+
+        return false;
     }
 
     @Override
     public boolean mouseDragged(MouseButtonEvent click, double offsetX, double offsetY) {
+        if (super.mouseDragged(click, offsetX, offsetY)) {
+            return true;
+        }
+
         if (this.isDragging() && click.button() == 0) {
             double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
             this.cameraBlockX -= offsetX / scale;
             this.cameraBlockZ -= offsetY / scale;
             return true;
         }
-        return super.mouseDragged(click, offsetX, offsetY);
+
+        return false;
     }
 
     @Override
@@ -790,5 +805,17 @@ public class MapScreen extends Screen {
             return 0x6666FF;
         }
         return 0xAAAAAA;
+    }
+
+    private boolean isMouseOverMap(double mouseX, double mouseY) {
+        int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int drawWidth = this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE);
+        int drawHeight = this.renderer.getDrawHeight(BLOCK_PIXEL_SIZE);
+
+        return mouseX >= mapLeft
+                && mouseY >= mapTop
+                && mouseX < mapLeft + drawWidth
+                && mouseY < mapTop + drawHeight;
     }
 }
