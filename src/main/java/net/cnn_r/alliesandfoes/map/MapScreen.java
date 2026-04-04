@@ -46,6 +46,10 @@ public class MapScreen extends Screen {
     private static final int CHUNK_BORDER_COLOR = 0x66FFFFFF;
     private static final int HOVERED_CHUNK_FILL_COLOR = 0x55FFFF00;
     private static final int HOVERED_CHUNK_BORDER_COLOR = 0xFFFFFF00;
+    private static final int STRUCTURE_HEATMAP_STRONG = 0x5533CCFF;
+    private static final int STRUCTURE_HEATMAP_MEDIUM = 0x4433AAFF;
+    private static final int STRUCTURE_HEATMAP_WEAK = 0x332266CC;
+    private static final float STRUCTURE_HEATMAP_ZOOM_THRESHOLD = 0.85f;
 
     public MapScreen() {
         super(Component.literal("World Map"));
@@ -340,6 +344,18 @@ public class MapScreen extends Screen {
                     continue;
                 }
 
+                this.renderStructureHeatmapOverlay(context, pos);
+            }
+        }
+
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+
+                if (!this.cache.hasChunk(pos)) {
+                    continue;
+                }
+
                 this.renderChunkOverlay(context, pos, pos.equals(this.hoveredChunk));
             }
         }
@@ -511,6 +527,51 @@ public class MapScreen extends Screen {
             this.renderPlayerHead(context, skin, marker.name, screenX, screenY, headSize);
         }
     }
+    private void renderStructureHeatmapOverlay(GuiGraphics context, ChunkPos pos) {
+        if (this.renderer.getZoom() < STRUCTURE_HEATMAP_ZOOM_THRESHOLD) {
+            return;
+        }
+
+        ChunkValueData valueData = this.chunkValueCache.get(pos);
+        if (valueData == null) {
+            return;
+        }
+
+        int structureValue = valueData.getBreakdown().getStructureValue();
+        if (structureValue <= 0) {
+            return;
+        }
+
+        double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
+        int textureCenter = this.mapTexture.getSize() / 2;
+
+        int chunkMinWorldX = pos.getMinBlockX();
+        int chunkMinWorldZ = pos.getMinBlockZ();
+
+        double texX = textureCenter + (chunkMinWorldX - this.cameraBlockX);
+        double texY = textureCenter + (chunkMinWorldZ - this.cameraBlockZ);
+
+        int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int drawWidth = this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE);
+        int drawHeight = this.renderer.getDrawHeight(BLOCK_PIXEL_SIZE);
+
+        int x1 = mapLeft + (int) Math.round(texX * scale);
+        int y1 = mapTop + (int) Math.round(texY * scale);
+        int size = Math.max(1, (int) Math.round(16 * scale));
+
+        int x2 = x1 + size;
+        int y2 = y1 + size;
+
+        if (x2 < mapLeft || y2 < mapTop || x1 > mapLeft + drawWidth || y1 > mapTop + drawHeight) {
+            return;
+        }
+
+        int fillColor = getStructureHeatmapFillColor(structureValue);
+        if (fillColor != 0) {
+            context.fill(x1, y1, x2, y2, fillColor);
+        }
+    }
 
     private void renderHoveredChunkTooltip(GuiGraphics context, int mouseX, int mouseY) {
         if (this.hoveredChunk == null) {
@@ -537,7 +598,7 @@ public class MapScreen extends Screen {
 
             lines.add(
                     Component.literal("Biome: ")
-                            .append(Component.literal(formatBiomeName(breakdown.getBiomeName())).withColor(getBiomeColor(breakdown.getBiomeValue())))
+                            .append(Component.literal(formatDisplayName(breakdown.getBiomeName())).withColor(getBiomeColor(breakdown.getBiomeValue())))
                             .append(Component.literal(" (" + breakdown.getBiomeValue() + ")"))
                             .getVisualOrderText()
             );
@@ -566,7 +627,9 @@ public class MapScreen extends Screen {
             if (!breakdown.getStructures().isEmpty()) {
                 lines.add(
                         Component.literal("Structures: ")
-                                .append(Component.literal(String.join(", ", breakdown.getStructures())).withColor(0xFFAA00))
+                                .append(Component.literal(String.valueOf(breakdown.getStructureValue())).withColor(getStructureColor(breakdown.getStructureValue())))
+                                .append(Component.literal("  "))
+                                .append(Component.literal(formatStructureList(breakdown.getStructures())).withColor(getStructureColor(breakdown.getStructureValue())))
                                 .getVisualOrderText()
                 );
             }
@@ -602,12 +665,23 @@ public class MapScreen extends Screen {
 
         this.renderer.setZoom(zoom);
     }
-    private String formatBiomeName(String biomeName) {
-        String[] parts = biomeName.split("_");
+    private String formatDisplayName(String rawName) {
+        if (rawName == null || rawName.isEmpty()) {
+            return "Unknown";
+        }
+
+        String suffix = "";
+        int suffixStart = rawName.indexOf(" (");
+        if (suffixStart >= 0) {
+            suffix = rawName.substring(suffixStart);
+            rawName = rawName.substring(0, suffixStart);
+        }
+
+        String[] parts = rawName.split("_");
         StringBuilder builder = new StringBuilder();
 
-        for (int i = 0; i < parts.length; i++) {
-            if (parts[i].isEmpty()) {
+        for (String part : parts) {
+            if (part.isEmpty()) {
                 continue;
             }
 
@@ -615,13 +689,29 @@ public class MapScreen extends Screen {
                 builder.append(" ");
             }
 
-            builder.append(Character.toUpperCase(parts[i].charAt(0)));
-            if (parts[i].length() > 1) {
-                builder.append(parts[i].substring(1));
+            builder.append(Character.toUpperCase(part.charAt(0)));
+            if (part.length() > 1) {
+                builder.append(part.substring(1));
             }
         }
 
+        builder.append(suffix);
         return builder.toString();
+    }
+
+    private String formatStructureList(List<String> structures) {
+        List<String> formatted = new ArrayList<>();
+
+        int limit = Math.min(structures.size(), 3);
+        for (int i = 0; i < limit; i++) {
+            formatted.add(formatDisplayName(structures.get(i)));
+        }
+
+        if (structures.size() > limit) {
+            formatted.add("+" + (structures.size() - limit) + " more");
+        }
+
+        return String.join(", ", formatted);
     }
 
     private int getBiomeColor(int biomeValue) {
@@ -682,5 +772,31 @@ public class MapScreen extends Screen {
             return 0x88DDDD33;
         }
         return 0x88DD3333;
+    }
+
+    private int getStructureHeatmapFillColor(int structureValue) {
+        if (structureValue >= 8) {
+            return STRUCTURE_HEATMAP_STRONG;
+        }
+        if (structureValue >= 5) {
+            return STRUCTURE_HEATMAP_MEDIUM;
+        }
+        if (structureValue >= 1) {
+            return STRUCTURE_HEATMAP_WEAK;
+        }
+        return 0;
+    }
+
+    private int getStructureColor(int structureValue) {
+        if (structureValue >= 8) {
+            return 0x33CCFF; // bright cyan
+        }
+        if (structureValue >= 5) {
+            return 0x3399FF; // blue
+        }
+        if (structureValue >= 1) {
+            return 0x6666FF; // purple-blue
+        }
+        return 0xAAAAAA;
     }
 }

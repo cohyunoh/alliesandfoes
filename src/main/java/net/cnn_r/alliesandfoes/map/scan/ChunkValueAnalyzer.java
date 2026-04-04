@@ -1,24 +1,31 @@
 package net.cnn_r.alliesandfoes.map.scan;
 
+import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.value.BiomeValueRules;
 import net.cnn_r.alliesandfoes.map.value.ChunkValueWeights;
 import net.cnn_r.alliesandfoes.map.value.OreValueRules;
+import net.cnn_r.alliesandfoes.map.value.StructureValueRules;
 import net.cnn_r.alliesandfoes.map.value.WaterValueRules;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 public class ChunkValueAnalyzer {
     private final ClientLevel level;
+    private static final int STRUCTURE_SCAN_RADIUS = 2;
 
     public ChunkValueAnalyzer(ClientLevel level) {
         this.level = level;
@@ -47,7 +54,8 @@ public class ChunkValueAnalyzer {
                 coalOreCount
         );
 
-        int structureValue = 0;
+        StructureAnalysis structureAnalysis = this.analyzeStructures(chunk);
+        int structureValue = structureAnalysis.structureValue;
 
         String biomeName = this.getChunkCenterBiomeName(pos);
         int biomeValue = BiomeValueRules.getBiomeScore(biomeName);
@@ -57,7 +65,7 @@ public class ChunkValueAnalyzer {
         boolean nearWater = hasWaterInChunk || hasWaterNearby;
         int waterValue = WaterValueRules.getWaterScore(hasWaterInChunk, hasWaterNearby);
 
-        List<String> structures = new ArrayList<>();
+        List<String> structures = structureAnalysis.structureNames;
 
         ChunkValueBreakdown breakdown = new ChunkValueBreakdown(
                 oreValue,
@@ -85,6 +93,76 @@ public class ChunkValueAnalyzer {
         int totalValue = clampToChunkValueRange((int) Math.round(weightedScore));
 
         return new ChunkValueData(pos, totalValue, breakdown);
+    }
+
+    private StructureAnalysis analyzeStructures(LevelChunk centerChunk) {
+        ChunkPos centerPos = centerChunk.getPos();
+
+        int bestScore = 0;
+        Set<String> names = new LinkedHashSet<>();
+
+        for (int chunkX = centerPos.x - STRUCTURE_SCAN_RADIUS; chunkX <= centerPos.x + STRUCTURE_SCAN_RADIUS; chunkX++) {
+            for (int chunkZ = centerPos.z - STRUCTURE_SCAN_RADIUS; chunkZ <= centerPos.z + STRUCTURE_SCAN_RADIUS; chunkZ++) {
+                if (!MapState.isCurrentlyLoaded(new ChunkPos(chunkX, chunkZ))) {
+                    continue;
+                }
+
+                LevelChunk nearbyChunk = this.level.getChunk(chunkX, chunkZ);
+                if (nearbyChunk == null) {
+                    continue;
+                }
+
+                var allStarts = nearbyChunk.getAllStarts();
+
+                for (var entry : allStarts.entrySet()) {
+                    StructureStart start = entry.getValue();
+
+                    if (start == null || !start.isValid()) {
+                        continue;
+                    }
+
+                    var structure = start.getStructure();
+
+                    var structureKeyOptional = this.level.registryAccess()
+                            .lookupOrThrow(Registries.STRUCTURE)
+                            .getResourceKey(structure);
+
+                    if (structureKeyOptional.isEmpty()) {
+                        continue;
+                    }
+
+                    String structureName = structureKeyOptional.get().identifier().getPath();
+                    int baseScore = StructureValueRules.getBaseScore(structureName);
+                    if (baseScore <= 0) {
+                        continue;
+                    }
+
+                    int chunkDistance = Math.max(
+                            Math.abs(chunkX - centerPos.x),
+                            Math.abs(chunkZ - centerPos.z)
+                    );
+
+                    double multiplier = StructureValueRules.getDistanceMultiplier(chunkDistance);
+                    if (multiplier <= 0.0) {
+                        continue;
+                    }
+
+                    int weightedScore = (int) Math.round(baseScore * multiplier);
+                    bestScore = Math.max(bestScore, weightedScore);
+
+                    if (chunkDistance == 0) {
+                        names.add(structureName);
+                    } else {
+                        names.add(structureName + " (" + chunkDistance + "ch)");
+                    }
+                }
+            }
+        }
+
+        return new StructureAnalysis(
+                StructureValueRules.getFinalStructureScore(bestScore),
+                new ArrayList<>(names)
+        );
     }
 
     private String getChunkCenterBiomeName(ChunkPos pos) {
@@ -148,16 +226,11 @@ public class ChunkValueAnalyzer {
         OreCounts counts = new OreCounts();
 
         LevelChunkSection[] sections = chunk.getSections();
-        int minSectionY = chunk.getMinSectionY();
 
-        for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
-            LevelChunkSection section = sections[sectionIndex];
+        for (LevelChunkSection section : sections) {
             if (section == null || section.hasOnlyAir()) {
                 continue;
             }
-
-            int sectionY = minSectionY + sectionIndex;
-            int minBlockY = sectionY << 4;
 
             for (int localX = 0; localX < 16; localX++) {
                 for (int localY = 0; localY < 16; localY++) {
@@ -199,5 +272,15 @@ public class ChunkValueAnalyzer {
         private int redstoneCount;
         private int lapisCount;
         private int coalCount;
+    }
+
+    private static class StructureAnalysis {
+        private final int structureValue;
+        private final List<String> structureNames;
+
+        private StructureAnalysis(int structureValue, List<String> structureNames) {
+            this.structureValue = structureValue;
+            this.structureNames = structureNames;
+        }
     }
 }
