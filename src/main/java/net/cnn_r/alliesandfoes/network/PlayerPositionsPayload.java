@@ -1,4 +1,4 @@
-package net.cnn_r.alliesandfoes.network.packet;
+package net.cnn_r.alliesandfoes.network;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;

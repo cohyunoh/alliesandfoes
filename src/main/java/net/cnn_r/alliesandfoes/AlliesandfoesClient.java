@@ -2,7 +2,7 @@ package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
-import net.cnn_r.alliesandfoes.network.packet.PlayerPositionsPayload;
+import net.cnn_r.alliesandfoes.network.PlayerPositionsPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;

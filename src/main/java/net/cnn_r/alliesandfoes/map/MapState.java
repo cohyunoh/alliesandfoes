@@ -61,15 +61,32 @@ public class MapState {
         loadedChunks.add(pos);
 
         ChunkScanner scanner = getScanner();
-        if (scanner == null || scanner.isQueued(pos)) {
+        if (scanner == null) {
             return;
         }
 
+        // Scan the chunk itself if needed
         boolean hasMapColors = getChunkCache().hasChunk(pos);
         boolean hasValueData = getChunkValueCache().has(pos);
 
-        if (!hasMapColors || !hasValueData) {
+        if ((!hasMapColors || !hasValueData) && !scanner.isQueued(pos)) {
             scanner.requestScan(chunk);
+        }
+
+        // Rescan nearby loaded chunks so structure influence updates when neighbors arrive
+        for (int chunkX = pos.x - 2; chunkX <= pos.x + 2; chunkX++) {
+            for (int chunkZ = pos.z - 2; chunkZ <= pos.z + 2; chunkZ++) {
+                ChunkPos nearbyPos = new ChunkPos(chunkX, chunkZ);
+
+                if (!loadedChunks.contains(nearbyPos) || scanner.isQueued(nearbyPos)) {
+                    continue;
+                }
+
+                LevelChunk nearbyChunk = Minecraft.getInstance().level.getChunk(chunkX, chunkZ);
+                if (nearbyChunk != null) {
+                    scanner.requestScan(nearbyChunk);
+                }
+            }
         }
     }
 
