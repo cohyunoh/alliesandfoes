@@ -14,7 +14,8 @@ public record AllianceViewPayload(
         String allianceName,
         UUID ownerUuid,
         String ownerName,
-        List<MemberEntry> members
+        List<MemberEntry> members,
+        List<PendingInviteEntry> pendingInvites
 ) implements CustomPacketPayload {
 
     public static final Type<AllianceViewPayload> TYPE =
@@ -40,6 +41,12 @@ public record AllianceViewPayload(
             buf.writeUtf(member.name());
             buf.writeBoolean(member.owner());
         }
+
+        buf.writeVarInt(payload.pendingInvites().size());
+        for (PendingInviteEntry invite : payload.pendingInvites()) {
+            buf.writeUUID(invite.uuid());
+            buf.writeUtf(invite.name());
+        }
     }
 
     private static AllianceViewPayload read(FriendlyByteBuf buf) {
@@ -48,10 +55,9 @@ public record AllianceViewPayload(
         UUID ownerUuid = buf.readUUID();
         String ownerName = buf.readUtf();
 
-        int size = buf.readVarInt();
-        List<MemberEntry> members = new ArrayList<>(size);
-
-        for (int i = 0; i < size; i++) {
+        int memberSize = buf.readVarInt();
+        List<MemberEntry> members = new ArrayList<>(memberSize);
+        for (int i = 0; i < memberSize; i++) {
             members.add(new MemberEntry(
                     buf.readUUID(),
                     buf.readUtf(),
@@ -59,9 +65,28 @@ public record AllianceViewPayload(
             ));
         }
 
-        return new AllianceViewPayload(inAlliance, allianceName, ownerUuid, ownerName, members);
+        int inviteSize = buf.readVarInt();
+        List<PendingInviteEntry> pendingInvites = new ArrayList<>(inviteSize);
+        for (int i = 0; i < inviteSize; i++) {
+            pendingInvites.add(new PendingInviteEntry(
+                    buf.readUUID(),
+                    buf.readUtf()
+            ));
+        }
+
+        return new AllianceViewPayload(
+                inAlliance,
+                allianceName,
+                ownerUuid,
+                ownerName,
+                members,
+                pendingInvites
+        );
     }
 
     public record MemberEntry(UUID uuid, String name, boolean owner) {
+    }
+
+    public record PendingInviteEntry(UUID uuid, String name) {
     }
 }

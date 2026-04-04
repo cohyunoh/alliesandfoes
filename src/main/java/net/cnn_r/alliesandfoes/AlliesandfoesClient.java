@@ -3,11 +3,13 @@ package net.cnn_r.alliesandfoes;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.screen.AllianceCreateScreen;
+import net.cnn_r.alliesandfoes.screen.AllianceInviteScreen;
 import net.cnn_r.alliesandfoes.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.network.AllianceCreateResultPayload;
 import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
+import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
 import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
 import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
 import net.cnn_r.alliesandfoes.network.ChunkStructurePayload;
@@ -119,12 +121,34 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
-        ClientPlayNetworking.registerGlobalReceiver(AllianceViewPayload.TYPE, (payload, context) -> {
+        ClientPlayNetworking.registerGlobalReceiver(AllianceInvitePayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
-                context.client().setScreen(new AllianceViewScreen(
+                context.client().setScreen(new AllianceInviteScreen(
                         context.client().screen,
                         payload
                 ));
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceViewPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                if (context.client().player != null) {
+                    AllianceClientState.setAllianceDetails(
+                            payload.inAlliance(),
+                            payload.allianceName(),
+                            payload.ownerUuid(),
+                            context.client().player.getUUID()
+                    );
+                }
+
+                if (context.client().screen instanceof AllianceViewScreen existing) {
+                    existing.replacePayload(payload);
+                } else {
+                    context.client().setScreen(new AllianceViewScreen(
+                            context.client().screen,
+                            payload
+                    ));
+                }
             });
         });
 

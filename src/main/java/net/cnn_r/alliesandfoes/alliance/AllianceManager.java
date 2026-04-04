@@ -103,6 +103,7 @@ public class AllianceManager {
                     "",
                     requester.getUUID(),
                     requester.getGameProfile().name(),
+                    List.of(),
                     List.of()
             ));
             return;
@@ -184,7 +185,7 @@ public class AllianceManager {
                     alliance.getId(),
                     alliance.getName(),
                     owner.getUUID(),
-                    owner.getGameProfile().getName()
+                    owner.getGameProfile().name()
             ));
         }
 
