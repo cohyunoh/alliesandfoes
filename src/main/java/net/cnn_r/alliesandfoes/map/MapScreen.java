@@ -609,7 +609,7 @@ public class MapScreen extends Screen {
                             .append(Component.literal(" (" + breakdown.getWaterValue() + ")"))
                             .getVisualOrderText()
             );
-
+            /*
             lines.add(
                     Component.literal("Ores: ")
                             .append(Component.literal(String.valueOf(breakdown.getOreValue())).withColor(getOreColor(breakdown.getOreValue())))
@@ -623,7 +623,8 @@ public class MapScreen extends Screen {
                             .append(Component.literal("G:" + breakdown.getGoldOreCount()).withColor(0xFFD700))
                             .getVisualOrderText()
             );
-
+            */
+            /*
             if (!breakdown.getStructures().isEmpty()) {
                 lines.add(
                         Component.literal("Structures: ")
@@ -633,6 +634,7 @@ public class MapScreen extends Screen {
                                 .getVisualOrderText()
                 );
             }
+            */
         } else {
             lines.add(Component.literal("Value data missing - awaiting rescan").withColor(0xFFAA55).getVisualOrderText());
         }

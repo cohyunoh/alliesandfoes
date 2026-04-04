@@ -6,26 +6,21 @@ import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.value.BiomeValueRules;
 import net.cnn_r.alliesandfoes.map.value.ChunkValueWeights;
 import net.cnn_r.alliesandfoes.map.value.OreValueRules;
-import net.cnn_r.alliesandfoes.map.value.StructureValueRules;
 import net.cnn_r.alliesandfoes.map.value.WaterValueRules;
+import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.level.levelgen.structure.StructureStart;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 public class ChunkValueAnalyzer {
     private final ClientLevel level;
-    private static final int STRUCTURE_SCAN_RADIUS = 2;
 
     public ChunkValueAnalyzer(ClientLevel level) {
         this.level = level;
@@ -54,8 +49,9 @@ public class ChunkValueAnalyzer {
                 coalOreCount
         );
 
-        int structureValue = 0;
-        List<String> structures = new ArrayList<>();
+        StructureFields structureFields = this.getStructureFields(pos);
+        int structureValue = structureFields.structureValue;
+        List<String> structures = structureFields.structureNames;
 
         String biomeName = this.getChunkCenterBiomeName(pos);
         int biomeValue = BiomeValueRules.getBiomeScore(biomeName);
@@ -64,7 +60,6 @@ public class ChunkValueAnalyzer {
         boolean hasWaterNearby = hasWaterInChunk || this.hasWaterNearby(pos);
         boolean nearWater = hasWaterInChunk || hasWaterNearby;
         int waterValue = WaterValueRules.getWaterScore(hasWaterInChunk, hasWaterNearby);
-
 
         ChunkValueBreakdown breakdown = new ChunkValueBreakdown(
                 oreValue,
@@ -94,96 +89,22 @@ public class ChunkValueAnalyzer {
         return new ChunkValueData(pos, totalValue, breakdown);
     }
 
-
-    private StructureAnalysis analyzeStructures(LevelChunk centerChunk) {
-        ChunkPos centerPos = centerChunk.getPos();
-
-        int bestScore = 0;
-        Set<String> names = new LinkedHashSet<>();
-
-        for (int chunkX = centerPos.x - STRUCTURE_SCAN_RADIUS; chunkX <= centerPos.x + STRUCTURE_SCAN_RADIUS; chunkX++) {
-            for (int chunkZ = centerPos.z - STRUCTURE_SCAN_RADIUS; chunkZ <= centerPos.z + STRUCTURE_SCAN_RADIUS; chunkZ++) {
-                ChunkPos nearbyPos = new ChunkPos(chunkX, chunkZ);
-
-                if (!MapState.isCurrentlyLoaded(nearbyPos)) {
-                    continue;
-                }
-
-                LevelChunk nearbyChunk = this.level.getChunk(chunkX, chunkZ);
-                if (nearbyChunk == null) {
-                    continue;
-                }
-
-                int chunkDistance = Math.max(
-                        Math.abs(chunkX - centerPos.x),
-                        Math.abs(chunkZ - centerPos.z)
-                );
-
-                double multiplier = StructureValueRules.getDistanceMultiplier(chunkDistance);
-                if (multiplier <= 0.0) {
-                    continue;
-                }
-
-                // Exact starts
-                var allStarts = nearbyChunk.getAllStarts();
-                for (var entry : allStarts.entrySet()) {
-                    StructureStart start = entry.getValue();
-
-                    if (start == null || !start.isValid()) {
-                        continue;
-                    }
-
-                    var structure = start.getStructure();
-                    String structureName = cleanStructureName(structure.type().toString());
-                    System.out.println("STRUCT DETECTED: " + structureName);
-                    int baseScore = StructureValueRules.getBaseScore(structureName);
-                    if (baseScore <= 0) {
-                        continue;
-                    }
-
-                    int weightedScore = (int) Math.round(baseScore * multiplier);
-                    bestScore = Math.max(bestScore, weightedScore);
-
-                    if (chunkDistance == 0) {
-                        names.add(structureName);
-                    } else {
-                        names.add(structureName + " (" + chunkDistance + "ch)");
-                    }
-                }
-
-                // References
-                var allReferences = nearbyChunk.getAllReferences();
-                for (var entry : allReferences.entrySet()) {
-                    var structure = entry.getKey();
-                    var references = entry.getValue();
-
-                    if (references == null || references.isEmpty()) {
-                        continue;
-                    }
-
-                    String structureName = cleanStructureName(structure.type().toString());
-                    System.out.println("STRUCT DETECTED: " + structureName);
-                    int baseScore = StructureValueRules.getBaseScore(structureName);
-                    if (baseScore <= 0) {
-                        continue;
-                    }
-
-                    int weightedScore = (int) Math.round(baseScore * multiplier);
-                    bestScore = Math.max(bestScore, weightedScore);
-
-                    if (chunkDistance == 0) {
-                        names.add(structureName);
-                    } else {
-                        names.add(structureName + " (" + chunkDistance + "ch)");
-                    }
-                }
-            }
+    private StructureFields getStructureFields(ChunkPos pos) {
+        ChunkStructureData synced = MapState.getChunkStructureSyncCache().get(pos);
+        if (synced != null) {
+            return new StructureFields(synced.getStructureValue(), new ArrayList<>(synced.getStructureNames()));
         }
 
-        return new StructureAnalysis(
-                StructureValueRules.getFinalStructureScore(bestScore),
-                new ArrayList<>(names)
-        );
+        ChunkValueData existing = MapState.getChunkValueCache().get(pos);
+        if (existing != null) {
+            ChunkValueBreakdown breakdown = existing.getBreakdown();
+            return new StructureFields(
+                    breakdown.getStructureValue(),
+                    new ArrayList<>(breakdown.getStructures())
+            );
+        }
+
+        return new StructureFields(0, new ArrayList<>());
     }
 
     private String getChunkCenterBiomeName(ChunkPos pos) {
@@ -295,24 +216,13 @@ public class ChunkValueAnalyzer {
         private int coalCount;
     }
 
-    private static class StructureAnalysis {
+    private static class StructureFields {
         private final int structureValue;
         private final List<String> structureNames;
 
-        private StructureAnalysis(int structureValue, List<String> structureNames) {
+        private StructureFields(int structureValue, List<String> structureNames) {
             this.structureValue = structureValue;
             this.structureNames = structureNames;
         }
-    }
-
-    private String cleanStructureName(String raw) {
-        if (raw == null) return "unknown";
-
-        int colonIndex = raw.indexOf(':');
-        if (colonIndex >= 0 && colonIndex < raw.length() - 1) {
-            return raw.substring(colonIndex + 1);
-        }
-
-        return raw;
     }
 }

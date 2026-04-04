@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes.map;
 
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
+import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
@@ -15,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class MapState {
     private static ChunkCache chunkCache;
     private static ChunkValueCache chunkValueCache;
+    private static ChunkStructureSyncCache chunkStructureSyncCache;
     private static ChunkScanner scanner;
     private static PlayerMarkerCache playerMarkerCache;
     private static final Set<ChunkPos> loadedChunks = ConcurrentHashMap.newKeySet();
@@ -31,6 +33,13 @@ public class MapState {
             chunkValueCache = new ChunkValueCache();
         }
         return chunkValueCache;
+    }
+
+    public static ChunkStructureSyncCache getChunkStructureSyncCache() {
+        if (chunkStructureSyncCache == null) {
+            chunkStructureSyncCache = new ChunkStructureSyncCache();
+        }
+        return chunkStructureSyncCache;
     }
 
     public static PlayerMarkerCache getPlayerMarkerCache() {
@@ -61,32 +70,15 @@ public class MapState {
         loadedChunks.add(pos);
 
         ChunkScanner scanner = getScanner();
-        if (scanner == null) {
+        if (scanner == null || scanner.isQueued(pos)) {
             return;
         }
 
-        // Scan the chunk itself if needed
         boolean hasMapColors = getChunkCache().hasChunk(pos);
         boolean hasValueData = getChunkValueCache().has(pos);
 
-        if ((!hasMapColors || !hasValueData) && !scanner.isQueued(pos)) {
+        if (!hasMapColors || !hasValueData) {
             scanner.requestScan(chunk);
-        }
-
-        // Rescan nearby loaded chunks so structure influence updates when neighbors arrive
-        for (int chunkX = pos.x - 2; chunkX <= pos.x + 2; chunkX++) {
-            for (int chunkZ = pos.z - 2; chunkZ <= pos.z + 2; chunkZ++) {
-                ChunkPos nearbyPos = new ChunkPos(chunkX, chunkZ);
-
-                if (!loadedChunks.contains(nearbyPos) || scanner.isQueued(nearbyPos)) {
-                    continue;
-                }
-
-                LevelChunk nearbyChunk = Minecraft.getInstance().level.getChunk(chunkX, chunkZ);
-                if (nearbyChunk != null) {
-                    scanner.requestScan(nearbyChunk);
-                }
-            }
         }
     }
 
@@ -120,6 +112,9 @@ public class MapState {
         }
         if (chunkValueCache != null) {
             chunkValueCache.clear();
+        }
+        if (chunkStructureSyncCache != null) {
+            chunkStructureSyncCache.clear();
         }
         if (playerMarkerCache != null) {
             playerMarkerCache.clear();

@@ -30,7 +30,7 @@ public final class StructureChunkValueCalculator {
             for (int chunkZ = centerPos.z - STRUCTURE_SCAN_RADIUS; chunkZ <= centerPos.z + STRUCTURE_SCAN_RADIUS; chunkZ++) {
                 ChunkPos searchPos = new ChunkPos(chunkX, chunkZ);
 
-                List<StructureStart> starts = structureManager.getStructureStarts(searchPos, structure -> true);
+                List<StructureStart> starts = structureManager.startsForStructure(searchPos, structure -> true);
 
                 for (StructureStart start : starts) {
                     if (start == null || !start.isValid()) {
