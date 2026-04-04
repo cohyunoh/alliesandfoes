@@ -77,7 +77,16 @@ public class MapState {
         boolean hasMapColors = getChunkCache().hasChunk(pos);
         boolean hasValueData = getChunkValueCache().has(pos);
 
+        // If map colors are missing OR value data is missing, scan.
         if (!hasMapColors || !hasValueData) {
+            scanner.requestScan(chunk);
+            return;
+        }
+
+        // Extra safety:
+        // if value data exists but biome is unknown, force a real rescan.
+        var existing = getChunkValueCache().get(pos);
+        if (existing != null && "unknown".equalsIgnoreCase(existing.getBreakdown().getBiomeName())) {
             scanner.requestScan(chunk);
         }
     }

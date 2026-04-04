@@ -32,29 +32,10 @@ public class ChunkValueCache {
     public void applyStructureData(ChunkPos pos, int structureValue, List<String> structureNames) {
         ChunkValueData existing = this.values.get(pos);
 
+        // IMPORTANT:
+        // Do not create placeholder entries with biome "unknown".
+        // Structure data should live in ChunkStructureSyncCache until a real scan builds full value data.
         if (existing == null) {
-            ChunkValueBreakdown breakdown = new ChunkValueBreakdown(
-                    0,
-                    structureValue,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    false,
-                    "unknown",
-                    structureNames
-            );
-
-            int totalValue = clampToChunkValueRange((int) Math.round(
-                    structureValue * ChunkValueWeights.STRUCTURE_WEIGHT
-            ));
-
-            this.values.put(pos, new ChunkValueData(pos, totalValue, breakdown));
             return;
         }
 
