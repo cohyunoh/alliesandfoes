@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes.map;
 
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
+import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.minecraft.client.Minecraft;
@@ -13,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class MapState {
     private static ChunkCache chunkCache;
+    private static ChunkValueCache chunkValueCache;
     private static ChunkScanner scanner;
     private static PlayerMarkerCache playerMarkerCache;
     private static final Set<ChunkPos> loadedChunks = ConcurrentHashMap.newKeySet();
@@ -22,6 +24,13 @@ public class MapState {
             chunkCache = new ChunkCache();
         }
         return chunkCache;
+    }
+
+    public static ChunkValueCache getChunkValueCache() {
+        if (chunkValueCache == null) {
+            chunkValueCache = new ChunkValueCache();
+        }
+        return chunkValueCache;
     }
 
     public static PlayerMarkerCache getPlayerMarkerCache() {
@@ -41,7 +50,7 @@ public class MapState {
             if (scanner != null) {
                 scanner.shutdown();
             }
-            scanner = new ChunkScanner(getChunkCache(), level);
+            scanner = new ChunkScanner(getChunkCache(), getChunkValueCache(), level);
         }
 
         return scanner;
@@ -83,6 +92,9 @@ public class MapState {
         }
         if (chunkCache != null) {
             chunkCache.clear();
+        }
+        if (chunkValueCache != null) {
+            chunkValueCache.clear();
         }
         if (playerMarkerCache != null) {
             playerMarkerCache.clear();

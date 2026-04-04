@@ -1,7 +1,10 @@
 package net.cnn_r.alliesandfoes.map;
 
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
+import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
+import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
+import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -11,8 +14,8 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.AbstractClientPlayer;
-import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.FormattedCharSequence;
@@ -26,6 +29,7 @@ public class MapScreen extends Screen {
     private MapTexture mapTexture;
     private MapRenderer renderer;
     private ChunkCache cache;
+    private ChunkValueCache chunkValueCache;
     private PlayerMarkerCache playerMarkerCache;
 
     private double cameraBlockX;
@@ -36,6 +40,8 @@ public class MapScreen extends Screen {
 
     private static final int BLOCK_PIXEL_SIZE = 2;
     private static final int TEXTURE_SIZE = 512;
+    private static final float VALUE_BORDER_ZOOM_THRESHOLD = 0.9f;
+    private static final int MIN_CHUNK_BORDER_SCREEN_SIZE = 6;
 
     private static final int CHUNK_BORDER_COLOR = 0x66FFFFFF;
     private static final int HOVERED_CHUNK_FILL_COLOR = 0x55FFFF00;
@@ -45,19 +51,15 @@ public class MapScreen extends Screen {
         super(Component.literal("World Map"));
     }
 
-    // OVERRIDES
     @Override
     protected void init() {
         this.mapTexture = new MapTexture(TEXTURE_SIZE);
         this.renderer = new MapRenderer(this.mapTexture);
         this.cache = MapState.getChunkCache();
+        this.chunkValueCache = MapState.getChunkValueCache();
+        ChunkScanner scanner = MapState.getScanner();
         this.playerMarkerCache = MapState.getPlayerMarkerCache();
         MapPersistence.load(this.cache, getMapId());
-
-        if (this.minecraft.player != null) {
-            this.cameraBlockX = this.minecraft.player.getX();
-            this.cameraBlockZ = this.minecraft.player.getZ();
-        }
 
         if (this.minecraft.player != null) {
             this.cameraBlockX = this.minecraft.player.getX();
@@ -104,7 +106,9 @@ public class MapScreen extends Screen {
 
         this.renderChunkOverlays(context);
         this.renderVisiblePlayers(context, level);
+
         super.render(context, mouseX, mouseY, delta);
+
         this.renderHoveredChunkTooltip(context, mouseX, mouseY);
     }
 
@@ -178,27 +182,27 @@ public class MapScreen extends Screen {
         int panAmount = (modifiers & 1) != 0 ? 64 : 16;
 
         switch (key) {
-            case 263 -> { // left
+            case 263 -> {
                 this.cameraBlockX -= panAmount;
                 this.followPlayer = false;
                 return true;
             }
-            case 262 -> { // right
+            case 262 -> {
                 this.cameraBlockX += panAmount;
                 this.followPlayer = false;
                 return true;
             }
-            case 265 -> { // up
+            case 265 -> {
                 this.cameraBlockZ -= panAmount;
                 this.followPlayer = false;
                 return true;
             }
-            case 264 -> { // down
+            case 264 -> {
                 this.cameraBlockZ += panAmount;
                 this.followPlayer = false;
                 return true;
             }
-            case 82 -> { // R
+            case 82 -> {
                 if (this.minecraft.player != null) {
                     this.cameraBlockX = this.minecraft.player.getX();
                     this.cameraBlockZ = this.minecraft.player.getZ();
@@ -222,7 +226,6 @@ public class MapScreen extends Screen {
         return false;
     }
 
-    // HELPERS
     private Identifier getSkinForMarker(net.cnn_r.alliesandfoes.map.data.PlayerMarker marker) {
         ClientLevel level = this.minecraft.level;
 
@@ -262,7 +265,6 @@ public class MapScreen extends Screen {
         return new ChunkPos(blockX >> 4, blockZ >> 4);
     }
 
-    // Renderers
     private void rebuildVisibleTexture() {
         this.mapTexture.clear(0xFF202020);
 
@@ -371,11 +373,34 @@ public class MapScreen extends Screen {
             return;
         }
 
-        if (hovered) {
-            context.fill(x1, y1, x2, y2, HOVERED_CHUNK_FILL_COLOR);
+        boolean chunkLargeEnoughForBorder = size >= MIN_CHUNK_BORDER_SCREEN_SIZE;
+
+        if (!hovered && !chunkLargeEnoughForBorder) {
+            return;
         }
 
-        int borderColor = hovered ? HOVERED_CHUNK_BORDER_COLOR : CHUNK_BORDER_COLOR;
+        ChunkValueData valueData = this.chunkValueCache.get(pos);
+        boolean showValueColors = this.renderer.getZoom() >= VALUE_BORDER_ZOOM_THRESHOLD;
+
+        int borderColor;
+        if (valueData != null && showValueColors) {
+            borderColor = hovered
+                    ? getOverallValueColor(valueData.getTotalValue())
+                    : getOverallValueBorderColorSoft(valueData.getTotalValue());
+        } else {
+            borderColor = hovered ? HOVERED_CHUNK_BORDER_COLOR : CHUNK_BORDER_COLOR;
+        }
+
+        if (hovered) {
+            int fillColor;
+            if (valueData != null && showValueColors) {
+                fillColor = getOverallValueFillColor(valueData.getTotalValue());
+            } else {
+                fillColor = HOVERED_CHUNK_FILL_COLOR;
+            }
+
+            context.fill(x1, y1, x2, y2, fillColor);
+        }
 
         context.hLine(x1, x2 - 1, y1, borderColor);
         context.hLine(x1, x2 - 1, y2 - 1, borderColor);
@@ -384,7 +409,6 @@ public class MapScreen extends Screen {
     }
 
     private void renderPlayerHead(GuiGraphics context, Identifier skin, String name, int screenX, int screenY, int headSize) {
-        // face
         context.blit(
                 RenderPipelines.GUI_TEXTURED,
                 skin,
@@ -400,7 +424,6 @@ public class MapScreen extends Screen {
                 64
         );
 
-        // hat layer
         context.blit(
                 RenderPipelines.GUI_TEXTURED,
                 skin,
@@ -499,9 +522,57 @@ public class MapScreen extends Screen {
         }
 
         List<FormattedCharSequence> lines = new ArrayList<>();
-        lines.add(Component.literal("Chunk: [" + this.hoveredChunk.x + ", " + this.hoveredChunk.z + "]").getVisualOrderText());
-        lines.add(Component.literal("X: " + this.hoveredChunk.getMinBlockX() + " to " + this.hoveredChunk.getMaxBlockX()).getVisualOrderText());
-        lines.add(Component.literal("Z: " + this.hoveredChunk.getMinBlockZ() + " to " + this.hoveredChunk.getMaxBlockZ()).getVisualOrderText());
+
+        lines.add(Component.literal("Chunk [" + this.hoveredChunk.x + ", " + this.hoveredChunk.z + "]").getVisualOrderText());
+
+        ChunkValueData valueData = this.chunkValueCache.get(this.hoveredChunk);
+        if (valueData != null) {
+            ChunkValueBreakdown breakdown = valueData.getBreakdown();
+
+            lines.add(
+                    Component.literal("Value: ")
+                            .append(Component.literal(valueData.getTotalValue() + "/10").withColor(getOverallValueColor(valueData.getTotalValue())))
+                            .getVisualOrderText()
+            );
+
+            lines.add(
+                    Component.literal("Biome: ")
+                            .append(Component.literal(formatBiomeName(breakdown.getBiomeName())).withColor(getBiomeColor(breakdown.getBiomeValue())))
+                            .append(Component.literal(" (" + breakdown.getBiomeValue() + ")"))
+                            .getVisualOrderText()
+            );
+
+            lines.add(
+                    Component.literal("Water: ")
+                            .append(Component.literal(breakdown.isNearWater() ? "Nearby" : "None").withColor(getWaterColor(breakdown.getWaterValue())))
+                            .append(Component.literal(" (" + breakdown.getWaterValue() + ")"))
+                            .getVisualOrderText()
+            );
+
+            lines.add(
+                    Component.literal("Ores: ")
+                            .append(Component.literal(String.valueOf(breakdown.getOreValue())).withColor(getOreColor(breakdown.getOreValue())))
+                            .append(Component.literal("  "))
+                            .append(Component.literal("D:" + breakdown.getDiamondOreCount()).withColor(0x55FFFF))
+                            .append(Component.literal(" "))
+                            .append(Component.literal("E:" + breakdown.getEmeraldOreCount()).withColor(0x55FF55))
+                            .append(Component.literal(" "))
+                            .append(Component.literal("I:" + breakdown.getIronOreCount()).withColor(0xD8AF93))
+                            .append(Component.literal(" "))
+                            .append(Component.literal("G:" + breakdown.getGoldOreCount()).withColor(0xFFD700))
+                            .getVisualOrderText()
+            );
+
+            if (!breakdown.getStructures().isEmpty()) {
+                lines.add(
+                        Component.literal("Structures: ")
+                                .append(Component.literal(String.join(", ", breakdown.getStructures())).withColor(0xFFAA00))
+                                .getVisualOrderText()
+                );
+            }
+        } else {
+            lines.add(Component.literal("Value data not scanned yet").withColor(0xAAAAAA).getVisualOrderText());
+        }
 
         context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
     }
@@ -530,5 +601,86 @@ public class MapScreen extends Screen {
         float zoom = Math.max(0.5f, Math.min(6.0f, Math.min(zoomX, zoomY)));
 
         this.renderer.setZoom(zoom);
+    }
+    private String formatBiomeName(String biomeName) {
+        String[] parts = biomeName.split("_");
+        StringBuilder builder = new StringBuilder();
+
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].isEmpty()) {
+                continue;
+            }
+
+            if (builder.length() > 0) {
+                builder.append(" ");
+            }
+
+            builder.append(Character.toUpperCase(parts[i].charAt(0)));
+            if (parts[i].length() > 1) {
+                builder.append(parts[i].substring(1));
+            }
+        }
+
+        return builder.toString();
+    }
+
+    private int getBiomeColor(int biomeValue) {
+        if (biomeValue >= 8) {
+            return 0x55FF55;
+        }
+        if (biomeValue >= 5) {
+            return 0xFFFF55;
+        }
+        return 0xFF5555;
+    }
+
+    private int getWaterColor(int waterValue) {
+        if (waterValue >= 8) {
+            return 0x55AAFF;
+        }
+        if (waterValue >= 5) {
+            return 0x88CCFF;
+        }
+        return 0xAAAAAA;
+    }
+
+    private int getOreColor(int oreValue) {
+        if (oreValue >= 8) {
+            return 0xFFAA00;
+        }
+        if (oreValue >= 5) {
+            return 0xFFFF55;
+        }
+        return 0xAAAAAA;
+    }
+
+    private int getOverallValueColor(int totalValue) {
+        if (totalValue >= 8) {
+            return 0x55FF55;
+        }
+        if (totalValue >= 5) {
+            return 0xFFFF55;
+        }
+        return 0xFF5555;
+    }
+
+    private int getOverallValueFillColor(int totalValue) {
+        if (totalValue >= 8) {
+            return 0x5533CC33;
+        }
+        if (totalValue >= 5) {
+            return 0x55CCCC33;
+        }
+        return 0x55CC3333;
+    }
+
+    private int getOverallValueBorderColorSoft(int totalValue) {
+        if (totalValue >= 8) {
+            return 0x8833DD33;
+        }
+        if (totalValue >= 5) {
+            return 0x88DDDD33;
+        }
+        return 0x88DD3333;
     }
 }

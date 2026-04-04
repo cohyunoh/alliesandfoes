@@ -1,14 +1,16 @@
 package net.cnn_r.alliesandfoes.map.scan;
 
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
+import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
+import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.util.BlockColorResolver;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -17,13 +19,17 @@ import java.util.concurrent.Executors;
 
 public class ChunkScanner {
     private final ChunkCache cache;
+    private final ChunkValueCache chunkValueCache;
+    private final ChunkValueAnalyzer chunkValueAnalyzer;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Set<ChunkPos> queued = ConcurrentHashMap.newKeySet();
     private final ClientLevel level;
 
-    public ChunkScanner(ChunkCache cache, ClientLevel level) {
+    public ChunkScanner(ChunkCache cache, ChunkValueCache chunkValueCache, ClientLevel level) {
         this.cache = cache;
+        this.chunkValueCache = chunkValueCache;
         this.level = level;
+        this.chunkValueAnalyzer = new ChunkValueAnalyzer(level);
     }
 
     public boolean isQueued(ChunkPos pos) {
@@ -58,7 +64,6 @@ public class ChunkScanner {
                 int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX, worldZ);
                 int northY = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX, worldZ - 1);
                 int westY = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX - 1, worldZ);
-
 
                 if (y <= level.getMinY()) {
                     pixels[localX + localZ * 16] = 0xFF000000;
@@ -95,6 +100,9 @@ public class ChunkScanner {
         }
 
         this.cache.put(pos, pixels);
+
+        ChunkValueData valueData = this.chunkValueAnalyzer.analyze(chunk);
+        this.chunkValueCache.put(pos, valueData);
     }
 
     private boolean shouldSkipTopBlock(BlockState state) {
@@ -122,13 +130,14 @@ public class ChunkScanner {
                 || state.is(Blocks.DEAD_BUSH)
                 || state.is(Blocks.SNOW);
     }
+
     private int applyShading(int color, int shade) {
         int a = (color >> 24) & 0xFF;
         int r = (color >> 16) & 0xFF;
         int g = (color >> 8) & 0xFF;
         int b = color & 0xFF;
 
-        int amount = shade * 12; // strength of shading
+        int amount = shade * 12;
 
         r = clamp(r + amount, 0, 255);
         g = clamp(g + amount, 0, 255);
