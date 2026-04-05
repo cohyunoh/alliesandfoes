@@ -1,5 +1,6 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
+import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
 import net.cnn_r.alliesandfoes.network.RespondAllianceInvitePayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -28,6 +29,7 @@ public class AllianceInviteScreen extends Screen {
 
         this.addRenderableWidget(
                 Button.builder(Component.literal("Accept"), btn -> {
+                    AllianceClientState.removePendingInvite(payload.allianceId());
                     ClientPlayNetworking.send(new RespondAllianceInvitePayload(payload.allianceId(), true));
                     this.onClose();
                 }).bounds(left, buttonY, 146, 20).build()
@@ -35,6 +37,7 @@ public class AllianceInviteScreen extends Screen {
 
         this.addRenderableWidget(
                 Button.builder(Component.literal("Decline"), btn -> {
+                    AllianceClientState.removePendingInvite(payload.allianceId());
                     ClientPlayNetworking.send(new RespondAllianceInvitePayload(payload.allianceId(), false));
                     this.onClose();
                 }).bounds(left + 154, buttonY, 146, 20).build()

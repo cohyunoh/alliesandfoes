@@ -3,7 +3,6 @@ package net.cnn_r.alliesandfoes;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
-import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
@@ -18,6 +17,7 @@ import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.ChunkPos;
 
@@ -123,10 +123,17 @@ public class AlliesandfoesClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(AllianceInvitePayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
-                context.client().setScreen(new AllianceInviteScreen(
-                        context.client().screen,
-                        payload
-                ));
+                AllianceClientState.addPendingInvite(payload);
+
+                Component title = Component.literal("Alliance Invite");
+                Component body = Component.literal(payload.ownerName() + " invited you to " + payload.allianceName());
+
+                SystemToast.add(
+                        context.client().getToastManager(),
+                        SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                        title,
+                        body
+                );
             });
         });
 

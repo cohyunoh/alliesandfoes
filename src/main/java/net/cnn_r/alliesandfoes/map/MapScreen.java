@@ -1,12 +1,14 @@
 package net.cnn_r.alliesandfoes.map;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
+import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteScreen;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
+import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
 import net.cnn_r.alliesandfoes.network.RequestAllianceCreationScreenPayload;
 import net.cnn_r.alliesandfoes.network.RequestAllianceViewPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -41,6 +43,7 @@ public class MapScreen extends Screen {
 
     private ChunkPos hoveredChunk;
     private Button allianceButton;
+    private Button inviteButton;
 
     private static final int BLOCK_PIXEL_SIZE = 2;
     private static final int TEXTURE_SIZE = 512;
@@ -83,7 +86,17 @@ public class MapScreen extends Screen {
             }
         }).bounds(20, 20, 120, 20).build();
 
+        this.inviteButton = Button.builder(getInviteButtonText(), (btn) -> {
+            AllianceInvitePayload pendingInvite = AllianceClientState.getFirstPendingInvite();
+            if (pendingInvite != null && this.minecraft != null) {
+                AllianceClientState.acknowledgeInviteNotification();
+                this.minecraft.setScreen(new AllianceInviteScreen(this, pendingInvite));
+            }
+        }).bounds(20, 46, 120, 20).build();
+        this.inviteButton.active = AllianceClientState.hasPendingInvites();
+
         this.addRenderableWidget(this.allianceButton);
+        this.addRenderableWidget(this.inviteButton);
     }
 
     @Override
@@ -93,10 +106,24 @@ public class MapScreen extends Screen {
         if (this.allianceButton != null) {
             this.allianceButton.setMessage(getAllianceButtonText());
         }
+
+        if (this.inviteButton != null) {
+            this.inviteButton.setMessage(getInviteButtonText());
+            this.inviteButton.active = AllianceClientState.hasPendingInvites();
+        }
     }
 
     private Component getAllianceButtonText() {
         return Component.literal(AllianceClientState.isInAlliance() ? "View Alliance" : "Create Alliance");
+    }
+
+    private Component getInviteButtonText() {
+        int count = AllianceClientState.getPendingInviteCount();
+        if (count <= 0) {
+            return Component.literal("Invites");
+        }
+
+        return Component.literal("Invites (" + count + ")");
     }
 
     @Override
@@ -108,6 +135,7 @@ public class MapScreen extends Screen {
 
         if (player == null || level == null) {
             super.render(context, mouseX, mouseY, delta);
+            renderInviteButtonGlow(context, delta);
             return;
         }
 
@@ -126,8 +154,33 @@ public class MapScreen extends Screen {
         this.renderVisiblePlayers(context, level);
 
         super.render(context, mouseX, mouseY, delta);
+        renderInviteButtonGlow(context, delta);
 
         this.renderHoveredChunkTooltip(context, mouseX, mouseY);
+    }
+
+    private void renderInviteButtonGlow(GuiGraphics context, float delta) {
+        if (this.inviteButton == null || !AllianceClientState.shouldHighlightInviteButton()) {
+            return;
+        }
+
+        long tick = this.minecraft != null && this.minecraft.level != null
+                ? this.minecraft.level.getGameTime()
+                : 0L;
+
+        double pulse = (Math.sin((tick + delta) * 0.25D) + 1.0D) * 0.5D;
+        int alpha = 70 + (int) (90 * pulse);
+        int glowColor = (alpha << 24) | 0xFFD966;
+
+        int x = this.inviteButton.getX();
+        int y = this.inviteButton.getY();
+        int w = this.inviteButton.getWidth();
+        int h = this.inviteButton.getHeight();
+
+        context.fill(x - 3, y - 3, x + w + 3, y - 1, glowColor);
+        context.fill(x - 3, y + h + 1, x + w + 3, y + h + 3, glowColor);
+        context.fill(x - 3, y - 1, x - 1, y + h + 1, glowColor);
+        context.fill(x + w + 1, y - 1, x + w + 3, y + h + 1, glowColor);
     }
 
     @Override
