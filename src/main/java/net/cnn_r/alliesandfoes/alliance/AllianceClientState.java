@@ -2,9 +2,9 @@ package net.cnn_r.alliesandfoes.alliance;
 
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.UUID;
 
 public class AllianceClientState {
@@ -13,7 +13,7 @@ public class AllianceClientState {
     private static UUID ownerUuid = new UUID(0L, 0L);
     private static boolean owner = false;
 
-    private static final Deque<AllianceInvitePayload> pendingInvites = new ArrayDeque<>();
+    private static final List<AllianceInvitePayload> pendingInvites = new ArrayList<>();
     private static boolean inviteNotificationUnread = false;
 
     public static boolean isInAlliance() {
@@ -58,7 +58,7 @@ public class AllianceClientState {
 
     public static void addPendingInvite(AllianceInvitePayload payload) {
         removePendingInvite(payload.allianceId());
-        pendingInvites.addLast(payload);
+        pendingInvites.add(payload);
         inviteNotificationUnread = true;
     }
 
@@ -71,7 +71,18 @@ public class AllianceClientState {
     }
 
     public static AllianceInvitePayload getFirstPendingInvite() {
-        return pendingInvites.peekFirst();
+        return pendingInvites.isEmpty() ? null : pendingInvites.get(0);
+    }
+
+    public static AllianceInvitePayload getPendingInvite(int index) {
+        if (index < 0 || index >= pendingInvites.size()) {
+            return null;
+        }
+        return pendingInvites.get(index);
+    }
+
+    public static List<AllianceInvitePayload> getPendingInvitesSnapshot() {
+        return new ArrayList<>(pendingInvites);
     }
 
     public static void removePendingInvite(UUID allianceId) {
