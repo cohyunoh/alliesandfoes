@@ -40,6 +40,7 @@ public record AllianceViewPayload(
             buf.writeUUID(member.uuid());
             buf.writeUtf(member.name());
             buf.writeBoolean(member.owner());
+            buf.writeUtf(member.role());
         }
 
         buf.writeVarInt(payload.pendingInvites().size());
@@ -61,7 +62,8 @@ public record AllianceViewPayload(
             members.add(new MemberEntry(
                     buf.readUUID(),
                     buf.readUtf(),
-                    buf.readBoolean()
+                    buf.readBoolean(),
+                    buf.readUtf()
             ));
         }
 
@@ -84,7 +86,7 @@ public record AllianceViewPayload(
         );
     }
 
-    public record MemberEntry(UUID uuid, String name, boolean owner) {
+    public record MemberEntry(UUID uuid, String name, boolean owner, String role) {
     }
 
     public record PendingInviteEntry(UUID uuid, String name) {

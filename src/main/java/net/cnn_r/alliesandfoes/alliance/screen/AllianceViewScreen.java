@@ -5,12 +5,16 @@ import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
 import net.cnn_r.alliesandfoes.network.KickAllianceMemberPayload;
 import net.cnn_r.alliesandfoes.network.LeaveAlliancePayload;
 import net.cnn_r.alliesandfoes.network.RequestAllianceViewPayload;
+import net.cnn_r.alliesandfoes.network.SetAllianceMemberRolePayload;
 import net.cnn_r.alliesandfoes.network.TransferAllianceOwnershipPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
 
@@ -18,18 +22,19 @@ import java.util.List;
 import java.util.UUID;
 
 public class AllianceViewScreen extends Screen {
-    private static final int PANEL_WIDTH = 420;
-    private static final int MIN_PANEL_HEIGHT = 270;
-    private static final int MAX_PANEL_HEIGHT = 360;
+    private static final int PANEL_WIDTH = 430;
+    private static final int MIN_PANEL_HEIGHT = 250;
+    private static final int MAX_PANEL_HEIGHT = 330;
     private static final int SCREEN_MARGIN = 18;
 
     private static final int HEADER_HEIGHT = 24;
     private static final int SECTION_PAD = 12;
-    private static final int FOOTER_HEIGHT = 64;
+    private static final int FOOTER_HEIGHT = 52;
 
-    private static final int ROW_HEIGHT = 26;
+    private static final int ROW_HEIGHT = 34;
     private static final int ROW_SPACING = 4;
     private static final int FACE_SIZE = 16;
+    private static final int ROLE_MAX_LENGTH = 20;
 
     private final Screen parent;
     private AllianceViewPayload payload;
@@ -39,6 +44,11 @@ public class AllianceViewScreen extends Screen {
     private Button leaveButton;
 
     private int scrollOffset = 0;
+
+    private UUID editingRoleForUuid;
+    private EditBox roleEditBox;
+    private Button roleConfirmButton;
+    private Button roleCancelButton;
 
     public AllianceViewScreen(Screen parent, AllianceViewPayload payload) {
         super(Component.literal("Alliance Ledger"));
@@ -73,21 +83,36 @@ public class AllianceViewScreen extends Screen {
                         .build()
         );
 
+        if (this.editingRoleForUuid != null) {
+            AllianceViewPayload.MemberEntry editingMember = findMember(this.editingRoleForUuid);
+            if (editingMember == null || editingMember.owner()) {
+                cancelRoleEditing();
+            } else {
+                buildRoleEditorWidgets(layout, editingMember);
+            }
+        }
+
         clampScroll(layout);
     }
 
     public void replacePayload(AllianceViewPayload payload) {
         this.payload = payload;
+
+        if (this.editingRoleForUuid != null && findMember(this.editingRoleForUuid) == null) {
+            cancelRoleEditing();
+        }
+
         clampScroll(calculateLayout());
         this.init();
     }
 
     private Layout calculateLayout() {
+        int panelWidth = Math.min(PANEL_WIDTH, this.width - SCREEN_MARGIN * 2);
         int panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(this.height - (SCREEN_MARGIN * 2), MAX_PANEL_HEIGHT));
 
-        int left = (this.width - PANEL_WIDTH) / 2;
+        int left = (this.width - panelWidth) / 2;
         int top = (this.height - panelHeight) / 2;
-        int right = left + PANEL_WIDTH;
+        int right = left + panelWidth;
         int bottom = top + panelHeight;
 
         int contentLeft = left + SECTION_PAD;
@@ -96,7 +121,7 @@ public class AllianceViewScreen extends Screen {
 
         int bodyTop = top + HEADER_HEIGHT + 14;
         int footerTop = bottom - FOOTER_HEIGHT;
-        int bottomButtonY = bottom - 26;
+        int bottomButtonY = bottom - 24;
 
         return new Layout(
                 left,
@@ -117,13 +142,11 @@ public class AllianceViewScreen extends Screen {
     }
 
     private int getMemberListBottom(Layout layout) {
-        return layout.footerTop() - 16;
+        return getMemberListTop(layout) + (ROW_HEIGHT * 2) + ROW_SPACING;
     }
 
     private int getVisibleRowCount(Layout layout) {
-        int listHeight = Math.max(0, getMemberListBottom(layout) - getMemberListTop(layout));
-        int rowUnit = ROW_HEIGHT + ROW_SPACING;
-        return Math.max(1, (listHeight + ROW_SPACING) / rowUnit);
+        return 2;
     }
 
     private int getMaxScroll(Layout layout) {
@@ -142,6 +165,10 @@ public class AllianceViewScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (this.editingRoleForUuid != null) {
+            return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+        }
+
         Layout layout = calculateLayout();
 
         if (isMouseOverMemberList(mouseX, mouseY, layout)) {
@@ -152,6 +179,7 @@ public class AllianceViewScreen extends Screen {
             }
 
             clampScroll(layout);
+            this.init();
             return true;
         }
 
@@ -159,14 +187,38 @@ public class AllianceViewScreen extends Screen {
     }
 
     @Override
-    public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent click, boolean doubled) {
+    public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
+        if (super.mouseClicked(click, doubled)) {
+            return true;
+        }
+
         Layout layout = calculateLayout();
 
         if (handleOwnerRowActionClick(click.x(), click.y(), click.button(), layout)) {
             return true;
         }
 
-        return super.mouseClicked(click, doubled);
+        return false;
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent input) {
+        if (this.editingRoleForUuid != null) {
+            int key = input.key();
+
+            if (key == 257 || key == 335) {
+                confirmRoleEdit();
+                return true;
+            }
+
+            if (key == 256) {
+                cancelRoleEditing();
+                this.init();
+                return true;
+            }
+        }
+
+        return super.keyPressed(input);
     }
 
     private boolean handleOwnerRowActionClick(double mouseX, double mouseY, int button, Layout layout) {
@@ -188,26 +240,134 @@ public class AllianceViewScreen extends Screen {
             int rowY = getMemberListTop(layout) + visibleIndex * (ROW_HEIGHT + ROW_SPACING);
             int rowBottom = rowY + ROW_HEIGHT;
 
-            int promoteX = layout.contentRight() - 118;
-            int kickX = layout.contentRight() - 58;
-            int actionY = rowY + 3;
+            if (mouseY < rowY || mouseY > rowBottom) {
+                continue;
+            }
 
-            boolean overPromote = mouseX >= promoteX && mouseX <= promoteX + 54 && mouseY >= actionY && mouseY <= actionY + 18;
-            boolean overKick = mouseX >= kickX && mouseX <= kickX + 44 && mouseY >= actionY && mouseY <= actionY + 18;
+            int actionsStartX = layout.contentRight() - 170;
+            int promoteX = actionsStartX;
+            int roleX = actionsStartX + 57;
+            int kickX = actionsStartX + 114;
+            int actionY = rowY + 8;
 
-            if (mouseY >= rowY && mouseY <= rowBottom) {
-                if (overPromote) {
-                    ClientPlayNetworking.send(new TransferAllianceOwnershipPayload(member.uuid()));
-                    return true;
-                }
-                if (overKick) {
-                    ClientPlayNetworking.send(new KickAllianceMemberPayload(member.uuid()));
-                    return true;
-                }
+            if (mouseX >= promoteX && mouseX <= promoteX + 52 && mouseY >= actionY && mouseY <= actionY + 18) {
+                ClientPlayNetworking.send(new TransferAllianceOwnershipPayload(member.uuid()));
+                return true;
+            }
+
+            if (mouseX >= roleX && mouseX <= roleX + 52 && mouseY >= actionY && mouseY <= actionY + 18) {
+                startRoleEditing(member);
+                return true;
+            }
+
+            if (mouseX >= kickX && mouseX <= kickX + 43 && mouseY >= actionY && mouseY <= actionY + 18) {
+                ClientPlayNetworking.send(new KickAllianceMemberPayload(member.uuid()));
+                return true;
             }
         }
 
         return false;
+    }
+
+    private void startRoleEditing(AllianceViewPayload.MemberEntry member) {
+        this.editingRoleForUuid = member.uuid();
+        this.init();
+    }
+
+    private void cancelRoleEditing() {
+        this.editingRoleForUuid = null;
+        this.roleEditBox = null;
+        this.roleConfirmButton = null;
+        this.roleCancelButton = null;
+    }
+
+    private void confirmRoleEdit() {
+        AllianceViewPayload.MemberEntry member = findMember(this.editingRoleForUuid);
+        if (member == null || this.roleEditBox == null) {
+            cancelRoleEditing();
+            this.init();
+            return;
+        }
+
+        String newRole = this.roleEditBox.getValue().trim();
+        ClientPlayNetworking.send(new SetAllianceMemberRolePayload(member.uuid(), newRole));
+        cancelRoleEditing();
+    }
+
+    private AllianceViewPayload.MemberEntry findMember(UUID uuid) {
+        if (uuid == null) {
+            return null;
+        }
+
+        for (AllianceViewPayload.MemberEntry member : this.payload.members()) {
+            if (member.uuid().equals(uuid)) {
+                return member;
+            }
+        }
+
+        return null;
+    }
+
+    private void buildRoleEditorWidgets(Layout layout, AllianceViewPayload.MemberEntry member) {
+        int memberIndex = -1;
+        for (int i = 0; i < this.payload.members().size(); i++) {
+            if (this.payload.members().get(i).uuid().equals(member.uuid())) {
+                memberIndex = i;
+                break;
+            }
+        }
+
+        if (memberIndex < 0) {
+            cancelRoleEditing();
+            return;
+        }
+
+        int visibleIndex = memberIndex - this.scrollOffset;
+        if (visibleIndex < 0 || visibleIndex >= getVisibleRowCount(layout)) {
+            cancelRoleEditing();
+            return;
+        }
+
+        int rowY = getMemberListTop(layout) + visibleIndex * (ROW_HEIGHT + ROW_SPACING);
+        int rowRight = layout.contentRight() - 8;
+
+        int confirmWidth = 20;
+        int cancelWidth = 20;
+        int gap = 4;
+        int editorWidth = 132;
+
+        int editorY = rowY + 7;
+        int cancelX = rowRight - cancelWidth - 8;
+        int confirmX = cancelX - gap - confirmWidth;
+        int editorX = confirmX - gap - editorWidth;
+
+        this.roleEditBox = new EditBox(
+                this.font,
+                editorX,
+                editorY,
+                editorWidth,
+                20,
+                Component.literal("Role")
+        );
+        this.roleEditBox.setMaxLength(ROLE_MAX_LENGTH);
+        this.roleEditBox.setValue(member.role());
+        this.roleEditBox.setHint(Component.literal("Role"));
+        this.addRenderableWidget(this.roleEditBox);
+        this.setFocused(this.roleEditBox);
+
+        this.roleConfirmButton = this.addRenderableWidget(
+                Button.builder(Component.literal("✓"), btn -> confirmRoleEdit())
+                        .bounds(confirmX, editorY, confirmWidth, 20)
+                        .build()
+        );
+
+        this.roleCancelButton = this.addRenderableWidget(
+                Button.builder(Component.literal("X"), btn -> {
+                            cancelRoleEditing();
+                            this.init();
+                        }).bounds(cancelX, editorY, cancelWidth, 20)
+                        .build()
+        );
     }
 
     private boolean isMouseOverMemberList(double mouseX, double mouseY, Layout layout) {
@@ -237,20 +397,18 @@ public class AllianceViewScreen extends Screen {
         Layout layout = calculateLayout();
         clampScroll(layout);
 
-        // Outer shadow
         context.fill(layout.left() - 10, layout.top() - 10, layout.right() + 10, layout.bottom() + 10, 0x66000000);
-
-        // Parchment frame
         context.fill(layout.left() - 1, layout.top() - 1, layout.right() + 1, layout.bottom() + 1, 0xFF8A6A3A);
         context.fill(layout.left(), layout.top(), layout.right(), layout.bottom(), 0xFFF3E7C9);
         context.fill(layout.left() + 4, layout.top() + 4, layout.right() - 4, layout.bottom() - 4, 0xFFF8EFD8);
 
-        // Soft content tint
+        int tintedBottom = getMemberListBottom(layout) + 36;
+
         context.fill(
                 layout.contentLeft(),
                 layout.bodyTop() - 6,
                 layout.contentRight(),
-                layout.footerTop() - 10,
+                tintedBottom,
                 0x11A07A44
         );
 
@@ -292,10 +450,10 @@ public class AllianceViewScreen extends Screen {
         infoY += 12;
         context.drawString(this.font, payload.allianceName(), infoX, infoY, strongColor, false);
 
-        int ownerBlockX = layout.contentLeft() + 210;
+        int ownerBlockX = layout.contentLeft() + Math.max(170, layout.contentWidth() / 2 + 10);
         int ownerBlockY = layout.bodyTop();
 
-        context.drawString(this.font, "Owner", ownerBlockX, ownerBlockY, accentColor, false);
+        context.drawString(this.font, "Founder", ownerBlockX, ownerBlockY, accentColor, false);
         ownerBlockY += 12;
         context.drawString(this.font, payload.ownerName(), ownerBlockX, ownerBlockY, strongColor, false);
 
@@ -306,55 +464,60 @@ public class AllianceViewScreen extends Screen {
         context.drawString(this.font, membersText, infoX, metaY, bodyColor, false);
         context.drawString(this.font, invitesText, ownerBlockX, metaY, bodyColor, false);
 
-        int listTitleY = layout.bodyTop() + 52;
-        context.drawString(this.font, "Member Roster", layout.contentLeft(), listTitleY, strongColor, false);
+        int listTitleY = layout.bodyTop() + 50;
+        int listHeaderBaselineY = listTitleY + 2;
+
+        context.drawString(this.font, "Member Roster", layout.contentLeft() + 4, listHeaderBaselineY, strongColor, false);
 
         String scrollText = "Showing " + (this.scrollOffset + 1) + "-" +
                 Math.min(this.scrollOffset + getVisibleRowCount(layout), payload.members().size()) +
                 " of " + payload.members().size();
         int scrollWidth = this.font.width(scrollText);
-        context.drawString(this.font, scrollText, layout.contentRight() - scrollWidth, listTitleY, accentColor, false);
+        context.drawString(this.font, scrollText, layout.contentRight() - scrollWidth - 4, listHeaderBaselineY, accentColor, false);
 
         int listTop = getMemberListTop(layout);
         int listBottom = getMemberListBottom(layout);
 
         context.fill(
-                layout.contentLeft() + 4,
-                listTop - 6,
-                layout.contentRight() - 4,
+                layout.contentLeft() + 8,
+                listTop - 2,
+                layout.contentRight() - 8,
                 listBottom,
                 0x22D9C39A
         );
         context.fill(
-                layout.contentLeft() + 4,
-                listTop - 6,
-                layout.contentRight() - 4,
-                listTop - 5,
+                layout.contentLeft() + 8,
+                listTop - 2,
+                layout.contentRight() - 8,
+                listTop - 1,
                 0x668A6A3A
         );
         context.fill(
-                layout.contentLeft() + 4,
+                layout.contentLeft() + 8,
                 listBottom - 1,
-                layout.contentRight() - 4,
+                layout.contentRight() - 8,
                 listBottom,
                 0x668A6A3A
         );
-
         renderMemberRows(context, mouseX, mouseY, layout, strongColor, bodyColor, accentColor);
 
-        int dividerY = layout.footerTop() - 8;
+        String footerText = AllianceClientState.isOwner()
+                ? "Owners may promote, edit roles, or remove members."
+                : "Only the founder may change roles or remove members.";
+
+        int rosterBottom = getMemberListBottom(layout);
+        int footerTextY = rosterBottom + 10;
+        int dividerY = footerTextY + this.font.lineHeight + 6;
+
+        context.drawString(this.font, footerText, layout.contentLeft() + 8, footerTextY, bodyColor, false);
+
         context.fill(
-                layout.contentLeft() + 4,
+                layout.contentLeft() + 8,
                 dividerY,
-                layout.contentRight() - 4,
+                layout.contentRight() - 8,
                 dividerY + 1,
                 0x668A6A3A
         );
-
-        String footerText = AllianceClientState.isOwner()
-                ? "Owners can promote or remove members from the roster."
-                : "Only the owner may promote or remove members.";
-        context.drawString(this.font, footerText, layout.contentLeft() + 8, dividerY - 14, bodyColor, false);
     }
 
     private void renderMemberRows(
@@ -412,12 +575,12 @@ public class AllianceViewScreen extends Screen {
             int faceY = rowY + (ROW_HEIGHT - FACE_SIZE) / 2;
             renderPlayerFace(context, member.uuid(), faceX, faceY);
 
-            int textX = faceX + FACE_SIZE + 8;
-            int textY = rowY + (ROW_HEIGHT - this.font.lineHeight) / 2;
+            int nameX = faceX + FACE_SIZE + 8;
+            int nameY = rowY + 5;
+            int roleY = rowY + 17;
 
-            String memberText = member.name();
-            int memberColor = member.owner() ? strongColor : bodyColor;
-            context.drawString(this.font, memberText, textX, textY, memberColor, false);
+            context.drawString(this.font, member.name(), nameX, nameY, member.owner() ? strongColor : bodyColor, false);
+            context.drawString(this.font, member.role(), nameX, roleY, accentColor, false);
 
             if (member.owner()) {
                 String ownerLabel = "Founder";
@@ -426,28 +589,34 @@ public class AllianceViewScreen extends Screen {
                         this.font,
                         ownerLabel,
                         rowRight - ownerWidth - 10,
-                        textY,
+                        rowY + 10,
                         accentColor,
                         false
                 );
                 continue;
             }
 
-            if (AllianceClientState.isOwner()) {
-                int promoteX = rowRight - 110;
-                int kickX = rowRight - 52;
-                int buttonY = rowY + 3;
+            if (AllianceClientState.isOwner() && this.editingRoleForUuid == null) {
+                int actionsStartX = rowRight - 170;
+                int buttonY = rowY + 8;
+                int promoteX = actionsStartX;
+                int roleX = actionsStartX + 57;
+                int kickX = actionsStartX + 114;
 
-                boolean overPromote = mouseX >= promoteX && mouseX <= promoteX + 54 && mouseY >= buttonY && mouseY <= buttonY + 18;
-                boolean overKick = mouseX >= kickX && mouseX <= kickX + 44 && mouseY >= buttonY && mouseY <= buttonY + 18;
+                boolean overPromote = mouseX >= promoteX && mouseX <= promoteX + 52 && mouseY >= buttonY && mouseY <= buttonY + 18;
+                boolean overRole = mouseX >= roleX && mouseX <= roleX + 52 && mouseY >= buttonY && mouseY <= buttonY + 18;
+                boolean overKick = mouseX >= kickX && mouseX <= kickX + 43 && mouseY >= buttonY && mouseY <= buttonY + 18;
 
                 int promoteBg = overPromote ? 0x668A6A3A : 0x338A6A3A;
+                int roleBg = overRole ? 0x667E6A48 : 0x337E6A48;
                 int kickBg = overKick ? 0x66A64A3A : 0x33A64A3A;
 
-                context.fill(promoteX, buttonY, promoteX + 54, buttonY + 18, promoteBg);
-                context.fill(kickX, buttonY, kickX + 44, buttonY + 18, kickBg);
+                context.fill(promoteX, buttonY, promoteX + 52, buttonY + 18, promoteBg);
+                context.fill(roleX, buttonY, roleX + 52, buttonY + 18, roleBg);
+                context.fill(kickX, buttonY, kickX + 43, buttonY + 18, kickBg);
 
-                context.drawString(this.font, "Promote", promoteX + 6, buttonY + 5, 0xFFFFFFFF, false);
+                context.drawString(this.font, "Promote", promoteX + 5, buttonY + 5, 0xFFFFFFFF, false);
+                context.drawString(this.font, "Role", roleX + 14, buttonY + 5, 0xFFFFFFFF, false);
                 context.drawString(this.font, "Kick", kickX + 10, buttonY + 5, 0xFFFFFFFF, false);
             }
         }

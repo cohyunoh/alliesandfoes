@@ -117,10 +117,13 @@ public class AllianceManager {
         List<AllianceViewPayload.MemberEntry> members = new ArrayList<>();
         for (UUID memberUuid : alliance.getMemberUuids()) {
             String name = knownNames.getOrDefault(memberUuid, memberUuid.toString());
+            String role = alliance.getRole(memberUuid);
+
             members.add(new AllianceViewPayload.MemberEntry(
                     memberUuid,
                     name,
-                    memberUuid.equals(alliance.getOwnerUuid())
+                    memberUuid.equals(alliance.getOwnerUuid()),
+                    role
             ));
         }
 
@@ -350,6 +353,39 @@ public class AllianceManager {
         sendViewScreen(server, actor);
 
         return ActionResult.success("Alliance ownership transferred.");
+    }
+
+    public ActionResult setMemberRole(MinecraftServer server, ServerPlayer actor, UUID targetUuid, String rawRole) {
+        Alliance alliance = getAllianceFor(actor.getUUID());
+        if (alliance == null) {
+            return ActionResult.failure("You are not in an alliance.");
+        }
+
+        if (!alliance.getOwnerUuid().equals(actor.getUUID())) {
+            return ActionResult.failure("Only the alliance owner can change member roles.");
+        }
+
+        if (!alliance.hasMember(targetUuid)) {
+            return ActionResult.failure("That player is not a member of your alliance.");
+        }
+
+        if (targetUuid.equals(actor.getUUID())) {
+            return ActionResult.failure("You cannot change your own founder role.");
+        }
+
+        String sanitizedRole = Alliance.sanitizeRole(rawRole);
+        alliance.setRole(targetUuid, sanitizedRole);
+
+        ServerPlayer target = server.getPlayerList().getPlayer(targetUuid);
+        if (target != null) {
+            target.displayClientMessage(
+                    Component.literal("Your alliance role is now: " + sanitizedRole),
+                    false
+            );
+        }
+
+        sendViewScreen(server, actor);
+        return ActionResult.success("Updated member role to: " + sanitizedRole);
     }
 
     public record CreationResult(boolean success, String message, Alliance alliance) {

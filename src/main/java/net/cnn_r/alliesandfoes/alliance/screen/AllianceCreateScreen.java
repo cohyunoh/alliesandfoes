@@ -30,7 +30,7 @@ public class AllianceCreateScreen extends Screen {
     private static final int SECTION_PAD = 12;
     private static final int NAME_BOX_HEIGHT = 20;
     private static final int TOOLBAR_HEIGHT = 20;
-    private static final int FOOTER_HEIGHT = 64;
+    private static final int FOOTER_HEIGHT = 78;
 
     private static final int ROW_HEIGHT = 24;
     private static final int ROW_SPACING = 4;
@@ -308,12 +308,45 @@ public class AllianceCreateScreen extends Screen {
         context.fill(layout.left(), layout.top(), layout.right(), layout.bottom(), 0xFFF3E7C9);
         context.fill(layout.left() + 4, layout.top() + 4, layout.right() - 4, layout.bottom() - 4, 0xFFF8EFD8);
 
-        // Soft inner tint
+        int sectionLeft = layout.contentLeft() + 8;
+        int sectionRight = layout.contentRight() - 8;
+
+        int listTop = getListInnerTop(layout);
+        int listBottom = getListInnerBottom(layout);
+
+        // Top section: label, textbox, description, roster header, availability, buttons
+        int topSectionTop = layout.nameBoxY() - 24;
+        int topSectionBottom = layout.toolbarY() + TOOLBAR_HEIGHT + 8;
+
+        // List section
+        int listSectionTop = listTop - 2;
+        int listSectionBottom = listBottom;
+
+        // Footer section: showing count, selected count, founder note
+        int footerSectionTop = listBottom + 8;
+        int footerSectionBottom = layout.bottomButtonY() - 8;
+
         context.fill(
-                layout.contentLeft(),
-                layout.nameBoxY() - 28,
-                layout.contentRight(),
-                layout.footerTop() - 10,
+                sectionLeft,
+                topSectionTop,
+                sectionRight,
+                topSectionBottom,
+                0x11A07A44
+        );
+
+        context.fill(
+                sectionLeft,
+                listSectionTop,
+                sectionRight,
+                listSectionBottom,
+                0x22D9C39A
+        );
+
+        context.fill(
+                sectionLeft,
+                footerSectionTop,
+                sectionRight,
+                footerSectionBottom,
                 0x11A07A44
         );
 
@@ -329,56 +362,69 @@ public class AllianceCreateScreen extends Screen {
         int underlineY = titleY + this.font.lineHeight + 3;
         context.fill(titleX - 4, underlineY, titleX + titleWidth + 4, underlineY + 1, 0x668A6A3A);
 
-        context.drawString(this.font, "Alliance Name", layout.contentLeft(), layout.nameBoxY() - 18, accentColor, false);
-        context.drawString(this.font, "Draft a short name for your alliance charter.", layout.contentLeft(), layout.nameBoxY() + 30, bodyColor, false);
+        // Name section
+        context.drawString(this.font, "Alliance Name", layout.contentLeft() + 4, layout.nameBoxY() - 18, accentColor, false);
+        context.drawString(
+                this.font,
+                "Draft a short name for your alliance charter.",
+                layout.contentLeft() + 4,
+                layout.nameBoxY() + 30,
+                bodyColor,
+                false
+        );
 
-        int toolbarTextY = layout.toolbarY() - 12;
-        context.drawString(this.font, "Invite Roster", layout.contentLeft(), toolbarTextY, strongColor, false);
+        // Roster header section
+        int rosterHeaderY = layout.toolbarY() - 12;
+        context.drawString(this.font, "Invite Roster", layout.contentLeft() + 4, rosterHeaderY, strongColor, false);
 
         String onlineText = "Available: " + this.candidates.size();
         int onlineWidth = this.font.width(onlineText);
         context.drawString(
                 this.font,
                 onlineText,
-                layout.contentRight() - onlineWidth,
-                toolbarTextY,
+                layout.contentRight() - onlineWidth - 4,
+                rosterHeaderY,
                 accentColor,
                 false
         );
 
-        int listTop = layout.listStartY() - 6;
-        int listBottom = layout.footerTop() - 12;
-
+        // List section frame
         context.fill(
-                layout.contentLeft() + 4,
-                listTop,
-                layout.contentRight() - 4,
-                listBottom,
-                0x22D9C39A
-        );
-        context.fill(
-                layout.contentLeft() + 4,
-                listTop,
-                layout.contentRight() - 4,
-                listTop + 1,
+                sectionLeft,
+                listSectionTop,
+                sectionRight,
+                listSectionTop + 1,
                 0x668A6A3A
         );
         context.fill(
-                layout.contentLeft() + 4,
-                listBottom - 1,
-                layout.contentRight() - 4,
-                listBottom,
+                sectionLeft,
+                listSectionBottom - 1,
+                sectionRight,
+                listSectionBottom,
                 0x668A6A3A
         );
 
         renderPlayerRows(context, mouseX, mouseY, layout, bodyColor, strongColor, accentColor);
+
+        // Footer section content
+        String showingText = "Showing " + (this.scrollOffset + 1) + "-" +
+                Math.min(this.scrollOffset + getVisibleRowCount(layout), this.candidates.size()) +
+                " of " + this.candidates.size();
+        context.drawString(
+                this.font,
+                showingText,
+                layout.contentLeft() + 8,
+                footerSectionTop + 4,
+                accentColor,
+                false
+        );
 
         String selectionText = "Selected: " + this.selectedPlayers.size();
         context.drawString(
                 this.font,
                 selectionText,
                 layout.contentLeft() + 8,
-                layout.footerTop() + 6,
+                footerSectionTop + 18,
                 strongColor,
                 false
         );
@@ -388,16 +434,16 @@ public class AllianceCreateScreen extends Screen {
                 this.font,
                 footerText,
                 layout.contentLeft() + 8,
-                layout.footerTop() + 18,
+                footerSectionTop + 32,
                 bodyColor,
                 false
         );
 
-        int dividerY = layout.footerTop() - 8;
+        int dividerY = footerSectionBottom - 1;
         context.fill(
-                layout.contentLeft() + 4,
+                sectionLeft,
                 dividerY,
-                layout.contentRight() - 4,
+                sectionRight,
                 dividerY + 1,
                 0x668A6A3A
         );
@@ -487,10 +533,6 @@ public class AllianceCreateScreen extends Screen {
                 );
             }
         }
-
-        int listBottom = getListInnerBottom(layout);
-        String showingText = "Showing " + (startIndex + 1) + "-" + endIndex + " of " + this.candidates.size();
-        context.drawString(this.font, showingText, layout.contentLeft() + 8, listBottom - 10, accentColor, false);
     }
 
     @Override
