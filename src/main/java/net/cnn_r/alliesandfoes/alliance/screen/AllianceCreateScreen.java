@@ -17,12 +17,22 @@ import java.util.Set;
 import java.util.UUID;
 
 public class AllianceCreateScreen extends Screen {
-    private static final int PANEL_WIDTH = 320;
-    private static final int PANEL_TOP = 28;
-    private static final int PANEL_BOTTOM_MARGIN = 18;
-    private static final int ROW_HEIGHT = 20;
-    private static final int ROW_SPACING = 4;
-    private static final int MAX_VISIBLE_ROWS = 8;
+    private static final int PANEL_WIDTH = 360;
+
+    private static final int MIN_PANEL_HEIGHT = 250;
+    private static final int MAX_PANEL_HEIGHT = 380;
+    private static final int SCREEN_MARGIN = 18;
+
+    private static final int HEADER_HEIGHT = 24;
+    private static final int SECTION_PAD = 12;
+    private static final int NAME_BOX_HEIGHT = 20;
+    private static final int TOOLBAR_HEIGHT = 20;
+    private static final int FOOTER_HEIGHT = 64;
+
+    private static final int LIST_ROW_HEIGHT = 20;
+    private static final int LIST_ROW_SPACING = 4;
+    private static final int MIN_VISIBLE_ROWS = 3;
+    private static final int MAX_VISIBLE_ROWS = 10;
 
     private final Screen parent;
     private final List<AllianceCreationScreenPayload.CandidateEntry> candidates;
@@ -33,10 +43,11 @@ public class AllianceCreateScreen extends Screen {
     private Button prevPageButton;
     private Button nextPageButton;
     private Button selectVisibleButton;
-    private Button clearAllButton;
+    private Button clearSelectionButton;
 
     private int page = 0;
     private int maxPage = 0;
+    private int visibleRows = 6;
 
     public AllianceCreateScreen(Screen parent, List<AllianceCreationScreenPayload.CandidateEntry> candidates) {
         super(Component.literal("Create Alliance"));
@@ -49,18 +60,17 @@ public class AllianceCreateScreen extends Screen {
     protected void init() {
         this.clearWidgets();
 
-        int left = getPanelLeft();
-        int top = PANEL_TOP;
+        Layout layout = calculateLayout();
 
-        this.maxPage = Math.max(0, (this.candidates.size() - 1) / MAX_VISIBLE_ROWS);
+        this.maxPage = Math.max(0, (this.candidates.size() - 1) / this.visibleRows);
         this.page = Math.max(0, Math.min(this.page, this.maxPage));
 
         this.allianceNameBox = new EditBox(
                 this.font,
-                left,
-                top + 20,
-                PANEL_WIDTH,
-                20,
+                layout.contentLeft(),
+                layout.nameBoxY(),
+                layout.contentWidth(),
+                NAME_BOX_HEIGHT,
                 Component.literal("Alliance Name")
         );
         this.allianceNameBox.setMaxLength(24);
@@ -69,73 +79,71 @@ public class AllianceCreateScreen extends Screen {
         this.addRenderableWidget(this.allianceNameBox);
         this.setInitialFocus(this.allianceNameBox);
 
-        int actionTop = top + 54;
+        int toolbarY = layout.toolbarY();
+        int left = layout.contentLeft();
+        int right = layout.contentRight();
+
         this.selectVisibleButton = this.addRenderableWidget(
-                Button.builder(Component.literal("Select Visible"), btn -> {
+                Button.builder(Component.literal("Select Page"), btn -> {
                     for (AllianceCreationScreenPayload.CandidateEntry entry : getVisibleCandidates()) {
                         this.selectedPlayers.add(entry.uuid());
                     }
-                    this.rebuildScreen();
-                }).bounds(left, actionTop, 154, 20).build()
+                    rebuildPreservingName();
+                }).bounds(left, toolbarY, 104, TOOLBAR_HEIGHT).build()
         );
 
-        this.clearAllButton = this.addRenderableWidget(
-                Button.builder(Component.literal("Clear All"), btn -> {
+        this.clearSelectionButton = this.addRenderableWidget(
+                Button.builder(Component.literal("Clear"), btn -> {
                     this.selectedPlayers.clear();
-                    this.rebuildScreen();
-                }).bounds(left + 166, actionTop, 154, 20).build()
+                    rebuildPreservingName();
+                }).bounds(left + 110, toolbarY, 80, TOOLBAR_HEIGHT).build()
         );
 
-        int listTop = top + 88;
-        buildCandidateButtons(left, listTop);
-
-        int pagerY = listTop + MAX_VISIBLE_ROWS * (ROW_HEIGHT + ROW_SPACING) + 2;
         this.prevPageButton = this.addRenderableWidget(
-                Button.builder(Component.literal("< Prev"), btn -> {
+                Button.builder(Component.literal("<"), btn -> {
                     if (this.page > 0) {
                         this.page--;
-                        this.rebuildScreen();
+                        rebuildPreservingName();
                     }
-                }).bounds(left, pagerY, 100, 20).build()
+                }).bounds(right - 74, toolbarY, 32, TOOLBAR_HEIGHT).build()
         );
 
         this.nextPageButton = this.addRenderableWidget(
-                Button.builder(Component.literal("Next >"), btn -> {
+                Button.builder(Component.literal(">"), btn -> {
                     if (this.page < this.maxPage) {
                         this.page++;
-                        this.rebuildScreen();
+                        rebuildPreservingName();
                     }
-                }).bounds(left + 220, pagerY, 100, 20).build()
+                }).bounds(right - 36, toolbarY, 32, TOOLBAR_HEIGHT).build()
         );
 
-        int bottomY = this.height - PANEL_BOTTOM_MARGIN - 20;
+        buildCandidateButtons(layout);
+
+        int bottomButtonY = layout.bottomButtonY();
+        int buttonWidth = (layout.contentWidth() - 12) / 2;
+
         this.createButton = this.addRenderableWidget(
                 Button.builder(Component.literal("Create Alliance"), btn -> submit())
-                        .bounds(left, bottomY, 154, 20)
+                        .bounds(left, bottomButtonY, buttonWidth, 20)
                         .build()
         );
 
         this.addRenderableWidget(
                 Button.builder(Component.literal("Cancel"), btn -> onClose())
-                        .bounds(left + 166, bottomY, 154, 20)
+                        .bounds(left + buttonWidth + 12, bottomButtonY, buttonWidth, 20)
                         .build()
         );
 
-        updatePagerButtons();
         updateCreateButtonState();
+        updatePageButtons();
     }
 
-    private void buildCandidateButtons(int left, int listTop) {
-        List<AllianceCreationScreenPayload.CandidateEntry> visible = getVisibleCandidates();
+    private void buildCandidateButtons(Layout layout) {
+        List<AllianceCreationScreenPayload.CandidateEntry> visibleCandidates = getVisibleCandidates();
 
-        for (int i = 0; i < MAX_VISIBLE_ROWS; i++) {
-            int y = listTop + i * (ROW_HEIGHT + ROW_SPACING);
-
-            if (i >= visible.size()) {
-                continue;
-            }
-
-            AllianceCreationScreenPayload.CandidateEntry candidate = visible.get(i);
+        for (int i = 0; i < visibleCandidates.size(); i++) {
+            AllianceCreationScreenPayload.CandidateEntry candidate = visibleCandidates.get(i);
+            int y = layout.listStartY() + i * (LIST_ROW_HEIGHT + LIST_ROW_SPACING);
 
             Button button = Button.builder(getCandidateLabel(candidate), btn -> {
                 if (this.selectedPlayers.contains(candidate.uuid())) {
@@ -143,20 +151,21 @@ public class AllianceCreateScreen extends Screen {
                 } else {
                     this.selectedPlayers.add(candidate.uuid());
                 }
-
-                this.rebuildScreen();
-            }).bounds(left, y, PANEL_WIDTH, ROW_HEIGHT).build();
+                rebuildPreservingName();
+            }).bounds(layout.contentLeft(), y, layout.contentWidth(), LIST_ROW_HEIGHT).build();
 
             this.addRenderableWidget(button);
         }
     }
 
     private List<AllianceCreationScreenPayload.CandidateEntry> getVisibleCandidates() {
-        int start = this.page * MAX_VISIBLE_ROWS;
-        int end = Math.min(start + MAX_VISIBLE_ROWS, this.candidates.size());
+        int start = this.page * this.visibleRows;
+        int end = Math.min(start + this.visibleRows, this.candidates.size());
+
         if (start >= end) {
             return List.of();
         }
+
         return this.candidates.subList(start, end);
     }
 
@@ -174,7 +183,7 @@ public class AllianceCreateScreen extends Screen {
         this.createButton.active = !trimmed.isEmpty();
     }
 
-    private void updatePagerButtons() {
+    private void updatePageButtons() {
         if (this.prevPageButton != null) {
             this.prevPageButton.active = this.page > 0;
         }
@@ -184,8 +193,8 @@ public class AllianceCreateScreen extends Screen {
         if (this.selectVisibleButton != null) {
             this.selectVisibleButton.active = !getVisibleCandidates().isEmpty();
         }
-        if (this.clearAllButton != null) {
-            this.clearAllButton.active = !this.selectedPlayers.isEmpty();
+        if (this.clearSelectionButton != null) {
+            this.clearSelectionButton.active = !this.selectedPlayers.isEmpty();
         }
     }
 
@@ -201,64 +210,172 @@ public class AllianceCreateScreen extends Screen {
         ));
     }
 
-    private void rebuildScreen() {
-        String name = this.allianceNameBox != null ? this.allianceNameBox.getValue() : "";
+    private void rebuildPreservingName() {
+        String currentName = this.allianceNameBox != null ? this.allianceNameBox.getValue() : "";
         this.init();
-        this.allianceNameBox.setValue(name);
+        if (this.allianceNameBox != null) {
+            this.allianceNameBox.setValue(currentName);
+        }
     }
 
-    private int getPanelLeft() {
-        return (this.width - PANEL_WIDTH) / 2;
-    }
+    private Layout calculateLayout() {
+        int panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(this.height - (SCREEN_MARGIN * 2), MAX_PANEL_HEIGHT));
+        int left = (this.width - PANEL_WIDTH) / 2;
+        int top = (this.height - panelHeight) / 2;
+        int right = left + PANEL_WIDTH;
+        int bottom = top + panelHeight;
 
-    private int getPanelBottom() {
-        return this.height - PANEL_BOTTOM_MARGIN;
+        int contentLeft = left + SECTION_PAD;
+        int contentRight = right - SECTION_PAD;
+        int contentWidth = contentRight - contentLeft;
+
+        int nameBoxY = top + HEADER_HEIGHT + 18;
+
+        int toolbarY = nameBoxY + NAME_BOX_HEIGHT + 34;
+
+        int listStartY = toolbarY + TOOLBAR_HEIGHT + 14;
+
+        int footerTop = bottom - FOOTER_HEIGHT;
+        int bottomButtonY = bottom - 30;
+
+        int listBottom = footerTop - 14;
+        int listHeight = Math.max(0, listBottom - listStartY);
+
+        int rowUnit = LIST_ROW_HEIGHT + LIST_ROW_SPACING;
+        int computedRows = rowUnit <= 0 ? MIN_VISIBLE_ROWS : (listHeight + LIST_ROW_SPACING) / rowUnit;
+        this.visibleRows = Math.max(MIN_VISIBLE_ROWS, Math.min(computedRows, MAX_VISIBLE_ROWS));
+
+        return new Layout(
+                left,
+                top,
+                right,
+                bottom,
+                contentLeft,
+                contentRight,
+                contentWidth,
+                nameBoxY,
+                toolbarY,
+                listStartY,
+                footerTop,
+                bottomButtonY
+        );
     }
 
     @Override
     public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, this.width, this.height, 0xCC000000);
 
-        int left = getPanelLeft();
-        int top = PANEL_TOP;
-        int bottom = getPanelBottom();
+        Layout layout = calculateLayout();
 
-        context.fill(left - 8, top - 8, left + PANEL_WIDTH + 8, bottom, 0xAA111111);
+        int left = layout.left();
+        int top = layout.top();
+        int right = layout.right();
+        int bottom = layout.bottom();
+
+        context.fill(left - 10, top - 10, right + 10, bottom + 10, 0x88000000);
+        context.fill(left, top, right, bottom, 0xEE1B1B1B);
+
+        context.fill(left, top, right, top + HEADER_HEIGHT, 0xFF2A2A2A);
+
+        context.fill(
+                layout.contentLeft(),
+                layout.nameBoxY() - 10,
+                layout.contentRight(),
+                layout.nameBoxY() + NAME_BOX_HEIGHT + 14,
+                0x66222222
+        );
+
+        context.fill(
+                layout.contentLeft(),
+                layout.toolbarY() - 6,
+                layout.contentRight(),
+                layout.toolbarY() + TOOLBAR_HEIGHT + 6,
+                0x66303030
+        );
+
+        int listBodyTop = layout.listStartY() - 6;
+        int listBodyBottom = layout.footerTop() - 12;
+        context.fill(
+                layout.contentLeft(),
+                listBodyTop,
+                layout.contentRight(),
+                listBodyBottom,
+                0x44101010
+        );
+
+        context.fill(
+                layout.contentLeft(),
+                layout.footerTop(),
+                layout.contentRight(),
+                layout.footerTop() + 1,
+                0x66FFFFFF
+        );
 
         super.render(context, mouseX, mouseY, delta);
 
-        context.drawCenteredString(this.font, this.title, this.width / 2, top - 2, 0xFFFFFF);
-        context.drawString(this.font, "Alliance Name", left, top + 8, 0xC0C0C0);
-        context.drawString(this.font, "Invite Players", left, top + 74, 0xC0C0C0);
+        context.drawCenteredString(this.font, this.title, this.width / 2, top + 8, 0xFFFFFF);
 
-        int listTop = top + 88;
-        if (this.candidates.isEmpty()) {
-            context.drawString(this.font, "No eligible online players found.", left, listTop + 6, 0xFF9090);
-        }
+        int labelX = layout.contentLeft();
+        context.drawString(this.font, "Name", labelX, layout.nameBoxY() - 18, 0xBFBFBF);
+        context.drawString(this.font, "Choose a short, recognizable alliance name.", labelX, layout.nameBoxY() + 30, 0x8FBBBBBB);
 
-        int pagerY = listTop + MAX_VISIBLE_ROWS * (ROW_HEIGHT + ROW_SPACING) + 8;
-        context.drawCenteredString(
+        int toolbarTextY = layout.toolbarY() - 12;
+        context.drawString(this.font, "Invite Players", labelX, toolbarTextY, 0xFFFFFF);
+
+        String pageText = "Page " + (this.page + 1) + " / " + Math.max(1, this.maxPage + 1);
+        context.drawString(
                 this.font,
-                Component.literal("Page " + (this.page + 1) + " / " + Math.max(1, this.maxPage + 1)),
-                this.width / 2,
-                pagerY + 6,
-                0xAAAAAA
+                pageText,
+                layout.contentRight() - this.font.width(pageText),
+                toolbarTextY,
+                0xBFBFBF
         );
+
+        if (this.candidates.isEmpty()) {
+            context.drawCenteredString(
+                    this.font,
+                    Component.literal("No eligible online players found."),
+                    this.width / 2,
+                    layout.listStartY() + 12,
+                    0xFF9090
+            );
+        } else {
+            int start = this.page * this.visibleRows;
+            int end = Math.min(start + this.visibleRows, this.candidates.size());
+
+            for (int i = 0; i < this.visibleRows; i++) {
+                int rowY = layout.listStartY() + i * (LIST_ROW_HEIGHT + LIST_ROW_SPACING) - 2;
+                int rowBottom = rowY + LIST_ROW_HEIGHT + 2;
+
+                if (i % 2 == 0) {
+                    context.fill(layout.contentLeft() + 4, rowY, layout.contentRight() - 4, rowBottom, 0x21FFFFFF);
+                }
+            }
+
+            String showingText = "Showing " + (start + 1) + "-" + end + " of " + this.candidates.size();
+            context.drawString(
+                    this.font,
+                    showingText,
+                    labelX,
+                    listBodyBottom - 22,
+                    0x9FBBBBBB
+            );
+        }
 
         context.drawString(
                 this.font,
                 "Selected: " + this.selectedPlayers.size(),
-                left,
-                this.height - PANEL_BOTTOM_MARGIN - 34,
-                0xAAAAAA
+                labelX,
+                layout.footerTop() + 6,
+                0xFFFFFF
         );
 
         context.drawString(
                 this.font,
-                "Alliance owner is added automatically.",
-                left,
-                this.height - PANEL_BOTTOM_MARGIN - 46,
-                0x7FD0D0D0
+                "The creator is automatically included as the owner.",
+                labelX,
+                layout.footerTop() + 10,
+                0x8FBBBBBB
         );
     }
 
@@ -267,5 +384,21 @@ public class AllianceCreateScreen extends Screen {
         if (this.minecraft != null) {
             this.minecraft.setScreen(this.parent);
         }
+    }
+
+    private record Layout(
+            int left,
+            int top,
+            int right,
+            int bottom,
+            int contentLeft,
+            int contentRight,
+            int contentWidth,
+            int nameBoxY,
+            int toolbarY,
+            int listStartY,
+            int footerTop,
+            int bottomButtonY
+    ) {
     }
 }
