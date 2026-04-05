@@ -2,8 +2,10 @@ package net.cnn_r.alliesandfoes.alliance;
 
 import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
+import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
 import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
 import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
+import net.cnn_r.alliesandfoes.network.JoinAllianceScreenPayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -92,6 +94,42 @@ public class AllianceManager {
                 false,
                 "",
                 candidates
+        ));
+    }
+
+    public void sendJoinScreen(MinecraftServer server, ServerPlayer requester) {
+        Alliance existing = getAllianceFor(requester.getUUID());
+        if (existing != null) {
+            ServerPlayNetworking.send(requester, new JoinAllianceScreenPayload(
+                    true,
+                    existing.getName(),
+                    List.of()
+            ));
+            return;
+        }
+
+        Map<UUID, String> knownNames = new LinkedHashMap<>();
+        for (ServerPlayer onlinePlayer : server.getPlayerList().getPlayers()) {
+            knownNames.put(onlinePlayer.getUUID(), onlinePlayer.getGameProfile().name());
+        }
+
+        List<JoinAllianceScreenPayload.Entry> entries = new ArrayList<>();
+        for (Alliance alliance : this.alliancesById.values()) {
+            String ownerName = knownNames.getOrDefault(alliance.getOwnerUuid(), alliance.getOwnerUuid().toString());
+
+            entries.add(new JoinAllianceScreenPayload.Entry(
+                    alliance.getId(),
+                    alliance.getName(),
+                    alliance.getOwnerUuid(),
+                    ownerName,
+                    alliance.getMemberUuids().size()
+            ));
+        }
+
+        ServerPlayNetworking.send(requester, new JoinAllianceScreenPayload(
+                false,
+                "",
+                entries
         ));
     }
 
@@ -205,6 +243,39 @@ public class AllianceManager {
                 : "Alliance created.";
 
         return CreationResult.success(alliance, message);
+    }
+
+    public ActionResult requestJoinAlliance(MinecraftServer server, ServerPlayer requester, UUID allianceId) {
+        if (isPlayerInAlliance(requester.getUUID())) {
+            return ActionResult.failure("You are already in an alliance.");
+        }
+
+        Alliance alliance = getAllianceById(allianceId);
+        if (alliance == null) {
+            return ActionResult.failure("That alliance no longer exists.");
+        }
+
+        if (requester.getUUID().equals(alliance.getOwnerUuid())) {
+            return ActionResult.failure("You already lead that alliance.");
+        }
+
+        if (alliance.hasMember(requester.getUUID())) {
+            return ActionResult.failure("You are already in that alliance.");
+        }
+
+        ServerPlayer owner = server.getPlayerList().getPlayer(alliance.getOwnerUuid());
+        if (owner == null) {
+            return ActionResult.failure("That alliance founder is not online.");
+        }
+
+        ServerPlayNetworking.send(owner, new AllianceJoinRequestPayload(
+                alliance.getId(),
+                alliance.getName(),
+                requester.getUUID(),
+                requester.getGameProfile().name()
+        ));
+
+        return ActionResult.success("Join request sent to " + alliance.getName() + ".");
     }
 
     public ActionResult respondToInvite(MinecraftServer server, ServerPlayer player, UUID allianceId, boolean accept) {

@@ -13,6 +13,7 @@ import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
 import net.cnn_r.alliesandfoes.network.RequestAllianceCreationScreenPayload;
 import net.cnn_r.alliesandfoes.network.RequestAllianceViewPayload;
+import net.cnn_r.alliesandfoes.network.RequestJoinAllianceScreenPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -33,20 +34,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MapScreen extends Screen {
-    private MapTexture mapTexture;
-    private MapRenderer renderer;
-    private ChunkCache cache;
-    private ChunkValueCache chunkValueCache;
-    private PlayerMarkerCache playerMarkerCache;
-
-    private double cameraBlockX;
-    private double cameraBlockZ;
-    private boolean followPlayer = true;
-
-    private ChunkPos hoveredChunk;
-    private Button allianceButton;
-    private Button inviteButton;
-
     private static final int BLOCK_PIXEL_SIZE = 2;
     private static final int TEXTURE_SIZE = 512;
     private static final float VALUE_BORDER_ZOOM_THRESHOLD = 0.9f;
@@ -59,6 +46,27 @@ public class MapScreen extends Screen {
     private static final int STRUCTURE_HEATMAP_MEDIUM = 0x4433AAFF;
     private static final int STRUCTURE_HEATMAP_WEAK = 0x332266CC;
     private static final float STRUCTURE_HEATMAP_ZOOM_THRESHOLD = 0.85f;
+
+    private static final int TOP_BUTTON_X = 20;
+    private static final int TOP_BUTTON_Y = 20;
+    private static final int TOP_BUTTON_WIDTH = 120;
+    private static final int TOP_BUTTON_HEIGHT = 20;
+    private static final int TOP_BUTTON_SPACING = 6;
+
+    private MapTexture mapTexture;
+    private MapRenderer renderer;
+    private ChunkCache cache;
+    private ChunkValueCache chunkValueCache;
+    private PlayerMarkerCache playerMarkerCache;
+
+    private double cameraBlockX;
+    private double cameraBlockZ;
+    private boolean followPlayer = true;
+
+    private ChunkPos hoveredChunk;
+    private Button allianceButton;
+    private Button joinAllianceButton;
+    private Button inviteButton;
 
     public MapScreen() {
         super(Component.literal("World Map"));
@@ -87,7 +95,21 @@ public class MapScreen extends Screen {
             } else {
                 ClientPlayNetworking.send(new RequestAllianceCreationScreenPayload());
             }
-        }).bounds(20, 20, 120, 20).build();
+        }).bounds(
+                TOP_BUTTON_X,
+                TOP_BUTTON_Y,
+                TOP_BUTTON_WIDTH,
+                TOP_BUTTON_HEIGHT
+        ).build();
+
+        this.joinAllianceButton = Button.builder(Component.literal("Join Alliance"), (btn) -> {
+            ClientPlayNetworking.send(new RequestJoinAllianceScreenPayload());
+        }).bounds(
+                TOP_BUTTON_X,
+                TOP_BUTTON_Y + TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING,
+                TOP_BUTTON_WIDTH,
+                TOP_BUTTON_HEIGHT
+        ).build();
 
         this.inviteButton = Button.builder(getInviteButtonText(), (btn) -> {
             AllianceInvitePayload pendingInvite = AllianceClientState.getFirstPendingInvite();
@@ -95,23 +117,53 @@ public class MapScreen extends Screen {
                 AllianceClientState.acknowledgeInviteNotification();
                 this.minecraft.setScreen(new AllianceInviteScreen(this, pendingInvite));
             }
-        }).bounds(20, 46, 120, 20).build();
-        this.inviteButton.active = AllianceClientState.hasPendingInvites();
+        }).bounds(
+                TOP_BUTTON_X,
+                TOP_BUTTON_Y + (TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING) * 2,
+                TOP_BUTTON_WIDTH,
+                TOP_BUTTON_HEIGHT
+        ).build();
 
         this.addRenderableWidget(this.allianceButton);
+        this.addRenderableWidget(this.joinAllianceButton);
         this.addRenderableWidget(this.inviteButton);
+
+        refreshTopButtons();
     }
 
     @Override
     public void tick() {
         super.tick();
+        refreshTopButtons();
+    }
+
+    private void refreshTopButtons() {
+        boolean inAlliance = AllianceClientState.isInAlliance();
 
         if (this.allianceButton != null) {
             this.allianceButton.setMessage(getAllianceButtonText());
+            this.allianceButton.setX(TOP_BUTTON_X);
+            this.allianceButton.setY(TOP_BUTTON_Y);
+            this.allianceButton.visible = true;
+            this.allianceButton.active = true;
+        }
+
+        if (this.joinAllianceButton != null) {
+            this.joinAllianceButton.setX(TOP_BUTTON_X);
+            this.joinAllianceButton.setY(TOP_BUTTON_Y + TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING);
+            this.joinAllianceButton.visible = !inAlliance;
+            this.joinAllianceButton.active = !inAlliance;
         }
 
         if (this.inviteButton != null) {
+            int inviteY = inAlliance
+                    ? TOP_BUTTON_Y + TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING
+                    : TOP_BUTTON_Y + (TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING) * 2;
+
             this.inviteButton.setMessage(getInviteButtonText());
+            this.inviteButton.setX(TOP_BUTTON_X);
+            this.inviteButton.setY(inviteY);
+            this.inviteButton.visible = true;
             this.inviteButton.active = AllianceClientState.hasPendingInvites();
         }
     }

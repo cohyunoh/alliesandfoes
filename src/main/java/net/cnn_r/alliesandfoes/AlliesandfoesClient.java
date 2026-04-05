@@ -3,15 +3,18 @@ package net.cnn_r.alliesandfoes;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
+import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.network.AllianceCreateResultPayload;
 import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
+import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
 import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
 import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
 import net.cnn_r.alliesandfoes.network.ChunkStructurePayload;
+import net.cnn_r.alliesandfoes.network.JoinAllianceScreenPayload;
 import net.cnn_r.alliesandfoes.network.PlayerPositionsPayload;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.fabricmc.api.ClientModInitializer;
@@ -116,6 +119,22 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(AllianceJoinRequestPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                AllianceClientState.addJoinRequest(payload);
+
+                Component title = Component.literal("Alliance Join Request");
+                Component body = Component.literal(payload.requesterName() + " wants to join " + payload.allianceName());
+
+                SystemToast.add(
+                        context.client().getToastManager(),
+                        SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                        title,
+                        body
+                );
+            });
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(AllianceStatePayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 AllianceClientState.setAllianceState(payload.inAlliance(), payload.allianceName());
@@ -128,8 +147,12 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     context.client().player.displayClientMessage(Component.literal(payload.message()), false);
                 }
 
-                if (payload.success() && context.client().screen instanceof AllianceCreateScreen allianceScreen) {
-                    allianceScreen.onClose();
+                if (payload.success()) {
+                    if (context.client().screen instanceof AllianceCreateScreen allianceCreateScreen) {
+                        allianceCreateScreen.onClose();
+                    } else if (context.client().screen instanceof AllianceJoinScreen allianceJoinScreen) {
+                        allianceJoinScreen.onClose();
+                    }
                 }
             });
         });
@@ -147,6 +170,27 @@ public class AlliesandfoesClient implements ClientModInitializer {
                         title,
                         body
                 );
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceJoinRequestPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                Component title = Component.literal("Alliance Join Request");
+                Component body = Component.literal(payload.requesterName() + " wants to join " + payload.allianceName());
+
+                SystemToast.add(
+                        context.client().getToastManager(),
+                        SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                        title,
+                        body
+                );
+
+                if (context.client().player != null) {
+                    context.client().player.displayClientMessage(
+                            Component.literal(payload.requesterName() + " wants to join " + payload.allianceName() + "."),
+                            false
+                    );
+                }
             });
         });
 

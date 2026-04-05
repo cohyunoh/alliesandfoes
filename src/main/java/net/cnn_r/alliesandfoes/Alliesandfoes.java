@@ -4,15 +4,19 @@ import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.network.AllianceCreateResultPayload;
 import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
+import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
 import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
 import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
 import net.cnn_r.alliesandfoes.network.ChunkStructurePayload;
 import net.cnn_r.alliesandfoes.network.CreateAlliancePayload;
+import net.cnn_r.alliesandfoes.network.JoinAllianceScreenPayload;
 import net.cnn_r.alliesandfoes.network.KickAllianceMemberPayload;
 import net.cnn_r.alliesandfoes.network.LeaveAlliancePayload;
 import net.cnn_r.alliesandfoes.network.PlayerPositionsPayload;
 import net.cnn_r.alliesandfoes.network.RequestAllianceCreationScreenPayload;
 import net.cnn_r.alliesandfoes.network.RequestAllianceViewPayload;
+import net.cnn_r.alliesandfoes.network.RequestJoinAlliancePayload;
+import net.cnn_r.alliesandfoes.network.RequestJoinAllianceScreenPayload;
 import net.cnn_r.alliesandfoes.network.RespondAllianceInvitePayload;
 import net.cnn_r.alliesandfoes.network.SetAllianceMemberRolePayload;
 import net.cnn_r.alliesandfoes.network.TransferAllianceOwnershipPayload;
@@ -37,13 +41,17 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(PlayerPositionsPayload.TYPE, PlayerPositionsPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(ChunkStructurePayload.TYPE, ChunkStructurePayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(AllianceCreationScreenPayload.TYPE, AllianceCreationScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(JoinAllianceScreenPayload.TYPE, JoinAllianceScreenPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(AllianceStatePayload.TYPE, AllianceStatePayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(AllianceCreateResultPayload.TYPE, AllianceCreateResultPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(AllianceViewPayload.TYPE, AllianceViewPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(AllianceInvitePayload.TYPE, AllianceInvitePayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(AllianceJoinRequestPayload.TYPE, AllianceJoinRequestPayload.STREAM_CODEC);
 
 		PayloadTypeRegistry.playC2S().register(RequestAllianceCreationScreenPayload.TYPE, RequestAllianceCreationScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playC2S().register(RequestJoinAllianceScreenPayload.TYPE, RequestJoinAllianceScreenPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(CreateAlliancePayload.TYPE, CreateAlliancePayload.STREAM_CODEC);
+		PayloadTypeRegistry.playC2S().register(RequestJoinAlliancePayload.TYPE, RequestJoinAlliancePayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(RequestAllianceViewPayload.TYPE, RequestAllianceViewPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(RespondAllianceInvitePayload.TYPE, RespondAllianceInvitePayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(LeaveAlliancePayload.TYPE, LeaveAlliancePayload.STREAM_CODEC);
@@ -54,6 +62,12 @@ public class Alliesandfoes implements ModInitializer {
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
 				AllianceManager.get(context.server()).sendCreationScreen(context.server(), context.player());
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestJoinAllianceScreenPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.get(context.server()).sendJoinScreen(context.server(), context.player());
 			});
 		});
 
@@ -73,6 +87,15 @@ public class Alliesandfoes implements ModInitializer {
 						Component.literal("Created alliance: " + result.alliance().getName()),
 						false
 				);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestJoinAlliancePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				var result = AllianceManager.get(context.server())
+						.requestJoinAlliance(context.server(), context.player(), payload.allianceId());
+
+				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
 			});
 		});
 
