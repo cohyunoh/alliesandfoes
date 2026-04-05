@@ -14,18 +14,17 @@ import net.minecraft.network.chat.Component;
 import java.util.List;
 
 public class AllianceInviteScreen extends Screen {
-    private static final int PANEL_WIDTH = 340;
-    private static final int MIN_PANEL_HEIGHT = 208;
-    private static final int MAX_PANEL_HEIGHT = 248;
-    private static final int SCREEN_MARGIN = 24;
+    private static final int PANEL_WIDTH = 356;
+    private static final int MIN_PANEL_HEIGHT = 244;
+    private static final int MAX_PANEL_HEIGHT = 284;
+    private static final int SCREEN_MARGIN = 18;
 
     private static final int HEADER_HEIGHT = 24;
     private static final int SECTION_PAD = 12;
-    private static final int FOOTER_HEIGHT = 64;
     private static final int FACE_SIZE = 24;
+    private static final int CHARS_PER_TICK = 2;
 
     private int textRevealTicks = 0;
-    private static final int CHARS_PER_TICK = 2;
 
     private final Screen parent;
     private int currentIndex;
@@ -62,7 +61,7 @@ public class AllianceInviteScreen extends Screen {
         AllianceClientState.acknowledgeInviteNotification();
 
         Layout layout = calculateLayout();
-        int smallButtonWidth = 52;
+        int navButtonWidth = 52;
         int bottomButtonWidth = (layout.contentWidth() - 12) / 2;
 
         this.prevButton = this.addRenderableWidget(
@@ -72,7 +71,7 @@ public class AllianceInviteScreen extends Screen {
                         this.textRevealTicks = 0;
                         refreshButtons();
                     }
-                }).bounds(layout.contentLeft(), layout.bodyTop(), smallButtonWidth, 20).build()
+                }).bounds(layout.contentLeft(), layout.navButtonY(), navButtonWidth, 20).build()
         );
 
         this.nextButton = this.addRenderableWidget(
@@ -82,7 +81,7 @@ public class AllianceInviteScreen extends Screen {
                         this.textRevealTicks = 0;
                         refreshButtons();
                     }
-                }).bounds(layout.contentRight() - smallButtonWidth, layout.bodyTop(), smallButtonWidth, 20).build()
+                }).bounds(layout.contentRight() - navButtonWidth, layout.navButtonY(), navButtonWidth, 20).build()
         );
 
         this.acceptButton = this.addRenderableWidget(
@@ -128,10 +127,18 @@ public class AllianceInviteScreen extends Screen {
         int count = AllianceClientState.getPendingInviteCount();
 
         if (count <= 0) {
-            if (this.prevButton != null) this.prevButton.active = false;
-            if (this.nextButton != null) this.nextButton.active = false;
-            if (this.acceptButton != null) this.acceptButton.active = false;
-            if (this.declineButton != null) this.declineButton.active = false;
+            if (this.prevButton != null) {
+                this.prevButton.active = false;
+            }
+            if (this.nextButton != null) {
+                this.nextButton.active = false;
+            }
+            if (this.acceptButton != null) {
+                this.acceptButton.active = false;
+            }
+            if (this.declineButton != null) {
+                this.declineButton.active = false;
+            }
             return;
         }
 
@@ -161,11 +168,12 @@ public class AllianceInviteScreen extends Screen {
     }
 
     private Layout calculateLayout() {
+        int panelWidth = Math.min(PANEL_WIDTH, this.width - SCREEN_MARGIN * 2);
         int panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(this.height - SCREEN_MARGIN * 2, MAX_PANEL_HEIGHT));
 
-        int left = (this.width - PANEL_WIDTH) / 2;
+        int left = (this.width - panelWidth) / 2;
         int top = (this.height - panelHeight) / 2;
-        int right = left + PANEL_WIDTH;
+        int right = left + panelWidth;
         int bottom = top + panelHeight;
 
         int contentLeft = left + SECTION_PAD;
@@ -173,8 +181,18 @@ public class AllianceInviteScreen extends Screen {
         int contentWidth = contentRight - contentLeft;
 
         int bodyTop = top + HEADER_HEIGHT + 14;
-        int footerTop = bottom - FOOTER_HEIGHT;
-        int bottomButtonY = bottom - 26;
+        int navButtonY = bodyTop;
+        int counterY = bodyTop + 6;
+
+        int cardTop = bodyTop + 28;
+        int cardBottom = cardTop + 72;
+
+        int bottomButtonY = bottom - 24;
+        int instructionTop = cardBottom + 12;
+        int instructionBottom = bottomButtonY - 12;
+
+        int tintTop = bodyTop - 6;
+        int tintBottom = instructionBottom + 2;
 
         return new Layout(
                 left,
@@ -185,7 +203,14 @@ public class AllianceInviteScreen extends Screen {
                 contentRight,
                 contentWidth,
                 bodyTop,
-                footerTop,
+                navButtonY,
+                counterY,
+                cardTop,
+                cardBottom,
+                instructionTop,
+                instructionBottom,
+                tintTop,
+                tintBottom,
                 bottomButtonY
         );
     }
@@ -216,20 +241,16 @@ public class AllianceInviteScreen extends Screen {
         Layout layout = calculateLayout();
         AllianceInvitePayload invite = getCurrentInvite();
 
-        // Outer shadow
         context.fill(layout.left() - 10, layout.top() - 10, layout.right() + 10, layout.bottom() + 10, 0x66000000);
-
-        // Letter border + paper
         context.fill(layout.left() - 1, layout.top() - 1, layout.right() + 1, layout.bottom() + 1, 0xFF8A6A3A);
         context.fill(layout.left(), layout.top(), layout.right(), layout.bottom(), 0xFFF3E7C9);
         context.fill(layout.left() + 4, layout.top() + 4, layout.right() - 4, layout.bottom() - 4, 0xFFF8EFD8);
 
-        // Soft inner tint for the body
         context.fill(
                 layout.contentLeft(),
-                layout.bodyTop() - 6,
+                layout.tintTop(),
                 layout.contentRight(),
-                layout.footerTop() - 10,
+                layout.tintBottom(),
                 0x11A07A44
         );
 
@@ -240,7 +261,6 @@ public class AllianceInviteScreen extends Screen {
         int accentColor = 0xFF6E5630;
         int strongColor = 0xFF241A10;
 
-        // Title without shadow
         String titleText = this.title.getString();
         int titleWidth = this.font.width(titleText);
         int titleX = this.width / 2 - titleWidth / 2;
@@ -248,7 +268,6 @@ public class AllianceInviteScreen extends Screen {
 
         context.drawString(this.font, titleText, titleX, titleY, titleColor, false);
 
-        // Header underline for letter styling
         int underlineY = titleY + this.font.lineHeight + 3;
         context.fill(titleX - 4, underlineY, titleX + titleWidth + 4, underlineY + 1, 0x668A6A3A);
 
@@ -273,53 +292,71 @@ public class AllianceInviteScreen extends Screen {
                 this.font,
                 counterText,
                 this.width / 2 - counterWidth / 2,
-                layout.bodyTop() + 6,
+                layout.counterY(),
                 accentColor,
                 false
         );
 
-        int cardTop = layout.bodyTop() + 28;
-        int cardBottom = layout.footerTop() - 10;
-
-        // Inner letter card
         context.fill(
                 layout.contentLeft() + 4,
-                cardTop,
+                layout.cardTop(),
                 layout.contentRight() - 4,
-                cardBottom,
+                layout.cardBottom(),
                 0x22D9C39A
         );
         context.fill(
                 layout.contentLeft() + 4,
-                cardTop,
+                layout.cardTop(),
                 layout.contentRight() - 4,
-                cardTop + 1,
+                layout.cardTop() + 1,
                 0x668A6A3A
         );
         context.fill(
                 layout.contentLeft() + 4,
-                cardBottom - 1,
+                layout.cardBottom() - 1,
                 layout.contentRight() - 4,
-                cardBottom,
+                layout.cardBottom(),
                 0x668A6A3A
         );
 
-        // Wax seal accent
-        int sealCenterX = layout.contentRight() - 26;
-        int sealCenterY = cardBottom - 20;
+        context.fill(
+                layout.contentLeft() + 4,
+                layout.instructionTop(),
+                layout.contentRight() - 4,
+                layout.instructionBottom(),
+                0x16D9C39A
+        );
+        context.fill(
+                layout.contentLeft() + 4,
+                layout.instructionTop(),
+                layout.contentRight() - 4,
+                layout.instructionTop() + 1,
+                0x558A6A3A
+        );
+        context.fill(
+                layout.contentLeft() + 4,
+                layout.instructionBottom() - 1,
+                layout.contentRight() - 4,
+                layout.instructionBottom(),
+                0x558A6A3A
+        );
+
+        int sealCenterX = layout.contentRight() - 28;
+        int sealCenterY = layout.cardBottom() - 22;
         int sealColor = 0xFF8E2F2F;
         int sealHighlight = 0xFFB24A4A;
 
         context.fill(sealCenterX - 8, sealCenterY - 8, sealCenterX + 8, sealCenterY + 8, sealColor);
         context.fill(sealCenterX - 5, sealCenterY - 5, sealCenterX + 5, sealCenterY + 5, sealHighlight);
 
-        int faceX = layout.contentLeft() + 14;
-        int faceY = cardTop + 12;
+        int faceX = layout.contentLeft() + 18;
+        int faceY = layout.cardTop() + 16;
         renderOwnerFace(context, invite, faceX, faceY);
 
-        int textX = faceX + FACE_SIZE + 10;
-        int textMaxWidth = layout.contentRight() - 18 - textX;
-        int y = cardTop + 10;
+        int textX = faceX + FACE_SIZE + 12;
+        int textMaxWidth = (sealCenterX - 18) - textX;
+
+        int y = layout.cardTop() + 12;
         int charIndex = 0;
 
         String line1 = "Invitation";
@@ -337,43 +374,36 @@ public class AllianceInviteScreen extends Screen {
         y += 6;
 
         String line4 = "Sent by " + invite.ownerName();
-        y = drawAnimatedWrappedLine(context, line4, charIndex, textX, y, textMaxWidth, accentColor);
+        drawAnimatedWrappedLine(context, line4, charIndex, textX, y, textMaxWidth, accentColor);
         charIndex += line4.length();
 
-        int infoX = layout.contentLeft() + 14;
-        int infoMaxWidth = layout.contentRight() - 18 - infoX;
-        int infoY = y + 12;
+        int instructionCenterX = (layout.contentLeft() + layout.contentRight()) / 2;
+        int instructionY = layout.instructionTop() + 10;
+        int instructionMaxWidth = layout.contentWidth() - 36;
 
         String line5 = "Accept to join this alliance.";
-        int nextY = drawAnimatedWrappedLine(context, line5, charIndex, infoX, infoY, infoMaxWidth, bodyColor);
+        instructionY = drawAnimatedCenteredWrappedLine(
+                context,
+                line5,
+                charIndex,
+                instructionCenterX,
+                instructionY,
+                instructionMaxWidth,
+                bodyColor
+        );
         charIndex += line5.length();
 
         String line6 = "Decline to dismiss this letter.";
-        nextY = drawAnimatedWrappedLine(context, line6, charIndex, infoX, nextY, infoMaxWidth, bodyColor);
-        charIndex += line6.length();
-
-        int dividerY = nextY + 4;
-        context.fill(
-                layout.contentLeft() + 4,
-                dividerY,
-                layout.contentRight() - 4,
-                dividerY + 1,
-                0x668A6A3A
+        drawAnimatedCenteredWrappedLine(
+                context,
+                line6,
+                charIndex,
+                instructionCenterX,
+                instructionY + 4,
+                instructionMaxWidth,
+                bodyColor
         );
     }
-
-    private int drawWrappedLine(GuiGraphics context, String text, int x, int y, int maxWidth, int color) {
-        var lines = this.font.split(Component.literal(text), maxWidth);
-
-        int currentY = y;
-        for (var line : lines) {
-            context.drawString(this.font, line, x, currentY, color, false);
-            currentY += 12;
-        }
-
-        return currentY;
-    }
-
 
     @Override
     public void onClose() {
@@ -427,6 +457,32 @@ public class AllianceInviteScreen extends Screen {
         return currentY;
     }
 
+    private int drawAnimatedCenteredWrappedLine(
+            GuiGraphics context,
+            String fullText,
+            int startCharIndex,
+            int centerX,
+            int y,
+            int maxWidth,
+            int color
+    ) {
+        String visibleText = revealText(fullText, startCharIndex, getVisibleCharacterCount());
+        if (visibleText.isEmpty()) {
+            return y;
+        }
+
+        var lines = this.font.split(Component.literal(visibleText), maxWidth);
+
+        int currentY = y;
+        for (var line : lines) {
+            int lineWidth = this.font.width(line);
+            context.drawString(this.font, line, centerX - lineWidth / 2, currentY, color, false);
+            currentY += this.font.lineHeight + 2;
+        }
+
+        return currentY;
+    }
+
     private record Layout(
             int left,
             int top,
@@ -436,7 +492,14 @@ public class AllianceInviteScreen extends Screen {
             int contentRight,
             int contentWidth,
             int bodyTop,
-            int footerTop,
+            int navButtonY,
+            int counterY,
+            int cardTop,
+            int cardBottom,
+            int instructionTop,
+            int instructionBottom,
+            int tintTop,
+            int tintBottom,
             int bottomButtonY
     ) {
     }

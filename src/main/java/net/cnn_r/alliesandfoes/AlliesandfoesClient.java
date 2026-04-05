@@ -17,12 +17,25 @@ import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.ChunkPos;
 
 public class AlliesandfoesClient implements ClientModInitializer {
     private static final int STRUCTURE_REFRESH_RADIUS = 2;
+
+    private static boolean pendingAllianceViewScreenOpen = false;
+
+    public static void requestAllianceViewScreenOpen() {
+        pendingAllianceViewScreenOpen = true;
+    }
+
+    private static boolean consumeAllianceViewScreenOpenRequest() {
+        boolean requested = pendingAllianceViewScreenOpen;
+        pendingAllianceViewScreenOpen = false;
+        return requested;
+    }
 
     @Override
     public void onInitializeClient() {
@@ -139,6 +152,9 @@ public class AlliesandfoesClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(AllianceViewPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
+                boolean wasInAlliance = AllianceClientState.isInAlliance();
+                String previousAllianceName = AllianceClientState.getAllianceName();
+
                 if (context.client().player != null) {
                     AllianceClientState.setAllianceDetails(
                             payload.inAlliance(),
@@ -148,14 +164,27 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     );
                 }
 
-                if (context.client().screen instanceof AllianceViewScreen existing) {
-                    existing.replacePayload(payload);
-                } else {
-                    context.client().setScreen(new AllianceViewScreen(
-                            context.client().screen,
-                            payload
-                    ));
+                boolean shouldOpenScreen = consumeAllianceViewScreenOpenRequest()
+                        || context.client().screen instanceof AllianceViewScreen;
+
+                if (shouldOpenScreen) {
+                    if (context.client().screen instanceof AllianceViewScreen existing) {
+                        existing.replacePayload(payload);
+                    } else {
+                        context.client().setScreen(new AllianceViewScreen(
+                                context.client().screen,
+                                payload
+                        ));
+                    }
+                    return;
                 }
+
+                showAllianceUpdateToast(
+                        context.client(),
+                        payload,
+                        wasInAlliance,
+                        previousAllianceName
+                );
             });
         });
 
@@ -168,5 +197,40 @@ public class AlliesandfoesClient implements ClientModInitializer {
         });
 
         KeyBindings.register();
+    }
+
+    private static void showAllianceUpdateToast(
+            Minecraft client,
+            AllianceViewPayload payload,
+            boolean wasInAlliance,
+            String previousAllianceName
+    ) {
+        if (client.player == null) {
+            return;
+        }
+
+        Component title = Component.literal("Alliance Updated");
+        Component body;
+
+        if (!payload.inAlliance()) {
+            if (wasInAlliance && previousAllianceName != null && !previousAllianceName.isEmpty()) {
+                body = Component.literal("You are no longer in " + previousAllianceName);
+            } else {
+                body = Component.literal("You are not currently in an alliance");
+            }
+        } else if (!wasInAlliance) {
+            body = Component.literal("You joined " + payload.allianceName());
+        } else if (!payload.allianceName().equals(previousAllianceName)) {
+            body = Component.literal("Alliance changed to " + payload.allianceName());
+        } else {
+            body = Component.literal("Roster updated for " + payload.allianceName());
+        }
+
+        SystemToast.add(
+                client.getToastManager(),
+                SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                title,
+                body
+        );
     }
 }

@@ -1,7 +1,9 @@
 package net.cnn_r.alliesandfoes.map;
 
+import net.cnn_r.alliesandfoes.AlliesandfoesClient;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteScreen;
+import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
@@ -80,6 +82,7 @@ public class MapScreen extends Screen {
 
         this.allianceButton = Button.builder(getAllianceButtonText(), (btn) -> {
             if (AllianceClientState.isInAlliance()) {
+                AlliesandfoesClient.requestAllianceViewScreenOpen();
                 ClientPlayNetworking.send(new RequestAllianceViewPayload());
             } else {
                 ClientPlayNetworking.send(new RequestAllianceCreationScreenPayload());
@@ -262,6 +265,11 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent input) {
+        if (KeyBindings.OPEN_MAP != null && KeyBindings.OPEN_MAP.matches(input)) {
+            this.onClose();
+            return true;
+        }
+
         int key = input.key();
         int modifiers = input.modifiers();
 
