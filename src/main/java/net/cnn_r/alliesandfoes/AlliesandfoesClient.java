@@ -2,9 +2,9 @@ package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
-import net.cnn_r.alliesandfoes.screen.AllianceCreateScreen;
-import net.cnn_r.alliesandfoes.screen.AllianceInviteScreen;
-import net.cnn_r.alliesandfoes.screen.AllianceViewScreen;
+import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
+import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteScreen;
+import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.network.AllianceCreateResultPayload;

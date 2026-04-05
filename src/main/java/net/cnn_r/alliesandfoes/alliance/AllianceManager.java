@@ -1,11 +1,11 @@
 package net.cnn_r.alliesandfoes.alliance;
 
-import net.cnn_r.alliesandfoes.network.AllianceCreateResultPayload;
 import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
 import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
 import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -166,11 +166,16 @@ public class AllianceManager {
         playerToAllianceId.put(owner.getUUID(), alliance.getId());
         allianceNameToId.put(normalized, alliance.getId());
 
+        int sentInvites = 0;
+
         for (UUID invitedUuid : invitedPlayers) {
             if (invitedUuid.equals(owner.getUUID())) {
                 continue;
             }
             if (isPlayerInAlliance(invitedUuid)) {
+                continue;
+            }
+            if (alliance.hasPendingInvite(invitedUuid)) {
                 continue;
             }
 
@@ -180,6 +185,7 @@ public class AllianceManager {
             }
 
             alliance.addPendingInvite(invitedUuid);
+            sentInvites++;
 
             ServerPlayNetworking.send(invitedPlayer, new AllianceInvitePayload(
                     alliance.getId(),
@@ -190,7 +196,12 @@ public class AllianceManager {
         }
 
         syncPlayer(owner);
-        return CreationResult.success(alliance);
+
+        String message = sentInvites > 0
+                ? "Alliance created. Sent " + sentInvites + " invite(s)."
+                : "Alliance created.";
+
+        return CreationResult.success(alliance, message);
     }
 
     public ActionResult respondToInvite(MinecraftServer server, ServerPlayer player, UUID allianceId, boolean accept) {
@@ -209,11 +220,30 @@ public class AllianceManager {
 
         alliance.removePendingInvite(player.getUUID());
 
+        ServerPlayer owner = server.getPlayerList().getPlayer(alliance.getOwnerUuid());
+
         if (accept) {
             alliance.addMember(player.getUUID());
             playerToAllianceId.put(player.getUUID(), alliance.getId());
             syncAllianceMembers(server, alliance);
+
+            if (owner != null) {
+                owner.displayClientMessage(
+                        Component.literal(player.getGameProfile().name() + " joined alliance: " + alliance.getName()),
+                        false
+                );
+                sendViewScreen(server, owner);
+            }
+
             return ActionResult.success("You joined alliance: " + alliance.getName());
+        }
+
+        if (owner != null) {
+            owner.displayClientMessage(
+                    Component.literal(player.getGameProfile().name() + " declined your alliance invite."),
+                    false
+            );
+            sendViewScreen(server, owner);
         }
 
         return ActionResult.success("Alliance invite declined.");
@@ -244,6 +274,15 @@ public class AllianceManager {
         syncPlayer(player);
         syncAllianceMembers(server, alliance);
 
+        ServerPlayer owner = server.getPlayerList().getPlayer(alliance.getOwnerUuid());
+        if (owner != null) {
+            owner.displayClientMessage(
+                    Component.literal(player.getGameProfile().name() + " left the alliance."),
+                    false
+            );
+            sendViewScreen(server, owner);
+        }
+
         return ActionResult.success("You left the alliance.");
     }
 
@@ -271,8 +310,14 @@ public class AllianceManager {
         ServerPlayer target = server.getPlayerList().getPlayer(targetUuid);
         if (target != null) {
             syncPlayer(target);
+            target.displayClientMessage(
+                    Component.literal("You were removed from alliance: " + alliance.getName()),
+                    false
+            );
         }
+
         syncAllianceMembers(server, alliance);
+        sendViewScreen(server, actor);
 
         return ActionResult.success("Member kicked from alliance.");
     }
@@ -294,12 +339,22 @@ public class AllianceManager {
         alliance.setOwnerUuid(newOwnerUuid);
         syncAllianceMembers(server, alliance);
 
+        ServerPlayer newOwner = server.getPlayerList().getPlayer(newOwnerUuid);
+        if (newOwner != null) {
+            newOwner.displayClientMessage(
+                    Component.literal("You are now the owner of alliance: " + alliance.getName()),
+                    false
+            );
+        }
+
+        sendViewScreen(server, actor);
+
         return ActionResult.success("Alliance ownership transferred.");
     }
 
     public record CreationResult(boolean success, String message, Alliance alliance) {
-        public static CreationResult success(Alliance alliance) {
-            return new CreationResult(true, "Alliance created.", alliance);
+        public static CreationResult success(Alliance alliance, String message) {
+            return new CreationResult(true, message, alliance);
         }
 
         public static CreationResult failure(String message) {
