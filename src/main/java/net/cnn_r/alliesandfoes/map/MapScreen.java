@@ -3,6 +3,7 @@ package net.cnn_r.alliesandfoes.map;
 import net.cnn_r.alliesandfoes.AlliesandfoesClient;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteScreen;
+import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinRequestScreen;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
@@ -11,6 +12,7 @@ import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
+import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
 import net.cnn_r.alliesandfoes.network.RequestAllianceCreationScreenPayload;
 import net.cnn_r.alliesandfoes.network.RequestAllianceViewPayload;
 import net.cnn_r.alliesandfoes.network.RequestJoinAllianceScreenPayload;
@@ -67,6 +69,7 @@ public class MapScreen extends Screen {
     private Button allianceButton;
     private Button joinAllianceButton;
     private Button inviteButton;
+    private Button requestsButton;
 
     public MapScreen() {
         super(Component.literal("World Map"));
@@ -124,9 +127,23 @@ public class MapScreen extends Screen {
                 TOP_BUTTON_HEIGHT
         ).build();
 
+        this.requestsButton = Button.builder(getRequestsButtonText(), (btn) -> {
+            AllianceJoinRequestPayload pendingRequest = AllianceClientState.getFirstPendingJoinRequest();
+            if (pendingRequest != null && this.minecraft != null) {
+                AllianceClientState.acknowledgeJoinRequestNotification();
+                this.minecraft.setScreen(new AllianceJoinRequestScreen(this, pendingRequest));
+            }
+        }).bounds(
+                TOP_BUTTON_X,
+                TOP_BUTTON_Y + TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING,
+                TOP_BUTTON_WIDTH,
+                TOP_BUTTON_HEIGHT
+        ).build();
+
         this.addRenderableWidget(this.allianceButton);
         this.addRenderableWidget(this.joinAllianceButton);
         this.addRenderableWidget(this.inviteButton);
+        this.addRenderableWidget(this.requestsButton);
 
         refreshTopButtons();
     }
@@ -139,6 +156,7 @@ public class MapScreen extends Screen {
 
     private void refreshTopButtons() {
         boolean inAlliance = AllianceClientState.isInAlliance();
+        boolean isOwner = AllianceClientState.isOwner();
 
         if (this.allianceButton != null) {
             this.allianceButton.setMessage(getAllianceButtonText());
@@ -156,15 +174,19 @@ public class MapScreen extends Screen {
         }
 
         if (this.inviteButton != null) {
-            int inviteY = inAlliance
-                    ? TOP_BUTTON_Y + TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING
-                    : TOP_BUTTON_Y + (TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING) * 2;
-
             this.inviteButton.setMessage(getInviteButtonText());
             this.inviteButton.setX(TOP_BUTTON_X);
-            this.inviteButton.setY(inviteY);
-            this.inviteButton.visible = true;
-            this.inviteButton.active = AllianceClientState.hasPendingInvites();
+            this.inviteButton.setY(TOP_BUTTON_Y + (TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING) * 2);
+            this.inviteButton.visible = !inAlliance;
+            this.inviteButton.active = !inAlliance && AllianceClientState.hasPendingInvites();
+        }
+
+        if (this.requestsButton != null) {
+            this.requestsButton.setMessage(getRequestsButtonText());
+            this.requestsButton.setX(TOP_BUTTON_X);
+            this.requestsButton.setY(TOP_BUTTON_Y + TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING);
+            this.requestsButton.visible = inAlliance && isOwner;
+            this.requestsButton.active = inAlliance && isOwner && AllianceClientState.hasJoinRequests();
         }
     }
 
@@ -181,6 +203,15 @@ public class MapScreen extends Screen {
         return Component.literal("Invites (" + count + ")");
     }
 
+    private Component getRequestsButtonText() {
+        int count = AllianceClientState.getPendingJoinRequestCount();
+        if (count <= 0) {
+            return Component.literal("Requests");
+        }
+
+        return Component.literal("Requests (" + count + ")");
+    }
+
     @Override
     public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, this.width, this.height, 0xCC000000);
@@ -190,7 +221,7 @@ public class MapScreen extends Screen {
 
         if (player == null || level == null) {
             super.render(context, mouseX, mouseY, delta);
-            renderInviteButtonGlow(context, delta);
+            renderTopButtonGlows(context, delta);
             return;
         }
 
@@ -209,16 +240,33 @@ public class MapScreen extends Screen {
         this.renderVisiblePlayers(context, level);
 
         super.render(context, mouseX, mouseY, delta);
-        renderInviteButtonGlow(context, delta);
+        renderTopButtonGlows(context, delta);
 
         this.renderHoveredChunkTooltip(context, mouseX, mouseY);
     }
 
+    private void renderTopButtonGlows(GuiGraphics context, float delta) {
+        renderInviteButtonGlow(context, delta);
+        renderRequestsButtonGlow(context, delta);
+    }
+
     private void renderInviteButtonGlow(GuiGraphics context, float delta) {
-        if (this.inviteButton == null || !AllianceClientState.shouldHighlightInviteButton()) {
+        if (this.inviteButton == null || !this.inviteButton.visible || !AllianceClientState.shouldHighlightInviteButton()) {
             return;
         }
 
+        renderButtonGlow(context, this.inviteButton, delta);
+    }
+
+    private void renderRequestsButtonGlow(GuiGraphics context, float delta) {
+        if (this.requestsButton == null || !this.requestsButton.visible || !AllianceClientState.shouldHighlightJoinRequestButton()) {
+            return;
+        }
+
+        renderButtonGlow(context, this.requestsButton, delta);
+    }
+
+    private void renderButtonGlow(GuiGraphics context, Button button, float delta) {
         long tick = this.minecraft != null && this.minecraft.level != null
                 ? this.minecraft.level.getGameTime()
                 : 0L;
@@ -227,10 +275,10 @@ public class MapScreen extends Screen {
         int alpha = 70 + (int) (90 * pulse);
         int glowColor = (alpha << 24) | 0xFFD966;
 
-        int x = this.inviteButton.getX();
-        int y = this.inviteButton.getY();
-        int w = this.inviteButton.getWidth();
-        int h = this.inviteButton.getHeight();
+        int x = button.getX();
+        int y = button.getY();
+        int w = button.getWidth();
+        int h = button.getHeight();
 
         context.fill(x - 3, y - 3, x + w + 3, y - 1, glowColor);
         context.fill(x - 3, y + h + 1, x + w + 3, y + h + 3, glowColor);
