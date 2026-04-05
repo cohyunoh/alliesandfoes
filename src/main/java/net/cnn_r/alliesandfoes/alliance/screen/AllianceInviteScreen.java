@@ -24,6 +24,9 @@ public class AllianceInviteScreen extends Screen {
     private static final int FOOTER_HEIGHT = 64;
     private static final int FACE_SIZE = 24;
 
+    private int textRevealTicks = 0;
+    private static final int CHARS_PER_TICK = 2;
+
     private final Screen parent;
     private int currentIndex;
 
@@ -66,6 +69,7 @@ public class AllianceInviteScreen extends Screen {
                 Button.builder(Component.literal("<"), btn -> {
                     if (this.currentIndex > 0) {
                         this.currentIndex--;
+                        this.textRevealTicks = 0;
                         refreshButtons();
                     }
                 }).bounds(layout.contentLeft(), layout.bodyTop(), smallButtonWidth, 20).build()
@@ -75,6 +79,7 @@ public class AllianceInviteScreen extends Screen {
                 Button.builder(Component.literal(">"), btn -> {
                     if (this.currentIndex < AllianceClientState.getPendingInviteCount() - 1) {
                         this.currentIndex++;
+                        this.textRevealTicks = 0;
                         refreshButtons();
                     }
                 }).bounds(layout.contentRight() - smallButtonWidth, layout.bodyTop(), smallButtonWidth, 20).build()
@@ -113,6 +118,7 @@ public class AllianceInviteScreen extends Screen {
 
         if (this.currentIndex >= count) {
             this.currentIndex = count - 1;
+            this.textRevealTicks = 0;
         }
 
         refreshButtons();
@@ -312,19 +318,41 @@ public class AllianceInviteScreen extends Screen {
         renderOwnerFace(context, invite, faceX, faceY);
 
         int textX = faceX + FACE_SIZE + 10;
+        int textMaxWidth = layout.contentRight() - 18 - textX;
         int y = cardTop + 10;
+        int charIndex = 0;
 
-        context.drawString(this.font, "Invitation", textX, y, strongColor, false);
-        y += 16;
+        String line1 = "Invitation";
+        y = drawAnimatedWrappedLine(context, line1, charIndex, textX, y, textMaxWidth, strongColor);
+        charIndex += line1.length();
+        y += 4;
 
-        context.drawString(this.font, "You have been invited to join", textX, y, bodyColor, false);
-        y += 12;
-        context.drawString(this.font, "\"" + invite.allianceName() + "\"", textX, y, strongColor, false);
+        String line2 = "You have been invited to join";
+        y = drawAnimatedWrappedLine(context, line2, charIndex, textX, y, textMaxWidth, bodyColor);
+        charIndex += line2.length();
 
-        y += 18;
-        context.drawString(this.font, "Sent by " + invite.ownerName(), textX, y, accentColor, false);
+        String line3 = "\"" + invite.allianceName() + "\"";
+        y = drawAnimatedWrappedLine(context, line3, charIndex, textX, y, textMaxWidth, strongColor);
+        charIndex += line3.length();
+        y += 6;
 
-        int dividerY = layout.footerTop() - 8;
+        String line4 = "Sent by " + invite.ownerName();
+        y = drawAnimatedWrappedLine(context, line4, charIndex, textX, y, textMaxWidth, accentColor);
+        charIndex += line4.length();
+
+        int infoX = layout.contentLeft() + 14;
+        int infoMaxWidth = layout.contentRight() - 18 - infoX;
+        int infoY = y + 12;
+
+        String line5 = "Accept to join this alliance.";
+        int nextY = drawAnimatedWrappedLine(context, line5, charIndex, infoX, infoY, infoMaxWidth, bodyColor);
+        charIndex += line5.length();
+
+        String line6 = "Decline to dismiss this letter.";
+        nextY = drawAnimatedWrappedLine(context, line6, charIndex, infoX, nextY, infoMaxWidth, bodyColor);
+        charIndex += line6.length();
+
+        int dividerY = nextY + 4;
         context.fill(
                 layout.contentLeft() + 4,
                 dividerY,
@@ -332,20 +360,71 @@ public class AllianceInviteScreen extends Screen {
                 dividerY + 1,
                 0x668A6A3A
         );
-
-        int infoX = layout.contentLeft() + 14;
-        int infoLine1Y = dividerY - 24;
-        int infoLine2Y = dividerY - 12;
-
-        context.drawString(this.font, "Accept to join this alliance.", infoX, infoLine1Y, bodyColor, false);
-        context.drawString(this.font, "Decline to dismiss this letter.", infoX, infoLine2Y, bodyColor, false);
     }
+
+    private int drawWrappedLine(GuiGraphics context, String text, int x, int y, int maxWidth, int color) {
+        var lines = this.font.split(Component.literal(text), maxWidth);
+
+        int currentY = y;
+        for (var line : lines) {
+            context.drawString(this.font, line, x, currentY, color, false);
+            currentY += 12;
+        }
+
+        return currentY;
+    }
+
 
     @Override
     public void onClose() {
         if (this.minecraft != null) {
             this.minecraft.setScreen(this.parent);
         }
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        this.textRevealTicks++;
+    }
+
+    private int getVisibleCharacterCount() {
+        return this.textRevealTicks * CHARS_PER_TICK;
+    }
+
+    private String revealText(String fullText, int startCharIndex, int visibleCharCount) {
+        int remaining = visibleCharCount - startCharIndex;
+        if (remaining <= 0) {
+            return "";
+        }
+
+        int shownLength = Math.min(fullText.length(), remaining);
+        return fullText.substring(0, shownLength);
+    }
+
+    private int drawAnimatedWrappedLine(
+            GuiGraphics context,
+            String fullText,
+            int startCharIndex,
+            int x,
+            int y,
+            int maxWidth,
+            int color
+    ) {
+        String visibleText = revealText(fullText, startCharIndex, getVisibleCharacterCount());
+        if (visibleText.isEmpty()) {
+            return y;
+        }
+
+        var lines = this.font.split(Component.literal(visibleText), maxWidth);
+
+        int currentY = y;
+        for (var line : lines) {
+            context.drawString(this.font, line, x, currentY, color, false);
+            currentY += this.font.lineHeight + 2;
+        }
+
+        return currentY;
     }
 
     private record Layout(
