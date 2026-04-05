@@ -210,61 +210,102 @@ public class AllianceInviteScreen extends Screen {
         Layout layout = calculateLayout();
         AllianceInvitePayload invite = getCurrentInvite();
 
-        context.fill(layout.left() - 8, layout.top() - 8, layout.right() + 8, layout.bottom() + 8, 0x88000000);
-        context.fill(layout.left(), layout.top(), layout.right(), layout.bottom(), 0xEE1B1B1B);
+        // Outer shadow
+        context.fill(layout.left() - 10, layout.top() - 10, layout.right() + 10, layout.bottom() + 10, 0x66000000);
 
-        context.fill(layout.left(), layout.top(), layout.right(), layout.top() + HEADER_HEIGHT, 0xFF2A2A2A);
+        // Letter border + paper
+        context.fill(layout.left() - 1, layout.top() - 1, layout.right() + 1, layout.bottom() + 1, 0xFF8A6A3A);
+        context.fill(layout.left(), layout.top(), layout.right(), layout.bottom(), 0xFFF3E7C9);
+        context.fill(layout.left() + 4, layout.top() + 4, layout.right() - 4, layout.bottom() - 4, 0xFFF8EFD8);
 
+        // Soft inner tint for the body
         context.fill(
                 layout.contentLeft(),
                 layout.bodyTop() - 6,
                 layout.contentRight(),
                 layout.footerTop() - 10,
-                0x44101010
-        );
-
-        context.fill(
-                layout.contentLeft(),
-                layout.footerTop(),
-                layout.contentRight(),
-                layout.footerTop() + 1,
-                0x66FFFFFF
+                0x11A07A44
         );
 
         super.render(context, mouseX, mouseY, delta);
 
-        context.drawCenteredString(this.font, this.title, this.width / 2, layout.top() + 8, 0xFFFFFFFF);
+        int titleColor = 0xFF3A2F1B;
+        int bodyColor = 0xFF5A4A32;
+        int accentColor = 0xFF6E5630;
+        int strongColor = 0xFF241A10;
+
+        // Title without shadow
+        String titleText = this.title.getString();
+        int titleWidth = this.font.width(titleText);
+        int titleX = this.width / 2 - titleWidth / 2;
+        int titleY = layout.top() + 8;
+
+        context.drawString(this.font, titleText, titleX, titleY, titleColor, false);
+
+        // Header underline for letter styling
+        int underlineY = titleY + this.font.lineHeight + 3;
+        context.fill(titleX - 4, underlineY, titleX + titleWidth + 4, underlineY + 1, 0x668A6A3A);
 
         if (invite == null) {
-            context.drawCenteredString(
+            String emptyText = "No pending invites.";
+            int emptyWidth = this.font.width(emptyText);
+
+            context.drawString(
                     this.font,
-                    Component.literal("No pending invites."),
-                    this.width / 2,
+                    emptyText,
+                    this.width / 2 - emptyWidth / 2,
                     layout.bodyTop() + 40,
-                    0xFFD8D8D8
+                    bodyColor,
+                    false
             );
             return;
         }
 
         String counterText = (this.currentIndex + 1) + " / " + AllianceClientState.getPendingInviteCount();
-        context.drawCenteredString(
+        int counterWidth = this.font.width(counterText);
+        context.drawString(
                 this.font,
-                Component.literal(counterText),
-                this.width / 2,
+                counterText,
+                this.width / 2 - counterWidth / 2,
                 layout.bodyTop() + 6,
-                0xFFC0C0C0
+                accentColor,
+                false
         );
 
         int cardTop = layout.bodyTop() + 28;
-        int cardBottom = layout.footerTop() - 18;
+        int cardBottom = layout.footerTop() - 10;
 
+        // Inner letter card
         context.fill(
                 layout.contentLeft() + 4,
                 cardTop,
                 layout.contentRight() - 4,
                 cardBottom,
-                0x22000000
+                0x22D9C39A
         );
+        context.fill(
+                layout.contentLeft() + 4,
+                cardTop,
+                layout.contentRight() - 4,
+                cardTop + 1,
+                0x668A6A3A
+        );
+        context.fill(
+                layout.contentLeft() + 4,
+                cardBottom - 1,
+                layout.contentRight() - 4,
+                cardBottom,
+                0x668A6A3A
+        );
+
+        // Wax seal accent
+        int sealCenterX = layout.contentRight() - 26;
+        int sealCenterY = cardBottom - 20;
+        int sealColor = 0xFF8E2F2F;
+        int sealHighlight = 0xFFB24A4A;
+
+        context.fill(sealCenterX - 8, sealCenterY - 8, sealCenterX + 8, sealCenterY + 8, sealColor);
+        context.fill(sealCenterX - 5, sealCenterY - 5, sealCenterX + 5, sealCenterY + 5, sealHighlight);
 
         int faceX = layout.contentLeft() + 14;
         int faceY = cardTop + 12;
@@ -273,18 +314,31 @@ public class AllianceInviteScreen extends Screen {
         int textX = faceX + FACE_SIZE + 10;
         int y = cardTop + 10;
 
-        context.drawString(this.font, "Alliance", textX, y, 0xFFC0C0C0, true);
+        context.drawString(this.font, "Invitation", textX, y, strongColor, false);
+        y += 16;
+
+        context.drawString(this.font, "You have been invited to join", textX, y, bodyColor, false);
         y += 12;
-        context.drawString(this.font, invite.allianceName(), textX, y, 0xFFFFFFFF, true);
+        context.drawString(this.font, "\"" + invite.allianceName() + "\"", textX, y, strongColor, false);
 
         y += 18;
-        context.drawString(this.font, "Invited by", textX, y, 0xFFC0C0C0, true);
-        y += 12;
-        context.drawString(this.font, invite.ownerName(), textX, y, 0xFFFFD966, true);
+        context.drawString(this.font, "Sent by " + invite.ownerName(), textX, y, accentColor, false);
 
-        int infoY = faceY + FACE_SIZE + 18;
-        context.drawString(this.font, "Accept to join immediately.", layout.contentLeft() + 14, infoY + 12, 0xFFD8D8D8, true);
-        context.drawString(this.font, "Decline to remove this invite.", layout.contentLeft() + 14, infoY + 24, 0xFFAAAAAA, true);
+        int dividerY = layout.footerTop() - 8;
+        context.fill(
+                layout.contentLeft() + 4,
+                dividerY,
+                layout.contentRight() - 4,
+                dividerY + 1,
+                0x668A6A3A
+        );
+
+        int infoX = layout.contentLeft() + 14;
+        int infoLine1Y = dividerY - 24;
+        int infoLine2Y = dividerY - 12;
+
+        context.drawString(this.font, "Accept to join this alliance.", infoX, infoLine1Y, bodyColor, false);
+        context.drawString(this.font, "Decline to dismiss this letter.", infoX, infoLine2Y, bodyColor, false);
     }
 
     @Override
