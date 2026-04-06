@@ -207,12 +207,7 @@ public class AllianceViewScreen extends Screen {
         }
 
         Layout layout = calculateLayout();
-
-        if (handleOwnerRowActionClick(click.x(), click.y(), click.button(), layout)) {
-            return true;
-        }
-
-        return false;
+        return handleOwnerRowActionClick(click.x(), click.y(), click.button(), layout);
     }
 
     @Override
@@ -303,9 +298,13 @@ public class AllianceViewScreen extends Screen {
             return;
         }
 
+        UUID targetUuid = member.uuid();
         String newRole = this.roleEditBox.getValue().trim();
-        ClientPlayNetworking.send(new SetAllianceMemberRolePayload(member.uuid(), newRole));
+
         cancelRoleEditing();
+        this.init();
+
+        ClientPlayNetworking.send(new SetAllianceMemberRolePayload(targetUuid, newRole));
     }
 
     private AllianceViewPayload.MemberEntry findMember(UUID uuid) {

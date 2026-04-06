@@ -115,6 +115,76 @@ public class Alliesandfoes implements ModInitializer {
 			});
 		});
 
+		ServerPlayNetworking.registerGlobalReceiver(KickAllianceMemberPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				var result = AllianceManager.get(context.server())
+						.kickMember(context.server(), context.player(), payload.targetUuid());
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(TransferAllianceOwnershipPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				var result = AllianceManager.get(context.server())
+						.transferOwnership(context.server(), context.player(), payload.newOwnerUuid());
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(SetAllianceMemberRolePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				var result = AllianceManager.get(context.server())
+						.setMemberRole(context.server(), context.player(), payload.targetUuid(), payload.role());
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
+			});
+		});
+
+
+		ServerPlayNetworking.registerGlobalReceiver(LeaveAlliancePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				var result = AllianceManager.get(context.server())
+						.leaveAlliance(context.server(), context.player());
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
+
+				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RespondAllianceJoinRequestPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				var result = AllianceManager.get(context.server())
+						.respondToJoinRequest(
+								context.server(),
+								context.player(),
+								payload.allianceId(),
+								payload.requesterUuid(),
+								payload.accept()
+						);
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
+
+				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());
+			});
+		});
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			List<ServerPlayer> players = server.getPlayerList().getPlayers();
 
