@@ -1,18 +1,29 @@
 package net.cnn_r.alliesandfoes.territory;
 
+import net.cnn_r.alliesandfoes.map.value.ChunkValueEvaluator;
+import net.cnn_r.alliesandfoes.map.value.ChunkValueScoring;
+
 import java.util.Map;
 
 public class TerritoryValueService {
-    public static final int MIN_CHUNK_VALUE = 1;
+    public static final int MIN_CHUNK_VALUE = ChunkValueScoring.MIN_TOTAL_VALUE;
 
     private final Map<ChunkKey, Integer> cachedChunkValues;
+    private final ChunkValueEvaluator chunkValueEvaluator;
 
-    public TerritoryValueService(Map<ChunkKey, Integer> cachedChunkValues) {
+    public TerritoryValueService(
+            Map<ChunkKey, Integer> cachedChunkValues,
+            ChunkValueEvaluator chunkValueEvaluator
+    ) {
         if (cachedChunkValues == null) {
             throw new IllegalArgumentException("cachedChunkValues cannot be null");
         }
+        if (chunkValueEvaluator == null) {
+            throw new IllegalArgumentException("chunkValueEvaluator cannot be null");
+        }
 
         this.cachedChunkValues = cachedChunkValues;
+        this.chunkValueEvaluator = chunkValueEvaluator;
     }
 
     public int getOrCreateChunkValue(ChunkKey chunkKey) {
@@ -22,11 +33,11 @@ public class TerritoryValueService {
 
         Integer cachedValue = this.cachedChunkValues.get(chunkKey);
         if (cachedValue != null) {
-            return Math.max(MIN_CHUNK_VALUE, cachedValue);
+            return ChunkValueScoring.clampToChunkValueRange(cachedValue);
         }
 
         int computedValue = this.computeInitialChunkValue(chunkKey);
-        int stableValue = Math.max(MIN_CHUNK_VALUE, computedValue);
+        int stableValue = ChunkValueScoring.clampToChunkValueRange(computedValue);
         this.cachedChunkValues.put(chunkKey, stableValue);
         return stableValue;
     }
@@ -37,7 +48,7 @@ public class TerritoryValueService {
         }
 
         Integer cachedValue = this.cachedChunkValues.get(chunkKey);
-        return cachedValue == null ? null : Math.max(MIN_CHUNK_VALUE, cachedValue);
+        return cachedValue == null ? null : ChunkValueScoring.clampToChunkValueRange(cachedValue);
     }
 
     public boolean hasCachedChunkValue(ChunkKey chunkKey) {
@@ -49,7 +60,7 @@ public class TerritoryValueService {
             throw new IllegalArgumentException("chunkKey cannot be null");
         }
 
-        this.cachedChunkValues.put(chunkKey, Math.max(MIN_CHUNK_VALUE, value));
+        this.cachedChunkValues.put(chunkKey, ChunkValueScoring.clampToChunkValueRange(value));
     }
 
     public int getCachedValueCount() {
@@ -61,9 +72,10 @@ public class TerritoryValueService {
             throw new IllegalArgumentException("chunkKey cannot be null");
         }
 
-        // V1 valuation:
-        // Keep this intentionally simple and stable until gameplay balancing is finalized.
-        // The important locked behavior is server authority + stable caching + minimum value of 1.
-        return MIN_CHUNK_VALUE;
+        return this.chunkValueEvaluator.evaluate(
+                chunkKey.getDimensionId(),
+                chunkKey.getChunkX(),
+                chunkKey.getChunkZ()
+        );
     }
 }

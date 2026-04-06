@@ -4,7 +4,6 @@ import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.value.BiomeValueRules;
-import net.cnn_r.alliesandfoes.map.value.ChunkValueWeights;
 import net.cnn_r.alliesandfoes.map.value.OreValueRules;
 import net.cnn_r.alliesandfoes.map.value.WaterValueRules;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
@@ -15,6 +14,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.cnn_r.alliesandfoes.map.value.ChunkValueScoring;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -78,13 +78,12 @@ public class ChunkValueAnalyzer {
                 structures
         );
 
-        double weightedScore =
-                oreValue * ChunkValueWeights.ORE_WEIGHT +
-                        structureValue * ChunkValueWeights.STRUCTURE_WEIGHT +
-                        biomeValue * ChunkValueWeights.BIOME_WEIGHT +
-                        waterValue * ChunkValueWeights.WATER_WEIGHT;
-
-        int totalValue = clampToChunkValueRange((int) Math.round(weightedScore));
+        int totalValue = ChunkValueScoring.computeTotalValue(
+                oreValue,
+                structureValue,
+                biomeValue,
+                waterValue
+        );
 
         return new ChunkValueData(pos, totalValue, breakdown);
     }
@@ -200,10 +199,6 @@ public class ChunkValueAnalyzer {
         }
 
         return counts;
-    }
-
-    private int clampToChunkValueRange(int value) {
-        return Math.max(1, Math.min(10, value));
     }
 
     private static class OreCounts {
