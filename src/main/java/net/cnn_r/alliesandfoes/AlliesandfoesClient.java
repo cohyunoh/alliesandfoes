@@ -119,12 +119,40 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(JoinAllianceScreenPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                if (payload.alreadyInAlliance()) {
+                    AllianceClientState.setAllianceState(true, payload.currentAllianceName());
+
+                    if (context.client().player != null) {
+                        context.client().player.displayClientMessage(
+                                Component.literal("You are already in alliance: " + payload.currentAllianceName()),
+                                false
+                        );
+                    }
+                    return;
+                }
+
+                context.client().setScreen(new AllianceJoinScreen(
+                        context.client().screen,
+                        payload.alliances()
+                ));
+            });
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(AllianceJoinRequestPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 AllianceClientState.addJoinRequest(payload);
 
                 Component title = Component.literal("Alliance Join Request");
                 Component body = Component.literal(payload.requesterName() + " wants to join " + payload.allianceName());
+
+                if (context.client().player != null) {
+                    context.client().player.displayClientMessage(
+                            Component.literal(payload.requesterName() + " wants to join " + payload.allianceName() + "."),
+                            false
+                    );
+                }
 
                 SystemToast.add(
                         context.client().getToastManager(),
@@ -170,27 +198,6 @@ public class AlliesandfoesClient implements ClientModInitializer {
                         title,
                         body
                 );
-            });
-        });
-
-        ClientPlayNetworking.registerGlobalReceiver(AllianceJoinRequestPayload.TYPE, (payload, context) -> {
-            context.client().execute(() -> {
-                Component title = Component.literal("Alliance Join Request");
-                Component body = Component.literal(payload.requesterName() + " wants to join " + payload.allianceName());
-
-                SystemToast.add(
-                        context.client().getToastManager(),
-                        SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-                        title,
-                        body
-                );
-
-                if (context.client().player != null) {
-                    context.client().player.displayClientMessage(
-                            Component.literal(payload.requesterName() + " wants to join " + payload.allianceName() + "."),
-                            false
-                    );
-                }
             });
         });
 

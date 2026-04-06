@@ -16,6 +16,7 @@ public class Alliance {
     private final Set<UUID> memberUuids = new LinkedHashSet<>();
     private final Set<UUID> pendingInviteUuids = new LinkedHashSet<>();
     private final Map<UUID, String> memberRoles = new LinkedHashMap<>();
+    private final Set<UUID> pendingJoinRequestUuids = new LinkedHashSet<>();
 
     public Alliance(UUID id, String name, UUID ownerUuid) {
         this.id = id;
@@ -57,6 +58,10 @@ public class Alliance {
         return pendingInviteUuids;
     }
 
+    public Set<UUID> getPendingJoinRequestUuids() {
+        return pendingJoinRequestUuids;
+    }
+
     public Map<UUID, String> getMemberRoles() {
         return memberRoles;
     }
@@ -64,6 +69,7 @@ public class Alliance {
     public void addMember(UUID uuid) {
         memberUuids.add(uuid);
         pendingInviteUuids.remove(uuid);
+        pendingJoinRequestUuids.remove(uuid);
         memberRoles.putIfAbsent(uuid, DEFAULT_MEMBER_ROLE);
     }
 
@@ -88,6 +94,20 @@ public class Alliance {
 
     public boolean hasPendingInvite(UUID uuid) {
         return pendingInviteUuids.contains(uuid);
+    }
+
+    public void addPendingJoinRequest(UUID uuid) {
+        if (!memberUuids.contains(uuid)) {
+            pendingJoinRequestUuids.add(uuid);
+        }
+    }
+
+    public void removePendingJoinRequest(UUID uuid) {
+        pendingJoinRequestUuids.remove(uuid);
+    }
+
+    public boolean hasPendingJoinRequest(UUID uuid) {
+        return pendingJoinRequestUuids.contains(uuid);
     }
 
     public String getRole(UUID uuid) {

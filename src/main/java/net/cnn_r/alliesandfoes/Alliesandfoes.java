@@ -20,6 +20,7 @@ import net.cnn_r.alliesandfoes.network.RequestJoinAllianceScreenPayload;
 import net.cnn_r.alliesandfoes.network.RespondAllianceInvitePayload;
 import net.cnn_r.alliesandfoes.network.SetAllianceMemberRolePayload;
 import net.cnn_r.alliesandfoes.network.TransferAllianceOwnershipPayload;
+import net.cnn_r.alliesandfoes.network.RespondAllianceJoinRequestPayload;
 import net.cnn_r.alliesandfoes.structure.StructureChunkValueCalculator;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
@@ -58,6 +59,7 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(KickAllianceMemberPayload.TYPE, KickAllianceMemberPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(TransferAllianceOwnershipPayload.TYPE, TransferAllianceOwnershipPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(SetAllianceMemberRolePayload.TYPE, SetAllianceMemberRolePayload.STREAM_CODEC);
+		PayloadTypeRegistry.playC2S().register(RespondAllianceJoinRequestPayload.TYPE, RespondAllianceJoinRequestPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -145,6 +147,15 @@ public class Alliesandfoes implements ModInitializer {
 						payload.targetUuid(),
 						payload.role()
 				);
+
+				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
+				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());
+			});
+		});
+		ServerPlayNetworking.registerGlobalReceiver(RespondAllianceJoinRequestPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				var result = AllianceManager.get(context.server())
+						.respondToJoinRequest(context.server(), context.player(), payload.allianceId(), payload.requesterUuid(), payload.accept());
 
 				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
 				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());

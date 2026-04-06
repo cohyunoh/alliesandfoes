@@ -263,10 +263,16 @@ public class AllianceManager {
             return ActionResult.failure("You are already in that alliance.");
         }
 
+        if (alliance.hasPendingJoinRequest(requester.getUUID())) {
+            return ActionResult.failure("You already sent a join request to that alliance.");
+        }
+
         ServerPlayer owner = server.getPlayerList().getPlayer(alliance.getOwnerUuid());
         if (owner == null) {
             return ActionResult.failure("That alliance founder is not online.");
         }
+
+        alliance.addPendingJoinRequest(requester.getUUID());
 
         ServerPlayNetworking.send(owner, new AllianceJoinRequestPayload(
                 alliance.getId(),
@@ -321,6 +327,59 @@ public class AllianceManager {
         }
 
         return ActionResult.success("Alliance invite declined.");
+    }
+
+    public ActionResult respondToJoinRequest(MinecraftServer server, ServerPlayer actor, UUID allianceId, UUID requesterUuid, boolean accept) {
+        Alliance alliance = getAllianceFor(actor.getUUID());
+        if (alliance == null) {
+            return ActionResult.failure("You are not in an alliance.");
+        }
+
+        if (!alliance.getId().equals(allianceId)) {
+            return ActionResult.failure("That join request does not belong to your alliance.");
+        }
+
+        if (!alliance.getOwnerUuid().equals(actor.getUUID())) {
+            return ActionResult.failure("Only the alliance owner can respond to join requests.");
+        }
+
+        if (!alliance.hasPendingJoinRequest(requesterUuid)) {
+            return ActionResult.failure("That join request is no longer pending.");
+        }
+
+        ServerPlayer requester = server.getPlayerList().getPlayer(requesterUuid);
+        alliance.removePendingJoinRequest(requesterUuid);
+
+        if (accept) {
+            if (isPlayerInAlliance(requesterUuid)) {
+                return ActionResult.failure("That player is already in an alliance.");
+            }
+
+            alliance.addMember(requesterUuid);
+            playerToAllianceId.put(requesterUuid, alliance.getId());
+            syncAllianceMembers(server, alliance);
+
+            if (requester != null) {
+                syncPlayer(requester);
+                requester.displayClientMessage(
+                        Component.literal("Your request to join " + alliance.getName() + " was accepted."),
+                        false
+                );
+            }
+
+            sendViewScreen(server, actor);
+            return ActionResult.success("Join request accepted.");
+        }
+
+        if (requester != null) {
+            requester.displayClientMessage(
+                    Component.literal("Your request to join " + alliance.getName() + " was declined."),
+                    false
+            );
+        }
+
+        sendViewScreen(server, actor);
+        return ActionResult.success("Join request declined.");
     }
 
     public ActionResult leaveAlliance(MinecraftServer server, ServerPlayer player) {
