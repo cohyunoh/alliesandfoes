@@ -300,14 +300,14 @@ public class AllianceManager {
         if (accept) {
             alliance.addMember(player.getUUID());
             playerToAllianceId.put(player.getUUID(), alliance.getId());
-            syncAllianceMembers(server, alliance);
+
+            refreshAllianceMembers(server, alliance);
 
             if (owner != null) {
                 owner.displayClientMessage(
                         Component.literal(player.getGameProfile().name() + " joined alliance: " + alliance.getName()),
                         false
                 );
-                sendViewScreen(server, owner);
             }
 
             return ActionResult.success("You joined alliance: " + alliance.getName());
@@ -352,17 +352,16 @@ public class AllianceManager {
 
             alliance.addMember(requesterUuid);
             playerToAllianceId.put(requesterUuid, alliance.getId());
-            syncAllianceMembers(server, alliance);
+
+            refreshAllianceMembers(server, alliance);
 
             if (requester != null) {
-                syncPlayer(requester);
                 requester.displayClientMessage(
                         Component.literal("Your request to join " + alliance.getName() + " was accepted."),
                         false
                 );
             }
 
-            sendViewScreen(server, actor);
             return ActionResult.success("Join request accepted.");
         }
 
@@ -500,14 +499,15 @@ public class AllianceManager {
             playerToAllianceId.remove(playerUuid);
             alliancesById.remove(alliance.getId());
             allianceNameToId.remove(alliance.getName().toLowerCase(Locale.ROOT));
-            syncPlayer(player);
+            refreshRemovedPlayer(server, player);
             return ActionResult.success("Alliance disbanded.");
         }
 
         alliance.removeMember(playerUuid);
         playerToAllianceId.remove(playerUuid);
-        syncPlayer(player);
-        syncAllianceMembers(server, alliance);
+
+        refreshRemovedPlayer(server, player);
+        refreshAllianceMembers(server, alliance);
 
         ServerPlayer owner = server.getPlayerList().getPlayer(alliance.getOwnerUuid());
         if (owner != null) {
@@ -515,7 +515,6 @@ public class AllianceManager {
                     Component.literal(player.getGameProfile().name() + " left the alliance."),
                     false
             );
-            sendViewScreen(server, owner);
         }
 
         return ActionResult.success("You left the alliance.");
@@ -544,15 +543,14 @@ public class AllianceManager {
 
         ServerPlayer target = server.getPlayerList().getPlayer(targetUuid);
         if (target != null) {
-            syncPlayer(target);
+            refreshRemovedPlayer(server, target);
             target.displayClientMessage(
                     Component.literal("You were removed from alliance: " + alliance.getName()),
                     false
             );
         }
 
-        syncAllianceMembers(server, alliance);
-        sendViewScreen(server, actor);
+        refreshAllianceMembers(server, alliance);
 
         return ActionResult.success("Member kicked from alliance.");
     }
@@ -638,5 +636,24 @@ public class AllianceManager {
         public static ActionResult failure(String message) {
             return new ActionResult(false, message);
         }
+    }
+
+    public void sendViewScreenToAlliance(MinecraftServer server, Alliance alliance) {
+        for (UUID memberUuid : alliance.getMemberUuids()) {
+            ServerPlayer player = server.getPlayerList().getPlayer(memberUuid);
+            if (player != null) {
+                sendViewScreen(server, player);
+            }
+        }
+    }
+
+    private void refreshAllianceMembers(MinecraftServer server, Alliance alliance) {
+        syncAllianceMembers(server, alliance);
+        sendViewScreenToAlliance(server, alliance);
+    }
+
+    private void refreshRemovedPlayer(MinecraftServer server, ServerPlayer player) {
+        syncPlayer(player);
+        sendViewScreen(server, player);
     }
 }

@@ -156,7 +156,6 @@ public class MapScreen extends Screen {
 
     private void refreshTopButtons() {
         boolean inAlliance = AllianceClientState.isInAlliance();
-        boolean isOwner = AllianceClientState.isOwner();
         boolean hasPendingInvites = AllianceClientState.hasPendingInvites();
         boolean hasJoinRequests = AllianceClientState.hasJoinRequests();
 
@@ -187,8 +186,8 @@ public class MapScreen extends Screen {
             this.requestsButton.setMessage(getRequestsButtonText());
             this.requestsButton.setX(TOP_BUTTON_X);
             this.requestsButton.setY(TOP_BUTTON_Y + TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING);
-            this.requestsButton.visible = inAlliance && isOwner && hasJoinRequests;
-            this.requestsButton.active = inAlliance && isOwner && hasJoinRequests;
+            this.requestsButton.visible = inAlliance && hasJoinRequests;
+            this.requestsButton.active = inAlliance && hasJoinRequests;
         }
     }
 

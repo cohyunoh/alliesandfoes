@@ -181,10 +181,9 @@ public class Alliesandfoes implements ModInitializer {
 						context.player(),
 						new AllianceCreateResultPayload(result.success(), result.message())
 				);
-
-				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());
 			});
 		});
+
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			List<ServerPlayer> players = server.getPlayerList().getPlayers();
 
