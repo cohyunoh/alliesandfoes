@@ -169,6 +169,15 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     context.client().player.displayClientMessage(Component.literal(payload.message()), false);
                 }
 
+                if (!payload.success() && "Transfer ownership before leaving your alliance.".equals(payload.message())) {
+                    SystemToast.add(
+                            context.client().getToastManager(),
+                            SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                            Component.literal("Cannot Leave Alliance"),
+                            Component.literal(payload.message())
+                    );
+                }
+
                 if (payload.success()) {
                     if (context.client().screen instanceof AllianceCreateScreen allianceCreateScreen) {
                         allianceCreateScreen.onClose();

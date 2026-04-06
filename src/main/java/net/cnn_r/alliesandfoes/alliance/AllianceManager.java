@@ -318,7 +318,6 @@ public class AllianceManager {
                     Component.literal(player.getGameProfile().name() + " declined your alliance invite."),
                     false
             );
-            sendViewScreen(server, owner);
         }
 
         return ActionResult.success("Alliance invite declined.");
@@ -372,7 +371,6 @@ public class AllianceManager {
             );
         }
 
-        sendViewScreen(server, actor);
         return ActionResult.success("Join request declined.");
     }
 
@@ -648,12 +646,10 @@ public class AllianceManager {
     }
 
     private void refreshAllianceMembers(MinecraftServer server, Alliance alliance) {
-        syncAllianceMembers(server, alliance);
         sendViewScreenToAlliance(server, alliance);
     }
 
     private void refreshRemovedPlayer(MinecraftServer server, ServerPlayer player) {
-        syncPlayer(player);
         sendViewScreen(server, player);
     }
 }
