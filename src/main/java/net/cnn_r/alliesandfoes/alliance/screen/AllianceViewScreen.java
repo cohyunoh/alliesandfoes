@@ -1,12 +1,7 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
-import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
-import net.cnn_r.alliesandfoes.network.KickAllianceMemberPayload;
-import net.cnn_r.alliesandfoes.network.LeaveAlliancePayload;
-import net.cnn_r.alliesandfoes.network.RequestAllianceViewPayload;
-import net.cnn_r.alliesandfoes.network.SetAllianceMemberRolePayload;
-import net.cnn_r.alliesandfoes.network.TransferAllianceOwnershipPayload;
+import net.cnn_r.alliesandfoes.network.*;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -36,12 +31,15 @@ public class AllianceViewScreen extends Screen {
     private static final int FACE_SIZE = 16;
     private static final int ROLE_MAX_LENGTH = 20;
 
+    private static final int OWNER_INVITE_BUTTON_SIZE = 20;
+
     private final Screen parent;
     private AllianceViewPayload payload;
 
     private Button backButton;
     private Button refreshButton;
     private Button leaveButton;
+    private Button manageInvitesButton;
 
     private int scrollOffset = 0;
 
@@ -83,6 +81,18 @@ public class AllianceViewScreen extends Screen {
                         .build()
         );
 
+        this.manageInvitesButton = null;
+        if (payload.inAlliance() && AllianceClientState.isOwner()) {
+            int inviteButtonX = layout.contentRight() - OWNER_INVITE_BUTTON_SIZE;
+            int inviteButtonY = layout.bodyTop() + 28;
+
+            this.manageInvitesButton = this.addRenderableWidget(
+                    Button.builder(Component.literal("+"), btn -> openInviteManagement())
+                            .bounds(inviteButtonX, inviteButtonY, OWNER_INVITE_BUTTON_SIZE, OWNER_INVITE_BUTTON_SIZE)
+                            .build()
+            );
+        }
+
         if (this.editingRoleForUuid != null) {
             AllianceViewPayload.MemberEntry editingMember = findMember(this.editingRoleForUuid);
             if (editingMember == null || editingMember.owner()) {
@@ -104,6 +114,10 @@ public class AllianceViewScreen extends Screen {
 
         clampScroll(calculateLayout());
         this.init();
+    }
+
+    private void openInviteManagement() {
+        ClientPlayNetworking.send(new RequestInviteAllianceManagementScreenPayload());
     }
 
     private Layout calculateLayout() {
@@ -502,7 +516,7 @@ public class AllianceViewScreen extends Screen {
         renderMemberRows(context, mouseX, mouseY, layout, strongColor, bodyColor, accentColor);
 
         String footerText = AllianceClientState.isOwner()
-                ? "Owners may promote, edit roles, or remove members."
+                ? "Owners may promote, edit roles, remove members, and manage invites."
                 : "Only the founder may change roles or remove members.";
 
         int rosterBottom = getMemberListBottom(layout);

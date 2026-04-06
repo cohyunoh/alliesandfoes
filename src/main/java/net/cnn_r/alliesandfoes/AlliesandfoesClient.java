@@ -1,27 +1,21 @@
 package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
+import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteManagementScreen;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
-import net.cnn_r.alliesandfoes.network.AllianceCreateResultPayload;
-import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
-import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
-import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
-import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
-import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
-import net.cnn_r.alliesandfoes.network.ChunkStructurePayload;
-import net.cnn_r.alliesandfoes.network.JoinAllianceScreenPayload;
-import net.cnn_r.alliesandfoes.network.PlayerPositionsPayload;
+import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.toasts.SystemToast;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.ChunkPos;
 
@@ -182,6 +176,30 @@ public class AlliesandfoesClient implements ClientModInitializer {
                         allianceJoinScreen.onClose();
                     }
                 }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(InviteAllianceManagementScreenPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                if (!payload.allowed()) {
+                    if (context.client().player != null) {
+                        context.client().player.displayClientMessage(
+                                Component.literal("Only the founder can manage alliance invites."),
+                                false
+                        );
+                    }
+                    return;
+                }
+
+                Screen parent = context.client().screen;
+                if (parent instanceof AllianceInviteManagementScreen inviteManagementScreen) {
+                    parent = inviteManagementScreen.getParentScreen();
+                }
+
+                context.client().setScreen(new AllianceInviteManagementScreen(
+                        parent,
+                        payload
+                ));
             });
         });
 

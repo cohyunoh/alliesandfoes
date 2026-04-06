@@ -1,11 +1,10 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
-import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
-import net.cnn_r.alliesandfoes.network.CreateAlliancePayload;
+import net.cnn_r.alliesandfoes.network.InviteAllianceManagementScreenPayload;
+import net.cnn_r.alliesandfoes.network.SendAllianceInvitesPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.PlayerFaceRenderer;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -19,7 +18,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-public class AllianceCreateScreen extends Screen {
+public class AllianceInviteManagementScreen extends Screen {
     private static final int SCREEN_MARGIN = 18;
 
     private static final int PANEL_WIDTH = 430;
@@ -55,24 +54,31 @@ public class AllianceCreateScreen extends Screen {
     private static final int TITLE_UNDERLINE_GAP = 3;
     private static final int SHADOW_PAD = 8;
 
-    private static final String FOOTER_NOTE = "Choose any eligible players you want to invite when the alliance is created.";
+    private static final String FOOTER_NOTE = "Choose one or more eligible players, then send alliance invitations.";
 
     private final Screen parent;
-    private final List<AllianceCreationScreenPayload.CandidateEntry> candidates;
+    private final String allianceName;
+    private final List<InviteAllianceManagementScreenPayload.CandidateEntry> candidates;
     private final Set<UUID> selectedPlayers = new LinkedHashSet<>();
 
-    private EditBox allianceNameBox;
-    private Button createButton;
+    private Button sendInvitesButton;
     private Button selectAllButton;
     private Button clearSelectionButton;
 
     private int scrollOffset = 0;
 
-    public AllianceCreateScreen(Screen parent, List<AllianceCreationScreenPayload.CandidateEntry> candidates) {
-        super(Component.literal("Alliance Charter"));
+    public AllianceInviteManagementScreen(
+            Screen parent,
+            InviteAllianceManagementScreenPayload payload
+    ) {
+        super(Component.literal("Alliance Invites"));
         this.parent = parent;
-        this.candidates = new ArrayList<>(candidates);
-        this.candidates.sort(Comparator.comparing(AllianceCreationScreenPayload.CandidateEntry::name, String.CASE_INSENSITIVE_ORDER));
+        this.allianceName = payload.allianceName();
+        this.candidates = new ArrayList<>(payload.candidates());
+        this.candidates.sort(Comparator.comparing(
+                InviteAllianceManagementScreenPayload.CandidateEntry::name,
+                String.CASE_INSENSITIVE_ORDER
+        ));
     }
 
     @Override
@@ -81,26 +87,12 @@ public class AllianceCreateScreen extends Screen {
 
         Layout layout = calculateLayout();
 
-        this.allianceNameBox = new EditBox(
-                this.font,
-                layout.nameBoxX(),
-                layout.nameBoxY(),
-                layout.nameBoxWidth(),
-                20,
-                Component.literal("Alliance Name")
-        );
-        this.allianceNameBox.setMaxLength(24);
-        this.allianceNameBox.setHint(Component.literal("Enter alliance name"));
-        this.allianceNameBox.setResponder(value -> updateCreateButtonState());
-        this.addRenderableWidget(this.allianceNameBox);
-        this.setInitialFocus(this.allianceNameBox);
-
         this.selectAllButton = this.addRenderableWidget(
                 Button.builder(Component.literal("Select All"), btn -> {
-                            for (AllianceCreationScreenPayload.CandidateEntry candidate : this.candidates) {
+                            for (InviteAllianceManagementScreenPayload.CandidateEntry candidate : this.candidates) {
                                 this.selectedPlayers.add(candidate.uuid());
                             }
-                            updateToolbarButtons();
+                            updateActionButtons();
                         })
                         .bounds(layout.toolbarLeft(), layout.toolbarY(), layout.selectAllButtonWidth(), TOOLBAR_HEIGHT)
                         .build()
@@ -109,7 +101,7 @@ public class AllianceCreateScreen extends Screen {
         this.clearSelectionButton = this.addRenderableWidget(
                 Button.builder(Component.literal("Clear"), btn -> {
                             this.selectedPlayers.clear();
-                            updateToolbarButtons();
+                            updateActionButtons();
                         })
                         .bounds(
                                 layout.toolbarLeft() + layout.selectAllButtonWidth() + TOOLBAR_GAP,
@@ -122,14 +114,14 @@ public class AllianceCreateScreen extends Screen {
 
         int footerButtonWidth = (layout.contentWidth() - BUTTON_GAP) / 2;
 
-        this.createButton = this.addRenderableWidget(
-                Button.builder(Component.literal("Create Alliance"), btn -> submit())
+        this.sendInvitesButton = this.addRenderableWidget(
+                Button.builder(Component.literal("Send Invites"), btn -> submit())
                         .bounds(layout.contentLeft(), layout.bottomButtonY(), footerButtonWidth, BUTTON_HEIGHT)
                         .build()
         );
 
         this.addRenderableWidget(
-                Button.builder(Component.literal("Cancel"), btn -> onClose())
+                Button.builder(Component.literal("Back"), btn -> onClose())
                         .bounds(
                                 layout.contentLeft() + footerButtonWidth + BUTTON_GAP,
                                 layout.bottomButtonY(),
@@ -140,19 +132,10 @@ public class AllianceCreateScreen extends Screen {
         );
 
         clampScroll(layout);
-        updateCreateButtonState();
-        updateToolbarButtons();
+        updateActionButtons();
     }
 
-    private void updateCreateButtonState() {
-        if (this.createButton == null || this.allianceNameBox == null) {
-            return;
-        }
-
-        this.createButton.active = !this.allianceNameBox.getValue().trim().isEmpty();
-    }
-
-    private void updateToolbarButtons() {
+    private void updateActionButtons() {
         if (this.selectAllButton != null) {
             this.selectAllButton.active = !this.candidates.isEmpty() && this.selectedPlayers.size() < this.candidates.size();
         }
@@ -160,18 +143,21 @@ public class AllianceCreateScreen extends Screen {
         if (this.clearSelectionButton != null) {
             this.clearSelectionButton.active = !this.selectedPlayers.isEmpty();
         }
+
+        if (this.sendInvitesButton != null) {
+            this.sendInvitesButton.active = !this.selectedPlayers.isEmpty();
+        }
     }
 
     private void submit() {
-        String allianceName = this.allianceNameBox.getValue().trim();
-        if (allianceName.isEmpty()) {
+        if (this.selectedPlayers.isEmpty()) {
             return;
         }
 
-        ClientPlayNetworking.send(new CreateAlliancePayload(
-                allianceName,
+        ClientPlayNetworking.send(new SendAllianceInvitesPayload(
                 new ArrayList<>(this.selectedPlayers)
         ));
+        this.onClose();
     }
 
     private Layout calculateLayout() {
@@ -200,16 +186,15 @@ public class AllianceCreateScreen extends Screen {
         int bodyTop = top + HEADER_HEIGHT + (compact ? 7 : 10);
         int topSectionTop = bodyTop - 5;
 
-        int labelToBoxGap = compact ? 2 : 3;
-        int boxToDescriptionGap = compact ? 5 : 6;
-        int descriptionToRosterGap = compact ? 7 : 10;
+        int allianceToSubtitleGap = compact ? 4 : 5;
+        int subtitleToRosterGap = compact ? 8 : 10;
         int rosterToToolbarGap = compact ? 7 : 9;
         int topSectionBottomPad = compact ? 5 : 7;
 
-        int nameLabelY = bodyTop;
-        int nameBoxY = nameLabelY + this.font.lineHeight + labelToBoxGap;
-        int descriptionY = nameBoxY + 20 + boxToDescriptionGap;
-        int rosterHeaderY = descriptionY + this.font.lineHeight + descriptionToRosterGap;
+        int allianceLabelY = bodyTop;
+        int allianceNameY = allianceLabelY + this.font.lineHeight + allianceToSubtitleGap;
+        int subtitleY = allianceNameY + this.font.lineHeight + 2;
+        int rosterHeaderY = subtitleY + this.font.lineHeight + subtitleToRosterGap;
         int toolbarY = rosterHeaderY + this.font.lineHeight + rosterToToolbarGap;
         int topSectionBottom = toolbarY + TOOLBAR_HEIGHT + topSectionBottomPad;
 
@@ -288,9 +273,9 @@ public class AllianceCreateScreen extends Screen {
                 listFrameBottom,
                 footerSectionTop,
                 footerSectionBottom,
-                nameLabelY,
-                nameBoxY,
-                descriptionY,
+                allianceLabelY,
+                allianceNameY,
+                subtitleY,
                 rosterHeaderY,
                 toolbarY,
                 showingTextY,
@@ -333,7 +318,7 @@ public class AllianceCreateScreen extends Screen {
         } else {
             this.selectedPlayers.add(uuid);
         }
-        updateToolbarButtons();
+        updateActionButtons();
     }
 
     @Override
@@ -365,6 +350,10 @@ public class AllianceCreateScreen extends Screen {
         return super.mouseClicked(click, doubled);
     }
 
+    public Screen getParentScreen() {
+        return this.parent;
+    }
+
     private boolean handleListClick(double mouseX, double mouseY, Layout layout) {
         if (!layout.isInsideList(mouseX, mouseY)) {
             return false;
@@ -379,7 +368,7 @@ public class AllianceCreateScreen extends Screen {
             int rowBottom = rowY + ROW_HEIGHT;
 
             if (mouseY >= rowY && mouseY <= rowBottom) {
-                AllianceCreationScreenPayload.CandidateEntry candidate = this.candidates.get(startIndex + visibleIndex);
+                InviteAllianceManagementScreenPayload.CandidateEntry candidate = this.candidates.get(startIndex + visibleIndex);
                 toggleSelectedPlayer(candidate.uuid());
                 return true;
             }
@@ -425,17 +414,21 @@ public class AllianceCreateScreen extends Screen {
         context.drawString(this.font, titleText, titleX, layout.titleY(), titleColor, false);
         context.fill(titleX - 4, layout.titleUnderlineY(), titleX + titleWidth + 4, layout.titleUnderlineY() + 1, RULE_COLOR);
 
-        context.drawString(this.font, "Alliance Name", layout.contentLeft() + 10, layout.nameLabelY(), accentColor, false);
+        context.drawString(this.font, "Alliance", layout.contentLeft() + 10, layout.allianceLabelY(), accentColor, false);
+
+        String visibleAllianceName = this.font.plainSubstrByWidth(this.allianceName, layout.contentWidth() - 20);
+        context.drawString(this.font, visibleAllianceName, layout.contentLeft() + 10, layout.allianceNameY(), strongColor, false);
+
         context.drawString(
                 this.font,
-                "Write a short alliance name, then mark any players you want invited.",
+                "Review the roster below and mark players to invite.",
                 layout.contentLeft() + 10,
-                layout.descriptionY(),
+                layout.subtitleY(),
                 bodyColor,
                 false
         );
 
-        context.drawString(this.font, "Invite Roster", layout.contentLeft() + 10, layout.rosterHeaderY(), strongColor, false);
+        context.drawString(this.font, "Eligible Players", layout.contentLeft() + 10, layout.rosterHeaderY(), strongColor, false);
 
         String availableText = "Available: " + this.candidates.size();
         int availableTextWidth = this.font.width(availableText);
@@ -486,13 +479,13 @@ public class AllianceCreateScreen extends Screen {
             int accentColor
     ) {
         if (this.candidates.isEmpty()) {
-            String empty = "No eligible online players found.";
+            String empty = "No eligible players are available right now.";
             int emptyWidth = this.font.width(empty);
             int emptyX = this.width / 2 - emptyWidth / 2;
             int emptyY = layout.listInnerTop() + 12;
             context.drawString(this.font, empty, emptyX, emptyY, bodyColor, false);
 
-            String hint = "Players already in an alliance are excluded from this roster.";
+            String hint = "Players already allied or already invited are filtered out.";
             int hintWidth = this.font.width(hint);
             context.drawString(
                     this.font,
@@ -518,7 +511,7 @@ public class AllianceCreateScreen extends Screen {
 
         for (int visibleIndex = 0; visibleIndex < (endIndex - startIndex); visibleIndex++) {
             int actualIndex = startIndex + visibleIndex;
-            AllianceCreationScreenPayload.CandidateEntry candidate = this.candidates.get(actualIndex);
+            InviteAllianceManagementScreenPayload.CandidateEntry candidate = this.candidates.get(actualIndex);
 
             int rowX = layout.listInnerLeft();
             int rowY = layout.listInnerTop() + visibleIndex * (ROW_HEIGHT + ROW_SPACING);
@@ -615,7 +608,7 @@ public class AllianceCreateScreen extends Screen {
     private void renderSections(GuiGraphics context, Layout layout) {
         context.fill(layout.contentLeft(), layout.topSectionTop(), layout.contentRight(), layout.topSectionBottom(), TOP_SECTION_COLOR);
 
-        context.drawString(this.font, "Member Roster", layout.contentLeft() + 8, layout.listHeaderY(), 0xFF241A10, false);
+        context.drawString(this.font, "Invite Ledger", layout.contentLeft() + 8, layout.listHeaderY(), 0xFF241A10, false);
 
         String listCountText = "Showing " + getShowingRangeText(layout);
         int countWidth = this.font.width(listCountText);
@@ -653,9 +646,9 @@ public class AllianceCreateScreen extends Screen {
             int listFrameBottom,
             int footerSectionTop,
             int footerSectionBottom,
-            int nameLabelY,
-            int nameBoxY,
-            int descriptionY,
+            int allianceLabelY,
+            int allianceNameY,
+            int subtitleY,
             int rosterHeaderY,
             int toolbarY,
             int showingTextY,
@@ -666,18 +659,6 @@ public class AllianceCreateScreen extends Screen {
             int selectAllButtonWidth,
             int clearButtonWidth
     ) {
-        private int nameBoxX() {
-            return this.contentLeft + 10;
-        }
-
-        public int nameBoxY() {
-            return this.nameBoxY;
-        }
-
-        private int nameBoxWidth() {
-            return this.contentWidth - 20;
-        }
-
         private int toolbarLeft() {
             return this.contentLeft + 10;
         }

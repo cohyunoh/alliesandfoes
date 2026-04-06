@@ -1,11 +1,6 @@
 package net.cnn_r.alliesandfoes.alliance;
 
-import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
-import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
-import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
-import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
-import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
-import net.cnn_r.alliesandfoes.network.JoinAllianceScreenPayload;
+import net.cnn_r.alliesandfoes.network.*;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -380,6 +375,113 @@ public class AllianceManager {
 
         sendViewScreen(server, actor);
         return ActionResult.success("Join request declined.");
+    }
+
+    public void sendInviteManagementScreen(MinecraftServer server, ServerPlayer requester) {
+        Alliance alliance = getAllianceFor(requester.getUUID());
+        if (alliance == null) {
+            ServerPlayNetworking.send(requester, new InviteAllianceManagementScreenPayload(
+                    false,
+                    "",
+                    List.of()
+            ));
+            return;
+        }
+
+        if (!alliance.getOwnerUuid().equals(requester.getUUID())) {
+            ServerPlayNetworking.send(requester, new InviteAllianceManagementScreenPayload(
+                    false,
+                    alliance.getName(),
+                    List.of()
+            ));
+            return;
+        }
+
+        List<InviteAllianceManagementScreenPayload.CandidateEntry> candidates = new ArrayList<>();
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            UUID playerUuid = player.getUUID();
+
+            if (playerUuid.equals(requester.getUUID())) {
+                continue;
+            }
+
+            if (isPlayerInAlliance(playerUuid)) {
+                continue;
+            }
+
+            if (alliance.hasPendingInvite(playerUuid)) {
+                continue;
+            }
+
+            candidates.add(new InviteAllianceManagementScreenPayload.CandidateEntry(
+                    playerUuid,
+                    player.getGameProfile().name()
+            ));
+        }
+
+        ServerPlayNetworking.send(requester, new InviteAllianceManagementScreenPayload(
+                true,
+                alliance.getName(),
+                candidates
+        ));
+    }
+
+    public ActionResult sendAllianceInvites(MinecraftServer server, ServerPlayer actor, Collection<UUID> invitedPlayerUuids) {
+        Alliance alliance = getAllianceFor(actor.getUUID());
+        if (alliance == null) {
+            return ActionResult.failure("You are not in an alliance.");
+        }
+
+        if (!alliance.getOwnerUuid().equals(actor.getUUID())) {
+            return ActionResult.failure("Only the alliance founder can send invites.");
+        }
+
+        if (invitedPlayerUuids == null || invitedPlayerUuids.isEmpty()) {
+            return ActionResult.failure("Select at least one player to invite.");
+        }
+
+        int sentInvites = 0;
+
+        for (UUID invitedUuid : invitedPlayerUuids) {
+            if (invitedUuid == null) {
+                continue;
+            }
+
+            if (invitedUuid.equals(actor.getUUID())) {
+                continue;
+            }
+
+            if (isPlayerInAlliance(invitedUuid)) {
+                continue;
+            }
+
+            if (alliance.hasPendingInvite(invitedUuid)) {
+                continue;
+            }
+
+            ServerPlayer invitedPlayer = server.getPlayerList().getPlayer(invitedUuid);
+            if (invitedPlayer == null) {
+                continue;
+            }
+
+            alliance.addPendingInvite(invitedUuid);
+            sentInvites++;
+
+            ServerPlayNetworking.send(invitedPlayer, new AllianceInvitePayload(
+                    alliance.getId(),
+                    alliance.getName(),
+                    actor.getUUID(),
+                    actor.getGameProfile().name()
+            ));
+        }
+
+        sendViewScreen(server, actor);
+
+        if (sentInvites <= 0) {
+            return ActionResult.failure("No eligible players were available to invite.");
+        }
+
+        return ActionResult.success("Sent " + sentInvites + " alliance invite(s).");
     }
 
     public ActionResult leaveAlliance(MinecraftServer server, ServerPlayer player) {
