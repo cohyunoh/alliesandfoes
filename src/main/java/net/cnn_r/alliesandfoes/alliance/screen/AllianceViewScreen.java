@@ -2,6 +2,7 @@ package net.cnn_r.alliesandfoes.alliance.screen;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.network.*;
+import net.cnn_r.alliesandfoes.alliance.screen.AllianceActionConfirmScreen.ConfirmAction;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -260,7 +261,15 @@ public class AllianceViewScreen extends Screen {
             int actionY = rowY + 8;
 
             if (mouseX >= promoteX && mouseX <= promoteX + 52 && mouseY >= actionY && mouseY <= actionY + 18) {
-                ClientPlayNetworking.send(new TransferAllianceOwnershipPayload(member.uuid()));
+                if (this.minecraft != null) {
+                    this.minecraft.setScreen(new AllianceActionConfirmScreen(
+                            this,
+                            ConfirmAction.PROMOTE,
+                            member.uuid(),
+                            member.name(),
+                            this.payload.allianceName()
+                    ));
+                }
                 return true;
             }
 
@@ -270,7 +279,15 @@ public class AllianceViewScreen extends Screen {
             }
 
             if (mouseX >= kickX && mouseX <= kickX + 43 && mouseY >= actionY && mouseY <= actionY + 18) {
-                ClientPlayNetworking.send(new KickAllianceMemberPayload(member.uuid()));
+                if (this.minecraft != null) {
+                    this.minecraft.setScreen(new AllianceActionConfirmScreen(
+                            this,
+                            ConfirmAction.KICK,
+                            member.uuid(),
+                            member.name(),
+                            this.payload.allianceName()
+                    ));
+                }
                 return true;
             }
         }
