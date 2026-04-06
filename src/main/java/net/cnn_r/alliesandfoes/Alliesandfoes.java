@@ -127,7 +127,6 @@ public class Alliesandfoes implements ModInitializer {
 			context.server().execute(() -> {
 				var result = AllianceManager.get(context.server()).kickMember(context.server(), context.player(), payload.targetUuid());
 				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
-				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());
 			});
 		});
 
@@ -135,7 +134,6 @@ public class Alliesandfoes implements ModInitializer {
 			context.server().execute(() -> {
 				var result = AllianceManager.get(context.server()).transferOwnership(context.server(), context.player(), payload.newOwnerUuid());
 				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
-				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());
 			});
 		});
 
@@ -149,16 +147,15 @@ public class Alliesandfoes implements ModInitializer {
 				);
 
 				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
-				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());
 			});
 		});
+
 		ServerPlayNetworking.registerGlobalReceiver(RespondAllianceJoinRequestPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
 				var result = AllianceManager.get(context.server())
 						.respondToJoinRequest(context.server(), context.player(), payload.allianceId(), payload.requesterUuid(), payload.accept());
 
 				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
-				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());
 			});
 		});
 
