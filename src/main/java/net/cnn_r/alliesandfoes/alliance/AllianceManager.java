@@ -1,6 +1,12 @@
 package net.cnn_r.alliesandfoes.alliance;
 
-import net.cnn_r.alliesandfoes.network.*;
+import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
+import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
+import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
+import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
+import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
+import net.cnn_r.alliesandfoes.network.InviteAllianceManagementScreenPayload;
+import net.cnn_r.alliesandfoes.network.JoinAllianceScreenPayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -8,6 +14,7 @@ import net.minecraft.server.level.ServerPlayer;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,29 +26,35 @@ import java.util.WeakHashMap;
 public class AllianceManager {
     private static final Map<MinecraftServer, AllianceManager> INSTANCES = new WeakHashMap<>();
 
+    private final MinecraftServer server;
     private final Map<UUID, Alliance> alliancesById = new HashMap<>();
     private final Map<UUID, UUID> playerToAllianceId = new HashMap<>();
     private final Map<String, UUID> allianceNameToId = new HashMap<>();
 
+    private AllianceManager(MinecraftServer server) {
+        this.server = server;
+        this.loadFromSavedData();
+    }
+
     public static AllianceManager get(MinecraftServer server) {
-        return INSTANCES.computeIfAbsent(server, ignored -> new AllianceManager());
+        return INSTANCES.computeIfAbsent(server, AllianceManager::new);
     }
 
     public boolean isPlayerInAlliance(UUID playerUuid) {
-        return playerToAllianceId.containsKey(playerUuid);
+        return this.playerToAllianceId.containsKey(playerUuid);
     }
 
     public Alliance getAllianceFor(UUID playerUuid) {
-        UUID allianceId = playerToAllianceId.get(playerUuid);
-        return allianceId == null ? null : alliancesById.get(allianceId);
+        UUID allianceId = this.playerToAllianceId.get(playerUuid);
+        return allianceId == null ? null : this.alliancesById.get(allianceId);
     }
 
     public Alliance getAllianceById(UUID allianceId) {
-        return alliancesById.get(allianceId);
+        return this.alliancesById.get(allianceId);
     }
 
     public void syncPlayer(ServerPlayer player) {
-        Alliance alliance = getAllianceFor(player.getUUID());
+        Alliance alliance = this.getAllianceFor(player.getUUID());
         if (alliance == null) {
             ServerPlayNetworking.send(player, new AllianceStatePayload(false, ""));
         } else {
@@ -53,13 +66,13 @@ public class AllianceManager {
         for (UUID memberUuid : alliance.getMemberUuids()) {
             ServerPlayer player = server.getPlayerList().getPlayer(memberUuid);
             if (player != null) {
-                syncPlayer(player);
+                this.syncPlayer(player);
             }
         }
     }
 
     public void sendCreationScreen(MinecraftServer server, ServerPlayer requester) {
-        Alliance existing = getAllianceFor(requester.getUUID());
+        Alliance existing = this.getAllianceFor(requester.getUUID());
         if (existing != null) {
             ServerPlayNetworking.send(requester, new AllianceCreationScreenPayload(
                     true,
@@ -75,7 +88,7 @@ public class AllianceManager {
                 continue;
             }
 
-            if (isPlayerInAlliance(player.getUUID())) {
+            if (this.isPlayerInAlliance(player.getUUID())) {
                 continue;
             }
 
@@ -93,7 +106,7 @@ public class AllianceManager {
     }
 
     public void sendJoinScreen(MinecraftServer server, ServerPlayer requester) {
-        Alliance existing = getAllianceFor(requester.getUUID());
+        Alliance existing = this.getAllianceFor(requester.getUUID());
         if (existing != null) {
             ServerPlayNetworking.send(requester, new JoinAllianceScreenPayload(
                     true,
@@ -129,7 +142,7 @@ public class AllianceManager {
     }
 
     public void sendViewScreen(MinecraftServer server, ServerPlayer requester) {
-        Alliance alliance = getAllianceFor(requester.getUUID());
+        Alliance alliance = this.getAllianceFor(requester.getUUID());
         if (alliance == null) {
             ServerPlayNetworking.send(requester, new AllianceViewPayload(
                     false,
@@ -179,7 +192,7 @@ public class AllianceManager {
     }
 
     public CreationResult createAlliance(MinecraftServer server, ServerPlayer owner, String rawName, Collection<UUID> invitedPlayers) {
-        if (isPlayerInAlliance(owner.getUUID())) {
+        if (this.isPlayerInAlliance(owner.getUUID())) {
             return CreationResult.failure("You are already in an alliance.");
         }
 
@@ -193,24 +206,30 @@ public class AllianceManager {
         }
 
         String normalized = allianceName.toLowerCase(Locale.ROOT);
-        if (allianceNameToId.containsKey(normalized)) {
+        if (this.allianceNameToId.containsKey(normalized)) {
             return CreationResult.failure("That alliance name is already taken.");
         }
 
         Alliance alliance = new Alliance(UUID.randomUUID(), allianceName, owner.getUUID());
-        alliancesById.put(alliance.getId(), alliance);
-        playerToAllianceId.put(owner.getUUID(), alliance.getId());
-        allianceNameToId.put(normalized, alliance.getId());
+        this.alliancesById.put(alliance.getId(), alliance);
+        this.playerToAllianceId.put(owner.getUUID(), alliance.getId());
+        this.allianceNameToId.put(normalized, alliance.getId());
 
         int sentInvites = 0;
 
         for (UUID invitedUuid : invitedPlayers) {
+            if (invitedUuid == null) {
+                continue;
+            }
+
             if (invitedUuid.equals(owner.getUUID())) {
                 continue;
             }
-            if (isPlayerInAlliance(invitedUuid)) {
+
+            if (this.isPlayerInAlliance(invitedUuid)) {
                 continue;
             }
+
             if (alliance.hasPendingInvite(invitedUuid)) {
                 continue;
             }
@@ -231,7 +250,8 @@ public class AllianceManager {
             ));
         }
 
-        syncPlayer(owner);
+        this.save();
+        this.syncPlayer(owner);
 
         String message = sentInvites > 0
                 ? "Alliance created. Sent " + sentInvites + " invite(s)."
@@ -241,11 +261,11 @@ public class AllianceManager {
     }
 
     public ActionResult requestJoinAlliance(MinecraftServer server, ServerPlayer requester, UUID allianceId) {
-        if (isPlayerInAlliance(requester.getUUID())) {
+        if (this.isPlayerInAlliance(requester.getUUID())) {
             return ActionResult.failure("You are already in an alliance.");
         }
 
-        Alliance alliance = getAllianceById(allianceId);
+        Alliance alliance = this.getAllianceById(allianceId);
         if (alliance == null) {
             return ActionResult.failure("That alliance no longer exists.");
         }
@@ -268,6 +288,7 @@ public class AllianceManager {
         }
 
         alliance.addPendingJoinRequest(requester.getUUID());
+        this.save();
 
         ServerPlayNetworking.send(owner, new AllianceJoinRequestPayload(
                 alliance.getId(),
@@ -280,11 +301,11 @@ public class AllianceManager {
     }
 
     public ActionResult respondToInvite(MinecraftServer server, ServerPlayer player, UUID allianceId, boolean accept) {
-        if (isPlayerInAlliance(player.getUUID())) {
+        if (this.isPlayerInAlliance(player.getUUID())) {
             return ActionResult.failure("You are already in an alliance.");
         }
 
-        Alliance alliance = getAllianceById(allianceId);
+        Alliance alliance = this.getAllianceById(allianceId);
         if (alliance == null) {
             return ActionResult.failure("That alliance no longer exists.");
         }
@@ -299,9 +320,10 @@ public class AllianceManager {
 
         if (accept) {
             alliance.addMember(player.getUUID());
-            playerToAllianceId.put(player.getUUID(), alliance.getId());
+            this.playerToAllianceId.put(player.getUUID(), alliance.getId());
 
-            refreshAllianceMembers(server, alliance);
+            this.save();
+            this.refreshAllianceMembers(server, alliance);
 
             if (owner != null) {
                 owner.displayClientMessage(
@@ -312,6 +334,8 @@ public class AllianceManager {
 
             return ActionResult.success("You joined alliance: " + alliance.getName());
         }
+
+        this.save();
 
         if (owner != null) {
             owner.displayClientMessage(
@@ -324,7 +348,7 @@ public class AllianceManager {
     }
 
     public ActionResult respondToJoinRequest(MinecraftServer server, ServerPlayer actor, UUID allianceId, UUID requesterUuid, boolean accept) {
-        Alliance alliance = getAllianceFor(actor.getUUID());
+        Alliance alliance = this.getAllianceFor(actor.getUUID());
         if (alliance == null) {
             return ActionResult.failure("You are not in an alliance.");
         }
@@ -345,14 +369,15 @@ public class AllianceManager {
         alliance.removePendingJoinRequest(requesterUuid);
 
         if (accept) {
-            if (isPlayerInAlliance(requesterUuid)) {
+            if (this.isPlayerInAlliance(requesterUuid)) {
                 return ActionResult.failure("That player is already in an alliance.");
             }
 
             alliance.addMember(requesterUuid);
-            playerToAllianceId.put(requesterUuid, alliance.getId());
+            this.playerToAllianceId.put(requesterUuid, alliance.getId());
 
-            refreshAllianceMembers(server, alliance);
+            this.save();
+            this.refreshAllianceMembers(server, alliance);
 
             if (requester != null) {
                 requester.displayClientMessage(
@@ -363,6 +388,8 @@ public class AllianceManager {
 
             return ActionResult.success("Join request accepted.");
         }
+
+        this.save();
 
         if (requester != null) {
             requester.displayClientMessage(
@@ -375,7 +402,7 @@ public class AllianceManager {
     }
 
     public void sendInviteManagementScreen(MinecraftServer server, ServerPlayer requester) {
-        Alliance alliance = getAllianceFor(requester.getUUID());
+        Alliance alliance = this.getAllianceFor(requester.getUUID());
         if (alliance == null) {
             ServerPlayNetworking.send(requester, new InviteAllianceManagementScreenPayload(
                     false,
@@ -402,7 +429,7 @@ public class AllianceManager {
                 continue;
             }
 
-            if (isPlayerInAlliance(playerUuid)) {
+            if (this.isPlayerInAlliance(playerUuid)) {
                 continue;
             }
 
@@ -424,7 +451,7 @@ public class AllianceManager {
     }
 
     public ActionResult sendAllianceInvites(MinecraftServer server, ServerPlayer actor, Collection<UUID> invitedPlayerUuids) {
-        Alliance alliance = getAllianceFor(actor.getUUID());
+        Alliance alliance = this.getAllianceFor(actor.getUUID());
         if (alliance == null) {
             return ActionResult.failure("You are not in an alliance.");
         }
@@ -448,7 +475,7 @@ public class AllianceManager {
                 continue;
             }
 
-            if (isPlayerInAlliance(invitedUuid)) {
+            if (this.isPlayerInAlliance(invitedUuid)) {
                 continue;
             }
 
@@ -472,17 +499,18 @@ public class AllianceManager {
             ));
         }
 
-        sendViewScreen(server, actor);
-
         if (sentInvites <= 0) {
             return ActionResult.failure("No eligible players were available to invite.");
         }
+
+        this.save();
+        this.sendViewScreen(server, actor);
 
         return ActionResult.success("Sent " + sentInvites + " alliance invite(s).");
     }
 
     public ActionResult leaveAlliance(MinecraftServer server, ServerPlayer player) {
-        Alliance alliance = getAllianceFor(player.getUUID());
+        Alliance alliance = this.getAllianceFor(player.getUUID());
         if (alliance == null) {
             return ActionResult.failure("You are not in an alliance.");
         }
@@ -494,18 +522,22 @@ public class AllianceManager {
                 return ActionResult.failure("Transfer ownership before leaving your alliance.");
             }
 
-            playerToAllianceId.remove(playerUuid);
-            alliancesById.remove(alliance.getId());
-            allianceNameToId.remove(alliance.getName().toLowerCase(Locale.ROOT));
-            refreshRemovedPlayer(server, player);
+            this.playerToAllianceId.remove(playerUuid);
+            this.alliancesById.remove(alliance.getId());
+            this.allianceNameToId.remove(alliance.getName().toLowerCase(Locale.ROOT));
+
+            this.save();
+            this.refreshRemovedPlayer(server, player);
+
             return ActionResult.success("Alliance disbanded.");
         }
 
         alliance.removeMember(playerUuid);
-        playerToAllianceId.remove(playerUuid);
+        this.playerToAllianceId.remove(playerUuid);
 
-        refreshRemovedPlayer(server, player);
-        refreshAllianceMembers(server, alliance);
+        this.save();
+        this.refreshRemovedPlayer(server, player);
+        this.refreshAllianceMembers(server, alliance);
 
         ServerPlayer owner = server.getPlayerList().getPlayer(alliance.getOwnerUuid());
         if (owner != null) {
@@ -519,7 +551,7 @@ public class AllianceManager {
     }
 
     public ActionResult kickMember(MinecraftServer server, ServerPlayer actor, UUID targetUuid) {
-        Alliance alliance = getAllianceFor(actor.getUUID());
+        Alliance alliance = this.getAllianceFor(actor.getUUID());
         if (alliance == null) {
             return ActionResult.failure("You are not in an alliance.");
         }
@@ -537,24 +569,25 @@ public class AllianceManager {
         }
 
         alliance.removeMember(targetUuid);
-        playerToAllianceId.remove(targetUuid);
+        this.playerToAllianceId.remove(targetUuid);
+        this.save();
 
         ServerPlayer target = server.getPlayerList().getPlayer(targetUuid);
         if (target != null) {
-            refreshRemovedPlayer(server, target);
+            this.refreshRemovedPlayer(server, target);
             target.displayClientMessage(
                     Component.literal("You were removed from alliance: " + alliance.getName()),
                     false
             );
         }
 
-        refreshAllianceMembers(server, alliance);
+        this.refreshAllianceMembers(server, alliance);
 
         return ActionResult.success("Member kicked from alliance.");
     }
 
     public ActionResult transferOwnership(MinecraftServer server, ServerPlayer actor, UUID newOwnerUuid) {
-        Alliance alliance = getAllianceFor(actor.getUUID());
+        Alliance alliance = this.getAllianceFor(actor.getUUID());
         if (alliance == null) {
             return ActionResult.failure("You are not in an alliance.");
         }
@@ -568,7 +601,9 @@ public class AllianceManager {
         }
 
         alliance.setOwnerUuid(newOwnerUuid);
-        syncAllianceMembers(server, alliance);
+        this.save();
+
+        this.syncAllianceMembers(server, alliance);
 
         ServerPlayer newOwner = server.getPlayerList().getPlayer(newOwnerUuid);
         if (newOwner != null) {
@@ -578,13 +613,13 @@ public class AllianceManager {
             );
         }
 
-        sendViewScreen(server, actor);
+        this.sendViewScreen(server, actor);
 
         return ActionResult.success("Alliance ownership transferred.");
     }
 
     public ActionResult setMemberRole(MinecraftServer server, ServerPlayer actor, UUID targetUuid, String rawRole) {
-        Alliance alliance = getAllianceFor(actor.getUUID());
+        Alliance alliance = this.getAllianceFor(actor.getUUID());
         if (alliance == null) {
             return ActionResult.failure("You are not in an alliance.");
         }
@@ -603,6 +638,7 @@ public class AllianceManager {
 
         String sanitizedRole = Alliance.sanitizeRole(rawRole);
         alliance.setRole(targetUuid, sanitizedRole);
+        this.save();
 
         ServerPlayer target = server.getPlayerList().getPlayer(targetUuid);
         if (target != null) {
@@ -612,8 +648,54 @@ public class AllianceManager {
             );
         }
 
-        sendViewScreen(server, actor);
+        this.sendViewScreen(server, actor);
         return ActionResult.success("Updated member role to: " + sanitizedRole);
+    }
+
+    public void sendViewScreenToAlliance(MinecraftServer server, Alliance alliance) {
+        for (UUID memberUuid : alliance.getMemberUuids()) {
+            ServerPlayer player = server.getPlayerList().getPlayer(memberUuid);
+            if (player != null) {
+                this.sendViewScreen(server, player);
+            }
+        }
+    }
+
+    private void refreshAllianceMembers(MinecraftServer server, Alliance alliance) {
+        this.sendViewScreenToAlliance(server, alliance);
+    }
+
+    private void refreshRemovedPlayer(MinecraftServer server, ServerPlayer player) {
+        this.sendViewScreen(server, player);
+        this.syncPlayer(player);
+    }
+
+    private void loadFromSavedData() {
+        this.alliancesById.clear();
+        this.playerToAllianceId.clear();
+        this.allianceNameToId.clear();
+
+        AllianceSavedData savedData = AllianceSavedData.get(this.server);
+
+        List<Alliance> loadedAlliances = new ArrayList<>(savedData.createLiveAlliances());
+        loadedAlliances.sort(Comparator.comparing(Alliance::getName, String.CASE_INSENSITIVE_ORDER));
+
+        for (Alliance alliance : loadedAlliances) {
+            this.registerLoadedAlliance(alliance);
+        }
+    }
+
+    private void registerLoadedAlliance(Alliance alliance) {
+        this.alliancesById.put(alliance.getId(), alliance);
+        this.allianceNameToId.put(alliance.getName().toLowerCase(Locale.ROOT), alliance.getId());
+
+        for (UUID memberUuid : alliance.getMemberUuids()) {
+            this.playerToAllianceId.put(memberUuid, alliance.getId());
+        }
+    }
+
+    private void save() {
+        AllianceSavedData.get(this.server).saveFromLiveAlliances(this.alliancesById.values());
     }
 
     public record CreationResult(boolean success, String message, Alliance alliance) {
@@ -634,22 +716,5 @@ public class AllianceManager {
         public static ActionResult failure(String message) {
             return new ActionResult(false, message);
         }
-    }
-
-    public void sendViewScreenToAlliance(MinecraftServer server, Alliance alliance) {
-        for (UUID memberUuid : alliance.getMemberUuids()) {
-            ServerPlayer player = server.getPlayerList().getPlayer(memberUuid);
-            if (player != null) {
-                sendViewScreen(server, player);
-            }
-        }
-    }
-
-    private void refreshAllianceMembers(MinecraftServer server, Alliance alliance) {
-        sendViewScreenToAlliance(server, alliance);
-    }
-
-    private void refreshRemovedPlayer(MinecraftServer server, ServerPlayer player) {
-        sendViewScreen(server, player);
     }
 }
