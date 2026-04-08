@@ -227,56 +227,48 @@ public class Alliesandfoes implements ModInitializer {
 			}
 		});
 
-		ServerChunkEvents.CHUNK_LOAD.register((world, chunk) -> {
-			if (!(world instanceof ServerLevel serverLevel)) {
-				return;
-			}
-
-			ChunkPos pos = chunk.getPos();
-			var structureData = StructureChunkValueCalculator.analyze(serverLevel, pos);
-			ChunkStructurePayload payload = new ChunkStructurePayload(
-					pos.x,
-					pos.z,
-					structureData.getStructureValue(),
-					structureData.getStructureNames()
-			);
-			TerritoryChunkBatchPayload territoryPayload = buildTerritoryPayloadForChunks(
-					serverLevel,
-					List.of(pos)
-			);
-			for (ServerPlayer player : serverLevel.players()) {
-				ServerPlayNetworking.send(player, payload);
-				ServerPlayNetworking.send(player, territoryPayload);
-			}
-		});
-
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+
+			// Sync nearby cached structure data once when the player joins.
+			// Chunk-load-driven sync was removed to avoid passive per-chunk work.
 			ServerPlayer player = handler.player;
+
 			ServerLevel level = player.level();
 			ChunkPos center = player.chunkPosition();
-			List<ChunkPos> nearbyChunks = new ArrayList<>();
+
 			AllianceManager.get(server).syncPlayer(player);
 
 			for (int chunkX = center.x - 8; chunkX <= center.x + 8; chunkX++) {
+
 				for (int chunkZ = center.z - 8; chunkZ <= center.z + 8; chunkZ++) {
+
 					ChunkPos pos = new ChunkPos(chunkX, chunkZ);
 
 					if (!level.isLoaded(pos.getWorldPosition())) {
+
 						continue;
+
 					}
-					nearbyChunks.add(pos);
+
 					var structureData = StructureChunkValueCalculator.analyze(level, pos);
+
 					ChunkStructurePayload payload = new ChunkStructurePayload(
+
 							pos.x,
+
 							pos.z,
 							structureData.getStructureValue(),
+
 							structureData.getStructureNames()
+
 					);
+
 					ServerPlayNetworking.send(player, payload);
+
 				}
+
 			}
-			TerritoryChunkBatchPayload territoryPayload = buildTerritoryPayloadForChunks(level, nearbyChunks);
-			ServerPlayNetworking.send(player, territoryPayload);
+
 		});
 	}
 
