@@ -883,11 +883,19 @@ public class MapScreen extends Screen {
                 );
             }
 
-            lines.add(
-                    Component.literal("Territory Value: ")
-                            .append(Component.literal(String.valueOf(territoryData.chunkValue())).withColor(getOverallValueColor(territoryData.chunkValue())))
-                            .getVisualOrderText()
-            );
+            if (territoryData.chunkValue() >= 0) {
+                lines.add(
+                        Component.literal("Territory Value: ")
+                                .append(Component.literal(String.valueOf(territoryData.chunkValue())).withColor(getOverallValueColor(territoryData.chunkValue())))
+                                .getVisualOrderText()
+                );
+            } else {
+                lines.add(
+                        Component.literal("Territory Value: ")
+                                .append(Component.literal("Not cached").withColor(0xAAAAAA))
+                                .getVisualOrderText()
+                );
+            }
         }
         TerritoryPreviewChunkPayload previewData = this.getTerritoryPreviewData(this.hoveredChunk);
         if (previewData != null) {

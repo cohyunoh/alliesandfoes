@@ -21,7 +21,7 @@ public final class TerritoryMapSyncService {
 
             int chunkValue = view.cachedChunkValue() != null
                     ? view.cachedChunkValue()
-                    : queryService.getOrCreateChunkValue(chunk);
+                    : -1;
 
             payloads.add(new TerritoryChunkDataPayload(
                     chunk.getDimensionId(),
