@@ -289,6 +289,20 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(TerritoryPreviewBatchPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                for (TerritoryPreviewChunkPayload chunkData : payload.chunks()) {
+                    ChunkKey chunkKey = new ChunkKey(
+                            chunkData.dimensionId(),
+                            chunkData.chunkX(),
+                            chunkData.chunkZ()
+                    );
+
+                    MapState.getTerritoryPreviewSyncCache().put(chunkKey, chunkData);
+                }
+            });
+        });
+
         KeyBindings.register();
     }
 
@@ -325,5 +339,19 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 title,
                 body
         );
+    }
+
+    public static void requestTerritoryPreview(
+            RequestTerritoryPreviewPayload.PreviewType previewType,
+            String dimensionId,
+            java.util.UUID anchorId,
+            java.util.List<RequestTerritoryPreviewPayload.ChunkCoord> chunks
+    ) {
+        ClientPlayNetworking.send(new RequestTerritoryPreviewPayload(
+                previewType,
+                dimensionId,
+                anchorId,
+                chunks
+        ));
     }
 }

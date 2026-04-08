@@ -503,6 +503,15 @@ public class TerritoryManager {
         }
         return trimmed;
     }
+
+    public UUID getAllianceIdForPlayer(UUID playerUuid) {
+        Alliance alliance = AllianceManager.get(this.server).getAllianceFor(playerUuid);
+        return alliance == null ? null : alliance.getId();
+    }
+
+    public boolean isAllowedDimensionForPreview(String dimensionId) {
+        return this.resolveLevelByDimensionId(dimensionId) != null;
+    }
     
     public record ActionResult(
             boolean success,

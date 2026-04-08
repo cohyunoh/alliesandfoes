@@ -10,12 +10,12 @@ import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
+import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
-import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
-import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
-import net.cnn_r.alliesandfoes.network.RequestAllianceCreationScreenPayload;
-import net.cnn_r.alliesandfoes.network.RequestAllianceViewPayload;
-import net.cnn_r.alliesandfoes.network.RequestJoinAllianceScreenPayload;
+import net.cnn_r.alliesandfoes.network.*;
+import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
+import net.cnn_r.alliesandfoes.map.cache.TerritoryPreviewSyncCache;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -34,6 +34,7 @@ import net.minecraft.world.level.ChunkPos;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public class MapScreen extends Screen {
     private static final int BLOCK_PIXEL_SIZE = 2;
@@ -55,11 +56,26 @@ public class MapScreen extends Screen {
     private static final int TOP_BUTTON_HEIGHT = 20;
     private static final int TOP_BUTTON_SPACING = 6;
 
+    private static final int CLAIMED_CHUNK_FILL_COLOR = 0x442266FF;
+    private static final int CLAIMED_CHUNK_BORDER_COLOR = 0xAA66AAFF;
+    private static final int ANCHOR_CHUNK_FILL_COLOR = 0x6644DDFF;
+    private static final int ANCHOR_CHUNK_BORDER_COLOR = 0xFF99EEFF;
+
+    private static final int PREVIEW_VALID_FILL_COLOR = 0x4433DD33;
+    private static final int PREVIEW_VALID_BORDER_COLOR = 0xFF55FF55;
+    private static final int PREVIEW_INVALID_FILL_COLOR = 0x44DD3333;
+    private static final int PREVIEW_INVALID_BORDER_COLOR = 0xFFFF5555;
+
+    private static final int PREVIEW_STATUS_BG_COLOR = 0xA0000000;
+    private static final int PREVIEW_STATUS_FOUND_COLOR = 0x55FF55;
+
     private MapTexture mapTexture;
     private MapRenderer renderer;
     private ChunkCache cache;
     private ChunkValueCache chunkValueCache;
     private PlayerMarkerCache playerMarkerCache;
+    private TerritoryChunkSyncCache territoryChunkSyncCache;
+    private TerritoryPreviewSyncCache territoryPreviewSyncCache;
 
     private double cameraBlockX;
     private double cameraBlockZ;
@@ -71,6 +87,19 @@ public class MapScreen extends Screen {
     private Button inviteButton;
     private Button requestsButton;
 
+    private enum TerritoryPreviewMode {
+        NONE,
+        FOUND,
+        CLAIM,
+        UNCLAIM
+    }
+
+    private TerritoryPreviewMode territoryPreviewMode = TerritoryPreviewMode.NONE;
+    private UUID selectedAnchorId;
+    private ChunkPos lastRequestedPreviewChunk;
+    private long lastPreviewRequestMillis;
+    private static final long PREVIEW_REQUEST_INTERVAL_MS = 150L;
+
     public MapScreen() {
         super(Component.literal("World Map"));
     }
@@ -81,6 +110,8 @@ public class MapScreen extends Screen {
         this.renderer = new MapRenderer(this.mapTexture);
         this.cache = MapState.getChunkCache();
         this.chunkValueCache = MapState.getChunkValueCache();
+        this.territoryChunkSyncCache = MapState.getTerritoryChunkSyncCache();
+        this.territoryPreviewSyncCache = MapState.getTerritoryPreviewSyncCache();
         ChunkScanner scanner = MapState.getScanner();
         this.playerMarkerCache = MapState.getPlayerMarkerCache();
         MapPersistence.load(this.cache, this.chunkValueCache, getMapId());
@@ -237,11 +268,15 @@ public class MapScreen extends Screen {
 
         this.hoveredChunk = this.getChunkAtMouse(mouseX, mouseY);
 
+        this.requestHoveredTerritoryPreview();
+
         this.renderChunkOverlays(context);
         this.renderVisiblePlayers(context, level);
 
         super.render(context, mouseX, mouseY, delta);
         renderTopButtonGlows(context, delta);
+
+        this.renderTerritoryPreviewStatus(context);
 
         this.renderHoveredChunkTooltip(context, mouseX, mouseY);
     }
@@ -397,7 +432,14 @@ public class MapScreen extends Screen {
                 this.followPlayer = false;
                 return true;
             }
-            case 82 -> {
+            case 70 -> { // F
+                this.clearTerritoryPreviewState();
+                this.territoryPreviewMode = TerritoryPreviewMode.FOUND;
+                return true;
+            }
+            case 82 -> { // R
+                this.clearTerritoryPreviewState();
+
                 if (this.minecraft.player != null) {
                     this.cameraBlockX = this.minecraft.player.getX();
                     this.cameraBlockZ = this.minecraft.player.getZ();
@@ -412,6 +454,7 @@ public class MapScreen extends Screen {
 
     @Override
     public void removed() {
+        this.clearTerritoryPreviewState();
         super.removed();
         MapPersistence.save(this.cache, this.chunkValueCache, getMapId());
     }
@@ -421,7 +464,7 @@ public class MapScreen extends Screen {
         return false;
     }
 
-    private Identifier getSkinForMarker(net.cnn_r.alliesandfoes.map.data.PlayerMarker marker) {
+    private Identifier getSkinForMarker(PlayerMarker marker) {
         ClientLevel level = this.minecraft.level;
 
         if (level != null) {
@@ -581,16 +624,42 @@ public class MapScreen extends Screen {
         }
 
         boolean chunkLargeEnoughForBorder = size >= MIN_CHUNK_BORDER_SCREEN_SIZE;
+        TerritoryChunkDataPayload territoryData = this.getTerritoryData(pos);
 
-        if (!hovered && !chunkLargeEnoughForBorder) {
+        if (!hovered && !chunkLargeEnoughForBorder && territoryData == null) {
             return;
         }
 
         ChunkValueData valueData = this.chunkValueCache.get(pos);
         boolean showValueColors = this.renderer.getZoom() >= VALUE_BORDER_ZOOM_THRESHOLD;
 
+        if (territoryData != null && territoryData.claimed()) {
+            int territoryFill = territoryData.anchorChunk()
+                    ? ANCHOR_CHUNK_FILL_COLOR
+                    : CLAIMED_CHUNK_FILL_COLOR;
+
+            context.fill(x1, y1, x2, y2, territoryFill);
+        }
+
+        TerritoryPreviewChunkPayload previewData = this.getTerritoryPreviewData(pos);
+
+        if (previewData != null) {
+            int previewFill = previewData.valid()
+                    ? PREVIEW_VALID_FILL_COLOR
+                    : PREVIEW_INVALID_FILL_COLOR;
+            context.fill(x1, y1, x2, y2, previewFill);
+        }
+
         int borderColor;
-        if (valueData != null && showValueColors) {
+        if (previewData != null) {
+            borderColor = previewData.valid()
+                    ? PREVIEW_VALID_BORDER_COLOR
+                    : PREVIEW_INVALID_BORDER_COLOR;
+        } else if (territoryData != null && territoryData.claimed()) {
+            borderColor = territoryData.anchorChunk()
+                    ? ANCHOR_CHUNK_BORDER_COLOR
+                    : CLAIMED_CHUNK_BORDER_COLOR;
+        } else if (valueData != null && showValueColors) {
             borderColor = hovered
                     ? getOverallValueColor(valueData.getTotalValue())
                     : getOverallValueBorderColorSoft(valueData.getTotalValue());
@@ -600,7 +669,11 @@ public class MapScreen extends Screen {
 
         if (hovered) {
             int fillColor;
-            if (valueData != null && showValueColors) {
+            if (territoryData != null && territoryData.claimed()) {
+                fillColor = territoryData.anchorChunk()
+                        ? ANCHOR_CHUNK_FILL_COLOR
+                        : CLAIMED_CHUNK_FILL_COLOR;
+            } else if (valueData != null && showValueColors) {
                 fillColor = getOverallValueFillColor(valueData.getTotalValue());
             } else {
                 fillColor = HOVERED_CHUNK_FILL_COLOR;
@@ -778,12 +851,72 @@ public class MapScreen extends Screen {
 
         lines.add(Component.literal("Chunk [" + this.hoveredChunk.x + ", " + this.hoveredChunk.z + "]").getVisualOrderText());
 
+        if (this.territoryPreviewMode == TerritoryPreviewMode.FOUND) {
+            lines.add(
+                    Component.literal("Found preview active")
+                            .withColor(PREVIEW_STATUS_FOUND_COLOR)
+                            .getVisualOrderText()
+            );
+        }
+
+        TerritoryChunkDataPayload territoryData = this.getTerritoryData(this.hoveredChunk);
+        if (territoryData != null) {
+            if (territoryData.claimed()) {
+                lines.add(
+                        Component.literal("Territory: ")
+                                .append(Component.literal(territoryData.anchorChunk() ? "Anchor Chunk" : "Claimed").withColor(0x99EEFF))
+                                .getVisualOrderText()
+                );
+
+                if (territoryData.allianceId() != null) {
+                    lines.add(Component.literal("Alliance: " + territoryData.allianceId()).getVisualOrderText());
+                }
+
+                if (territoryData.anchorId() != null) {
+                    lines.add(Component.literal("Anchor: " + territoryData.anchorId()).getVisualOrderText());
+                }
+            } else {
+                lines.add(
+                        Component.literal("Territory: ")
+                                .append(Component.literal("Unclaimed").withColor(0xAAAAAA))
+                                .getVisualOrderText()
+                );
+            }
+
+            lines.add(
+                    Component.literal("Territory Value: ")
+                            .append(Component.literal(String.valueOf(territoryData.chunkValue())).withColor(getOverallValueColor(territoryData.chunkValue())))
+                            .getVisualOrderText()
+            );
+        }
+        TerritoryPreviewChunkPayload previewData = this.getTerritoryPreviewData(this.hoveredChunk);
+        if (previewData != null) {
+            lines.add(
+                    Component.literal("Preview: ")
+                            .append(Component.literal(previewData.previewType().name()).withColor(0x99EEFF))
+                            .getVisualOrderText()
+            );
+
+            lines.add(
+                    Component.literal("Valid: ")
+                            .append(Component.literal(previewData.valid() ? "Yes" : "No").withColor(
+                                    previewData.valid() ? 0x55FF55 : 0xFF5555
+                            ))
+                            .getVisualOrderText()
+            );
+
+            lines.add(Component.literal("Cost: " + previewData.cost()).getVisualOrderText());
+
+            if (!previewData.reason().isEmpty()) {
+                lines.add(Component.literal(previewData.reason()).withColor(0xFFAA55).getVisualOrderText());
+            }
+        }
         ChunkValueData valueData = this.chunkValueCache.get(this.hoveredChunk);
         if (valueData != null) {
             ChunkValueBreakdown breakdown = valueData.getBreakdown();
 
             lines.add(
-                    Component.literal("Value: ")
+                    Component.literal("Map Value: ")
                             .append(Component.literal(valueData.getTotalValue() + "/10").withColor(getOverallValueColor(valueData.getTotalValue())))
                             .getVisualOrderText()
             );
@@ -801,8 +934,33 @@ public class MapScreen extends Screen {
                             .append(Component.literal(" (" + breakdown.getWaterValue() + ")"))
                             .getVisualOrderText()
             );
+
+            if (!breakdown.getStructures().isEmpty()) {
+                lines.add(
+                        Component.literal("Structures: ")
+                                .append(Component.literal(formatStructureList(breakdown.getStructures())).withColor(getStructureColor(breakdown.getStructureValue())))
+                                .append(Component.literal(" (" + breakdown.getStructureValue() + ")"))
+                                .getVisualOrderText()
+                );
+            }
+
+            int oreValue =
+                    breakdown.getDiamondOreCount()
+                            + breakdown.getEmeraldOreCount()
+                            + breakdown.getIronOreCount()
+                            + breakdown.getGoldOreCount()
+                            + breakdown.getRedstoneOreCount()
+                            + breakdown.getLapisOreCount()
+                            + breakdown.getCoalOreCount();
+
+            lines.add(
+                    Component.literal("Ore Density: ")
+                            .append(Component.literal(String.valueOf(oreValue)).withColor(getOreColor(breakdown.getOreValue())))
+                            .append(Component.literal(" (" + breakdown.getOreValue() + ")"))
+                            .getVisualOrderText()
+            );
         } else {
-            lines.add(Component.literal("Value data missing - awaiting rescan").withColor(0xFFAA55).getVisualOrderText());
+            lines.add(Component.literal("Map value data missing - awaiting rescan").withColor(0xFFAA55).getVisualOrderText());
         }
 
         context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
@@ -969,6 +1127,96 @@ public class MapScreen extends Screen {
         return 0xAAAAAA;
     }
 
+    private TerritoryChunkDataPayload getTerritoryData(ChunkPos pos) {
+        if (this.minecraft == null || this.minecraft.level == null || this.territoryChunkSyncCache == null) {
+            return null;
+        }
+
+        ChunkKey chunkKey = ChunkKey.of(this.minecraft.level, pos);
+        return this.territoryChunkSyncCache.get(chunkKey);
+    }
+
+    private TerritoryPreviewChunkPayload getTerritoryPreviewData(ChunkPos pos) {
+        if (this.minecraft == null || this.minecraft.level == null || this.territoryPreviewSyncCache == null) {
+            return null;
+        }
+
+        ChunkKey chunkKey = ChunkKey.of(this.minecraft.level, pos);
+        return this.territoryPreviewSyncCache.get(chunkKey);
+    }
+
+    private void requestHoveredTerritoryPreview() {
+        if (this.minecraft == null || this.minecraft.level == null) {
+            return;
+        }
+
+        if (this.territoryPreviewMode == TerritoryPreviewMode.NONE) {
+            return;
+        }
+
+        if (this.hoveredChunk == null) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (this.hoveredChunk.equals(this.lastRequestedPreviewChunk)
+                && now - this.lastPreviewRequestMillis < PREVIEW_REQUEST_INTERVAL_MS) {
+            return;
+        }
+
+        AlliesandfoesClient.requestTerritoryPreview(
+                RequestTerritoryPreviewPayload.PreviewType.FOUND,
+                this.minecraft.level.dimension().identifier().toString(),
+                null,
+                List.of(new RequestTerritoryPreviewPayload.ChunkCoord(
+                        this.hoveredChunk.x,
+                        this.hoveredChunk.z
+                ))
+        );
+
+        this.lastRequestedPreviewChunk = this.hoveredChunk;
+        this.lastPreviewRequestMillis = now;
+    }
+
+    private void renderTerritoryPreviewStatus(GuiGraphics context) {
+        if (this.territoryPreviewMode == TerritoryPreviewMode.NONE) {
+            return;
+        }
+
+        String text = switch (this.territoryPreviewMode) {
+            case FOUND -> "Territory Preview: Found Anchor (F active, R reset)";
+            case NONE -> "";
+            case CLAIM -> null;
+            case UNCLAIM -> null;
+        };
+
+        if (text.isEmpty()) {
+            return;
+        }
+
+        int textWidth = this.font.width(text);
+        int x = this.width - textWidth - 14;
+        int y = 12;
+        int color = switch (this.territoryPreviewMode) {
+            case FOUND -> PREVIEW_STATUS_FOUND_COLOR;
+            case NONE -> 0xFFFFFF;
+            case CLAIM -> 0;
+            case UNCLAIM -> 0;
+        };
+
+        context.fill(x - 6, y - 4, x + textWidth + 6, y + 12, PREVIEW_STATUS_BG_COLOR);
+        context.drawString(this.font, text, x, y, color);
+    }
+
+    private void clearTerritoryPreviewState() {
+        this.territoryPreviewMode = TerritoryPreviewMode.NONE;
+        this.selectedAnchorId = null;
+        this.lastRequestedPreviewChunk = null;
+        this.lastPreviewRequestMillis = 0L;
+
+        MapState.getTerritoryPreviewSyncCache().clear();
+    }
+
     private boolean isMouseOverMap(double mouseX, double mouseY) {
         int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
         int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
@@ -980,4 +1228,6 @@ public class MapScreen extends Screen {
                 && mouseX < mapLeft + drawWidth
                 && mouseY < mapTop + drawHeight;
     }
+
+
 }

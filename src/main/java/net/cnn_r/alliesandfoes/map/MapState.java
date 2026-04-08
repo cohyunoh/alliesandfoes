@@ -6,6 +6,7 @@ import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
+import net.cnn_r.alliesandfoes.map.cache.TerritoryPreviewSyncCache;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.ChunkPos;
@@ -22,6 +23,7 @@ public class MapState {
     private static PlayerMarkerCache playerMarkerCache;
     private static final Set<ChunkPos> loadedChunks = ConcurrentHashMap.newKeySet();
     private static TerritoryChunkSyncCache territoryChunkSyncCache;
+    private static TerritoryPreviewSyncCache territoryPreviewSyncCache;
 
     public static ChunkCache getChunkCache() {
         if (chunkCache == null) {
@@ -120,6 +122,13 @@ public class MapState {
         return territoryChunkSyncCache;
     }
 
+    public static TerritoryPreviewSyncCache getTerritoryPreviewSyncCache() {
+        if (territoryPreviewSyncCache == null) {
+            territoryPreviewSyncCache = new TerritoryPreviewSyncCache();
+        }
+        return territoryPreviewSyncCache;
+    }
+
     public static void clearAll() {
         if (scanner != null) {
             scanner.shutdown();
@@ -139,6 +148,9 @@ public class MapState {
         }
         if (territoryChunkSyncCache != null) {
             territoryChunkSyncCache.clear();
+        }
+        if (territoryPreviewSyncCache != null) {
+            territoryPreviewSyncCache.clear();
         }
         loadedChunks.clear();
     }

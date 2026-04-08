@@ -3,6 +3,7 @@ package net.cnn_r.alliesandfoes;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.structure.StructureChunkValueCalculator;
+import net.cnn_r.alliesandfoes.territory.*;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -13,10 +14,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
-import net.cnn_r.alliesandfoes.territory.ChunkKey;
-import net.cnn_r.alliesandfoes.territory.TerritoryManager;
-import net.cnn_r.alliesandfoes.territory.TerritoryMapSyncService;
-import net.cnn_r.alliesandfoes.territory.TerritoryQueryService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -49,6 +46,8 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(RequestInviteAllianceManagementScreenPayload.TYPE, RequestInviteAllianceManagementScreenPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(SendAllianceInvitesPayload.TYPE, SendAllianceInvitesPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(TerritoryChunkBatchPayload.TYPE, TerritoryChunkBatchPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(TerritoryPreviewBatchPayload.TYPE, TerritoryPreviewBatchPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playC2S().register(RequestTerritoryPreviewPayload.TYPE, RequestTerritoryPreviewPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -184,6 +183,23 @@ public class Alliesandfoes implements ModInitializer {
 						context.player(),
 						new AllianceCreateResultPayload(result.success(), result.message())
 				);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestTerritoryPreviewPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				TerritoryManager territoryManager = TerritoryManager.get(context.server());
+
+				TerritoryPreviewBatchPayload previewPayload = TerritoryPreviewSyncService.buildPreviewBatch(
+						territoryManager,
+						context.player(),
+						payload,
+						true,
+						true,
+						true
+				);
+
+				ServerPlayNetworking.send(context.player(), previewPayload);
 			});
 		});
 
