@@ -5,6 +5,7 @@ import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
+import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.ChunkPos;
@@ -20,6 +21,7 @@ public class MapState {
     private static ChunkScanner scanner;
     private static PlayerMarkerCache playerMarkerCache;
     private static final Set<ChunkPos> loadedChunks = ConcurrentHashMap.newKeySet();
+    private static TerritoryChunkSyncCache territoryChunkSyncCache;
 
     public static ChunkCache getChunkCache() {
         if (chunkCache == null) {
@@ -111,6 +113,13 @@ public class MapState {
         return radius;
     }
 
+    public static TerritoryChunkSyncCache getTerritoryChunkSyncCache() {
+        if (territoryChunkSyncCache == null) {
+            territoryChunkSyncCache = new TerritoryChunkSyncCache();
+        }
+        return territoryChunkSyncCache;
+    }
+
     public static void clearAll() {
         if (scanner != null) {
             scanner.shutdown();
@@ -127,6 +136,9 @@ public class MapState {
         }
         if (playerMarkerCache != null) {
             playerMarkerCache.clear();
+        }
+        if (territoryChunkSyncCache != null) {
+            territoryChunkSyncCache.clear();
         }
         loadedChunks.clear();
     }

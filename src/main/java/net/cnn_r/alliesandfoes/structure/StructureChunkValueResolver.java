@@ -24,12 +24,12 @@ public class StructureChunkValueResolver implements ChunkStructureResolver {
     @Override
     public ChunkStructureData resolve(String dimensionId, int chunkX, int chunkZ) {
         if (dimensionId == null || dimensionId.isBlank()) {
-            return new ChunkStructureData(0, List.of());
+            return emptyResult();
         }
 
         ServerLevel level = this.getLevel(dimensionId);
         if (level == null) {
-            return new ChunkStructureData(0, List.of());
+            return emptyResult();
         }
 
         return StructureChunkValueCalculator.analyze(level, new ChunkPos(chunkX, chunkZ));
@@ -43,5 +43,9 @@ public class StructureChunkValueResolver implements ChunkStructureResolver {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private static ChunkStructureData emptyResult() {
+        return new ChunkStructureData(0, List.of());
     }
 }

@@ -13,6 +13,10 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
+import net.cnn_r.alliesandfoes.territory.TerritoryManager;
+import net.cnn_r.alliesandfoes.territory.TerritoryMapSyncService;
+import net.cnn_r.alliesandfoes.territory.TerritoryQueryService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +48,7 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(RespondAllianceJoinRequestPayload.TYPE, RespondAllianceJoinRequestPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(RequestInviteAllianceManagementScreenPayload.TYPE, RequestInviteAllianceManagementScreenPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(SendAllianceInvitesPayload.TYPE, SendAllianceInvitesPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(TerritoryChunkBatchPayload.TYPE, TerritoryChunkBatchPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -219,9 +224,13 @@ public class Alliesandfoes implements ModInitializer {
 					structureData.getStructureValue(),
 					structureData.getStructureNames()
 			);
-
+			TerritoryChunkBatchPayload territoryPayload = buildTerritoryPayloadForChunks(
+					serverLevel,
+					List.of(pos)
+			);
 			for (ServerPlayer player : serverLevel.players()) {
 				ServerPlayNetworking.send(player, payload);
+				ServerPlayNetworking.send(player, territoryPayload);
 			}
 		});
 
@@ -229,7 +238,7 @@ public class Alliesandfoes implements ModInitializer {
 			ServerPlayer player = handler.player;
 			ServerLevel level = player.level();
 			ChunkPos center = player.chunkPosition();
-
+			List<ChunkPos> nearbyChunks = new ArrayList<>();
 			AllianceManager.get(server).syncPlayer(player);
 
 			for (int chunkX = center.x - 8; chunkX <= center.x + 8; chunkX++) {
@@ -239,7 +248,7 @@ public class Alliesandfoes implements ModInitializer {
 					if (!level.isLoaded(pos.getWorldPosition())) {
 						continue;
 					}
-
+					nearbyChunks.add(pos);
 					var structureData = StructureChunkValueCalculator.analyze(level, pos);
 					ChunkStructurePayload payload = new ChunkStructurePayload(
 							pos.x,
@@ -247,10 +256,25 @@ public class Alliesandfoes implements ModInitializer {
 							structureData.getStructureValue(),
 							structureData.getStructureNames()
 					);
-
 					ServerPlayNetworking.send(player, payload);
 				}
 			}
+			TerritoryChunkBatchPayload territoryPayload = buildTerritoryPayloadForChunks(level, nearbyChunks);
+			ServerPlayNetworking.send(player, territoryPayload);
 		});
+	}
+
+	private static TerritoryChunkBatchPayload buildTerritoryPayloadForChunks(
+			ServerLevel level,
+			List<ChunkPos> chunkPositions
+	) {
+		TerritoryQueryService queryService = new TerritoryQueryService(TerritoryManager.get(level.getServer()));
+		List<ChunkKey> chunkKeys = new ArrayList<>(chunkPositions.size());
+
+		for (ChunkPos pos : chunkPositions) {
+			chunkKeys.add(ChunkKey.of(level, pos));
+		}
+
+		return TerritoryMapSyncService.buildChunkBatch(queryService, chunkKeys);
 	}
 }

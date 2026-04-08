@@ -129,6 +129,10 @@ public final class ChunkKey {
         return Objects.hash(this.dimensionId, this.chunkX, this.chunkZ);
     }
 
+    public java.util.List<ChunkKey> getCardinalNeighbors() {
+        return java.util.List.of(north(), south(), east(), west());
+    }
+
     @Override
     public String toString() {
         return "ChunkKey{" +
