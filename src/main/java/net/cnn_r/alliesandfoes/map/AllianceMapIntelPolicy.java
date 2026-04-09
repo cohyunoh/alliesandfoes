@@ -45,15 +45,53 @@ public final class AllianceMapIntelPolicy {
     }
 
     /**
+     * Returns whether the player can use explorer intuition.
+     *
+     * V1 policy:
+     * - Explorer role gets intuition as gameplay-facing interpretation
+     * - Admin also gets access so the system can be tested without role swapping
+     */
+    public static boolean canUseExplorerIntuition() {
+        if (!AllianceClientState.isInAlliance()) {
+            return false;
+        }
+
+        String role = normalizeRole(AllianceClientState.getMemberRole());
+        return role.equals("explorer") || role.equals("admin");
+    }
+
+    /**
      * Returns whether the player can view raw structure intel (debug-level data).
      *
-     * This is restricted to admins only.
+     * This is restricted to admins only and should remain separate from the
+     * explorer intuition system.
      */
     public static boolean canViewAdminStructureIntel() {
         if (!AllianceClientState.isInAlliance()) {
             return false;
         }
 
+        return isAdmin();
+    }
+
+    /**
+     * Returns whether the player can toggle admin debug intel on the map.
+     *
+     * Keep this separate from normal gameplay-facing permissions so that
+     * Explorer intuition and admin debug visibility do not become coupled.
+     */
+    public static boolean canToggleAdminDebugIntel() {
+        if (!AllianceClientState.isInAlliance()) {
+            return false;
+        }
+
+        return isAdmin();
+    }
+
+    /**
+     * Returns whether the player is an admin.
+     */
+    public static boolean isAdmin() {
         String role = normalizeRole(AllianceClientState.getMemberRole());
         return role.equals("admin");
     }
