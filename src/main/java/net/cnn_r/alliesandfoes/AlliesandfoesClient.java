@@ -96,7 +96,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(AllianceCreationScreenPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 if (payload.alreadyInAlliance()) {
-                    AllianceClientState.setAllianceState(true, payload.currentAllianceName());
+                    AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "");
 
                     if (context.client().player != null) {
                         context.client().player.displayClientMessage(
@@ -117,7 +117,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(JoinAllianceScreenPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 if (payload.alreadyInAlliance()) {
-                    AllianceClientState.setAllianceState(true, payload.currentAllianceName());
+                    AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "");
 
                     if (context.client().player != null) {
                         context.client().player.displayClientMessage(
@@ -160,7 +160,11 @@ public class AlliesandfoesClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(AllianceStatePayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
-                AllianceClientState.setAllianceState(payload.inAlliance(), payload.allianceName());
+                AllianceClientState.setAllianceState(
+                        payload.inAlliance(),
+                        payload.allianceName(),
+                        payload.memberRole()
+                );
             });
         });
 
@@ -352,6 +356,30 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 dimensionId,
                 anchorId,
                 chunks
+        ));
+    }
+    /**
+     * Sends a map-driven territory action request to the server.
+     *
+     * @param actionType action type
+     * @param dimensionId target dimension id
+     * @param anchorId selected anchor id
+     * @param chunkX target chunk x
+     * @param chunkZ target chunk z
+     */
+    public static void requestTerritoryAction(
+            RequestTerritoryActionPayload.ActionType actionType,
+            String dimensionId,
+            java.util.UUID anchorId,
+            int chunkX,
+            int chunkZ
+    ) {
+        ClientPlayNetworking.send(new RequestTerritoryActionPayload(
+                actionType,
+                dimensionId,
+                anchorId,
+                chunkX,
+                chunkZ
         ));
     }
 }

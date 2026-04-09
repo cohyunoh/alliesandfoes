@@ -53,7 +53,8 @@ public class TerritoryManager {
 
         this.valueService = new TerritoryValueService(this.cachedChunkValues, chunkValueEvaluator);
         this.costService = new TerritoryCostService();
-        this.paymentService = new InventoryTerritoryPaymentService(server);
+        // Territory costs now come from alliance progression instead of player inventory.
+        this.paymentService = new AllianceProgressionTerritoryPaymentService(server);
 
         this.loadFromSavedData();
     }

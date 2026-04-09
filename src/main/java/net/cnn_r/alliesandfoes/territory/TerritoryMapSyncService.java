@@ -29,7 +29,9 @@ public final class TerritoryMapSyncService {
                     chunk.getChunkZ(),
                     view.claimed(),
                     view.allianceId(),
+                    view.allianceName(),
                     view.anchorId(),
+                    view.anchorName(),
                     view.anchorChunk(),
                     chunkValue
             ));

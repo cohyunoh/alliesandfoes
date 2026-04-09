@@ -7,7 +7,8 @@ import net.minecraft.resources.Identifier;
 
 public record AllianceStatePayload(
         boolean inAlliance,
-        String allianceName
+        String allianceName,
+        String memberRole
 ) implements CustomPacketPayload {
 
     public static final Type<AllianceStatePayload> TYPE =
@@ -24,11 +25,13 @@ public record AllianceStatePayload(
     private static void write(FriendlyByteBuf buf, AllianceStatePayload payload) {
         buf.writeBoolean(payload.inAlliance());
         buf.writeUtf(payload.allianceName());
+        buf.writeUtf(payload.memberRole());
     }
 
     private static AllianceStatePayload read(FriendlyByteBuf buf) {
         return new AllianceStatePayload(
                 buf.readBoolean(),
+                buf.readUtf(),
                 buf.readUtf()
         );
     }

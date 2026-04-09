@@ -157,9 +157,33 @@ public class TerritoryQueryService {
             boolean claimed,
             Integer cachedChunkValue,
             UUID allianceId,
+            String allianceName,
             UUID anchorId,
+            String anchorName,
             boolean anchorChunk
     ) {
+    }
+
+    private String getAllianceName(UUID allianceId) {
+        if (allianceId == null) {
+            return null;
+        }
+
+        net.cnn_r.alliesandfoes.alliance.Alliance alliance =
+                net.cnn_r.alliesandfoes.alliance.AllianceManager
+                        .get(this.territoryManager.getServer())
+                        .getAllianceById(allianceId);
+
+        return alliance == null ? null : alliance.getName();
+    }
+
+    private String getAnchorName(UUID anchorId) {
+        if (anchorId == null) {
+            return null;
+        }
+
+        TerritoryAnchor anchor = this.territoryManager.getAnchorById(anchorId);
+        return anchor == null ? null : anchor.getName();
     }
 
     public TerritoryChunkView getChunkView(ChunkKey chunkKey) {
@@ -177,16 +201,23 @@ public class TerritoryQueryService {
                     cachedValue,
                     null,
                     null,
+                    null,
+                    null,
                     false
             );
         }
+
+        String allianceName = this.getAllianceName(claim.getAllianceId());
+        String anchorName = this.getAnchorName(claim.getAnchorId());
 
         return new TerritoryChunkView(
                 chunkKey,
                 true,
                 cachedValue,
                 claim.getAllianceId(),
+                allianceName,
                 claim.getAnchorId(),
+                anchorName,
                 claim.isAnchorChunk()
         );
     }

@@ -1,11 +1,11 @@
 package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
 import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.structure.StructureChunkValueCalculator;
 import net.cnn_r.alliesandfoes.territory.*;
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -21,6 +21,8 @@ import java.util.List;
 public class Alliesandfoes implements ModInitializer {
 	@Override
 	public void onInitialize() {
+		TerritoryCommands.register();
+		AllianceProgressionCommands.register();
 		PayloadTypeRegistry.playS2C().register(PlayerPositionsPayload.TYPE, PlayerPositionsPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(ChunkStructurePayload.TYPE, ChunkStructurePayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(AllianceCreationScreenPayload.TYPE, AllianceCreationScreenPayload.STREAM_CODEC);
@@ -48,6 +50,7 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(TerritoryChunkBatchPayload.TYPE, TerritoryChunkBatchPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(TerritoryPreviewBatchPayload.TYPE, TerritoryPreviewBatchPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(RequestTerritoryPreviewPayload.TYPE, RequestTerritoryPreviewPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playC2S().register(RequestTerritoryActionPayload.TYPE, RequestTerritoryActionPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -200,6 +203,49 @@ public class Alliesandfoes implements ModInitializer {
 				);
 
 				ServerPlayNetworking.send(context.player(), previewPayload);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestTerritoryActionPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				TerritoryManager territoryManager = TerritoryManager.get(context.server());
+				ChunkKey targetChunk = new ChunkKey(
+						payload.dimensionId(),
+						payload.chunkX(),
+						payload.chunkZ()
+				);
+
+				TerritoryManager.ActionResult result = switch (payload.actionType()) {
+					case CLAIM -> territoryManager.claimChunk(
+							context.player().getUUID(),
+							payload.anchorId(),
+							targetChunk,
+							true
+					);
+					case UNCLAIM -> territoryManager.unclaimChunk(
+							context.player().getUUID(),
+							payload.anchorId(),
+							targetChunk,
+							true
+					);
+				};
+
+				// Send the result message back to the acting player immediately.
+				context.player().displayClientMessage(
+						Component.literal(result.message()),
+						false
+				);
+
+				// Sync the changed chunk to all players.
+				TerritoryQueryService queryService = new TerritoryQueryService(territoryManager);
+				TerritoryChunkBatchPayload territoryPayload = TerritoryMapSyncService.buildChunkBatch(
+						queryService,
+						List.of(targetChunk)
+				);
+
+				for (ServerPlayer receiver : context.server().getPlayerList().getPlayers()) {
+					ServerPlayNetworking.send(receiver, territoryPayload);
+				}
 			});
 		});
 

@@ -55,11 +55,19 @@ public class AllianceManager {
 
     public void syncPlayer(ServerPlayer player) {
         Alliance alliance = this.getAllianceFor(player.getUUID());
+
         if (alliance == null) {
-            ServerPlayNetworking.send(player, new AllianceStatePayload(false, ""));
-        } else {
-            ServerPlayNetworking.send(player, new AllianceStatePayload(true, alliance.getName()));
+            ServerPlayNetworking.send(player, new AllianceStatePayload(false, "", ""));
+            return;
         }
+
+        String memberRole = alliance.getRole(player.getUUID());
+
+        ServerPlayNetworking.send(player, new AllianceStatePayload(
+                true,
+                alliance.getName(),
+                memberRole == null ? "" : memberRole
+        ));
     }
 
     public void syncAllianceMembers(MinecraftServer server, Alliance alliance) {

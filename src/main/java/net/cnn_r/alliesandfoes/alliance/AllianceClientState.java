@@ -12,6 +12,7 @@ public class AllianceClientState {
 
     private static boolean inAlliance = false;
     private static String allianceName = "";
+    private static String memberRole = "";
 
     private static UUID ownerUuid = null;
     private static UUID selfUuid = null;
@@ -22,9 +23,10 @@ public class AllianceClientState {
     private static boolean inviteNotificationUnread = false;
     private static boolean joinRequestNotificationUnread = false;
 
-    public static void setAllianceState(boolean inAlliance, String allianceName) {
+    public static void setAllianceState(boolean inAlliance, String allianceName, String memberRole) {
         AllianceClientState.inAlliance = inAlliance;
         AllianceClientState.allianceName = allianceName == null ? "" : allianceName;
+        AllianceClientState.memberRole = memberRole == null ? "" : memberRole;
     }
 
     public static void setAllianceDetails(boolean inAlliance, String allianceName, UUID ownerUuid, UUID selfUuid) {
@@ -50,6 +52,10 @@ public class AllianceClientState {
         removePendingInvite(payload.allianceId());
         pendingInvites.add(payload);
         inviteNotificationUnread = true;
+    }
+
+    public static String getMemberRole() {
+        return memberRole;
     }
 
     public static List<AllianceInvitePayload> getPendingInvites() {

@@ -21,6 +21,20 @@ public class TerritoryChunkSyncCache {
         return this.values.containsKey(chunkKey);
     }
 
+    /**
+     * Returns a read-only view of all cached territory data.
+     *
+     * Used for UI lookups (e.g., resolving anchor names).
+     */
+    /**
+     * Returns a read-only view of all cached territory data.
+     *
+     * Used for UI lookups such as resolving the selected anchor name.
+     */
+    public java.util.Collection<TerritoryChunkDataPayload> getAll() {
+        return this.values.values();
+    }
+
     public void clear() {
         this.values.clear();
     }

@@ -12,6 +12,7 @@ import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
+import net.cnn_r.alliesandfoes.map.AllianceMapIntelPolicy;
 import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
@@ -87,6 +88,9 @@ public class MapScreen extends Screen {
     private Button inviteButton;
     private Button requestsButton;
 
+    private Component screenMessage = null;
+    private long screenMessageExpiry = 0L;
+
     private enum TerritoryPreviewMode {
         NONE,
         FOUND,
@@ -96,6 +100,7 @@ public class MapScreen extends Screen {
 
     private TerritoryPreviewMode territoryPreviewMode = TerritoryPreviewMode.NONE;
     private UUID selectedAnchorId;
+    private boolean showStructureIntel = false;
     private ChunkPos lastRequestedPreviewChunk;
     private long lastPreviewRequestMillis;
     private static final long PREVIEW_REQUEST_INTERVAL_MS = 150L;
@@ -277,6 +282,9 @@ public class MapScreen extends Screen {
         renderTopButtonGlows(context, delta);
 
         this.renderTerritoryPreviewStatus(context);
+        this.renderMapControls(context);
+
+        this.renderScreenMessage(context);
 
         this.renderHoveredChunkTooltip(context, mouseX, mouseY);
     }
@@ -300,6 +308,37 @@ public class MapScreen extends Screen {
         }
 
         renderButtonGlow(context, this.requestsButton, delta);
+    }
+
+    private void renderScreenMessage(GuiGraphics context) {
+        if (this.screenMessage == null) {
+            return;
+        }
+
+        if (System.currentTimeMillis() > this.screenMessageExpiry) {
+            this.screenMessage = null;
+            return;
+        }
+
+        int textWidth = this.font.width(this.screenMessage);
+        int x = (this.width - textWidth) / 2;
+        int y = this.height / 2 + 60;
+
+        context.fill(
+                x - 6,
+                y - 4,
+                x + textWidth + 6,
+                y + 12,
+                0xA0000000
+        );
+
+        context.drawString(
+                this.font,
+                this.screenMessage,
+                x,
+                y,
+                0xFFFFFFFF
+        );
     }
 
     private void renderButtonGlow(GuiGraphics context, Button button, float delta) {
@@ -328,7 +367,21 @@ public class MapScreen extends Screen {
             return true;
         }
 
+        this.hoveredChunk = this.getChunkAtMouse((int) click.x(), (int) click.y());
+
+        // Right click = select anchor from hovered claimed chunk.
+        if (click.button() == 1 && isMouseOverMap(click.x(), click.y())) {
+            if (this.trySelectHoveredAnchor()) {
+                return true;
+            }
+        }
+
+        // Left click = execute map action when a valid preview is active.
         if (click.button() == 0 && isMouseOverMap(click.x(), click.y())) {
+            if (this.tryExecuteHoveredTerritoryAction()) {
+                return true;
+            }
+
             this.setDragging(true);
             this.followPlayer = false;
             return true;
@@ -412,6 +465,30 @@ public class MapScreen extends Screen {
         int panAmount = (modifiers & 1) != 0 ? 64 : 16;
 
         switch (key) {
+            case 256 -> { // ESC
+                if (this.territoryPreviewMode != TerritoryPreviewMode.NONE
+                        || this.selectedAnchorId != null) {
+
+                    Component exitMessage;
+
+                    if (this.territoryPreviewMode == TerritoryPreviewMode.FOUND) {
+                        exitMessage = Component.literal("Exited founding mode");
+                    } else if (this.territoryPreviewMode == TerritoryPreviewMode.CLAIM) {
+                        exitMessage = Component.literal("Exited claim mode");
+                    } else if (this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM) {
+                        exitMessage = Component.literal("Exited unclaim mode");
+                    } else {
+                        exitMessage = Component.literal("Exited territory mode");
+                    }
+
+                    this.clearTerritoryPreviewState();
+
+                    this.showScreenMessage(exitMessage, 1500);
+                    return true;
+                }
+
+                return super.keyPressed(input);
+            }
             case 263 -> {
                 this.cameraBlockX -= panAmount;
                 this.followPlayer = false;
@@ -432,9 +509,28 @@ public class MapScreen extends Screen {
                 this.followPlayer = false;
                 return true;
             }
-            case 70 -> { // F
+            case 85 -> { // U
+                if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
+                    this.showScreenMessage(
+                            Component.literal("Your alliance role cannot use unclaim mode."),
+                            1500
+                    );
+                    return true;
+                }
+                if (this.selectedAnchorId == null) {
+                    if (this.minecraft.player != null) {
+                        this.showScreenMessage(
+                                Component.literal("Select an anchor first by right-clicking one of your claimed chunks."),
+                                2000
+                        );
+                    }
+                    return true;
+                }
+
+                UUID anchorId = this.selectedAnchorId;
                 this.clearTerritoryPreviewState();
-                this.territoryPreviewMode = TerritoryPreviewMode.FOUND;
+                this.selectedAnchorId = anchorId;
+                this.territoryPreviewMode = TerritoryPreviewMode.UNCLAIM;
                 return true;
             }
             case 82 -> { // R
@@ -447,6 +543,64 @@ public class MapScreen extends Screen {
                 }
                 return true;
             }
+            case 73 -> { // I
+                if (!AllianceMapIntelPolicy.canViewAdminStructureIntel()) {
+                    this.showScreenMessage(
+                            Component.literal("Structure intel is restricted to admins."),
+                            1500
+                    );
+                    return true;
+                }
+
+                this.showStructureIntel = !this.showStructureIntel;
+
+                this.showScreenMessage(
+                        Component.literal(this.showStructureIntel
+                                ? "Structure intel enabled"
+                                : "Structure intel hidden"),
+                        1500
+                );
+                return true;
+            }
+            case 70 -> { // F
+                if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
+                    this.showScreenMessage(
+                            Component.literal("Your alliance role cannot use founding mode."),
+                            1500
+                    );
+                    return true;
+                }
+
+                this.clearTerritoryPreviewState();
+                this.territoryPreviewMode = TerritoryPreviewMode.FOUND;
+                return true;
+            }
+            case 67 -> { // C
+                if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
+                    this.showScreenMessage(
+                            Component.literal("Your alliance role cannot use claim mode."),
+                            1500
+                    );
+                    return true;
+                }
+                if (this.selectedAnchorId == null) {
+                    if (this.minecraft.player != null) {
+                        this.showScreenMessage(
+                                Component.literal("Select an anchor first by right-clicking one of your claimed chunks."),
+                                2000
+                        );
+                    }
+                    return true;
+                }
+
+                UUID anchorId = this.selectedAnchorId;
+                this.clearTerritoryPreviewState();
+                this.selectedAnchorId = anchorId;
+                this.territoryPreviewMode = TerritoryPreviewMode.CLAIM;
+                return true;
+            }
+
+
         }
 
         return super.keyPressed(input);
@@ -624,7 +778,9 @@ public class MapScreen extends Screen {
         }
 
         boolean chunkLargeEnoughForBorder = size >= MIN_CHUNK_BORDER_SCREEN_SIZE;
-        TerritoryChunkDataPayload territoryData = this.getTerritoryData(pos);
+        TerritoryChunkDataPayload territoryData = AllianceMapIntelPolicy.canViewTerritoryIntel()
+                ? this.getTerritoryData(pos)
+                : null;
 
         if (!hovered && !chunkLargeEnoughForBorder && territoryData == null) {
             return;
@@ -641,7 +797,9 @@ public class MapScreen extends Screen {
             context.fill(x1, y1, x2, y2, territoryFill);
         }
 
-        TerritoryPreviewChunkPayload previewData = this.getTerritoryPreviewData(pos);
+        TerritoryPreviewChunkPayload previewData = AllianceMapIntelPolicy.canUseTerritoryActions()
+                ? this.getTerritoryPreviewData(pos)
+                : null;
 
         if (previewData != null) {
             int previewFill = previewData.valid()
@@ -793,6 +951,10 @@ public class MapScreen extends Screen {
     }
 
     private void renderStructureHeatmapOverlay(GuiGraphics context, ChunkPos pos) {
+        if (!this.showStructureIntel || !AllianceMapIntelPolicy.canViewAdminStructureIntel()) {
+            return;
+        }
+
         if (this.renderer.getZoom() < STRUCTURE_HEATMAP_ZOOM_THRESHOLD) {
             return;
         }
@@ -847,19 +1009,16 @@ public class MapScreen extends Screen {
             return;
         }
 
+        boolean isPreviewing = this.territoryPreviewMode != TerritoryPreviewMode.NONE;
+
         List<FormattedCharSequence> lines = new ArrayList<>();
 
         lines.add(Component.literal("Chunk [" + this.hoveredChunk.x + ", " + this.hoveredChunk.z + "]").getVisualOrderText());
 
-        if (this.territoryPreviewMode == TerritoryPreviewMode.FOUND) {
-            lines.add(
-                    Component.literal("Found preview active")
-                            .withColor(PREVIEW_STATUS_FOUND_COLOR)
-                            .getVisualOrderText()
-            );
-        }
+        TerritoryChunkDataPayload territoryData = AllianceMapIntelPolicy.canViewTerritoryIntel()
+                ? this.getTerritoryData(this.hoveredChunk)
+                : null;
 
-        TerritoryChunkDataPayload territoryData = this.getTerritoryData(this.hoveredChunk);
         if (territoryData != null) {
             if (territoryData.claimed()) {
                 lines.add(
@@ -868,12 +1027,18 @@ public class MapScreen extends Screen {
                                 .getVisualOrderText()
                 );
 
-                if (territoryData.allianceId() != null) {
-                    lines.add(Component.literal("Alliance: " + territoryData.allianceId()).getVisualOrderText());
-                }
+                if (AllianceMapIntelPolicy.canViewTerritoryIdentity()) {
+                    if (territoryData.allianceName() != null && !territoryData.allianceName().isBlank()) {
+                        lines.add(Component.literal("Alliance: " + territoryData.allianceName()).getVisualOrderText());
+                    } else if (territoryData.allianceId() != null) {
+                        lines.add(Component.literal("Alliance: " + territoryData.allianceId()).getVisualOrderText());
+                    }
 
-                if (territoryData.anchorId() != null) {
-                    lines.add(Component.literal("Anchor: " + territoryData.anchorId()).getVisualOrderText());
+                    if (territoryData.anchorName() != null && !territoryData.anchorName().isBlank()) {
+                        lines.add(Component.literal("Anchor: " + territoryData.anchorName()).getVisualOrderText());
+                    } else if (territoryData.anchorId() != null) {
+                        lines.add(Component.literal("Anchor: " + territoryData.anchorId()).getVisualOrderText());
+                    }
                 }
             } else {
                 lines.add(
@@ -900,16 +1065,10 @@ public class MapScreen extends Screen {
         TerritoryPreviewChunkPayload previewData = this.getTerritoryPreviewData(this.hoveredChunk);
         if (previewData != null) {
             lines.add(
-                    Component.literal("Preview: ")
-                            .append(Component.literal(previewData.previewType().name()).withColor(0x99EEFF))
-                            .getVisualOrderText()
-            );
-
-            lines.add(
-                    Component.literal("Valid: ")
-                            .append(Component.literal(previewData.valid() ? "Yes" : "No").withColor(
-                                    previewData.valid() ? 0x55FF55 : 0xFF5555
-                            ))
+                    Component.literal(
+                                    (previewData.valid() ? "✔ " : "✖ ")
+                                            + previewData.previewType().name()
+                            ).withColor(previewData.valid() ? 0x55FF55 : 0xFF5555)
                             .getVisualOrderText()
             );
 
@@ -918,6 +1077,15 @@ public class MapScreen extends Screen {
             if (!previewData.reason().isEmpty()) {
                 lines.add(Component.literal(previewData.reason()).withColor(0xFFAA55).getVisualOrderText());
             }
+
+            if (isPreviewing) {
+                context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
+                return;
+            }
+        } else if (isPreviewing) {
+            lines.add(Component.literal("Checking...").withColor(0xAAAAAA).getVisualOrderText());
+            context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
+            return;
         }
         ChunkValueData valueData = this.chunkValueCache.get(this.hoveredChunk);
         if (valueData != null) {
@@ -943,7 +1111,9 @@ public class MapScreen extends Screen {
                             .getVisualOrderText()
             );
 
-            if (!breakdown.getStructures().isEmpty()) {
+            if (this.showStructureIntel
+                    && AllianceMapIntelPolicy.canViewAdminStructureIntel()
+                    && !breakdown.getStructures().isEmpty()) {
                 lines.add(
                         Component.literal("Structures: ")
                                 .append(Component.literal(formatStructureList(breakdown.getStructures())).withColor(getStructureColor(breakdown.getStructureValue())))
@@ -1032,6 +1202,28 @@ public class MapScreen extends Screen {
 
         builder.append(suffix);
         return builder.toString();
+    }
+
+    private String getSelectedAnchorLabel() {
+        if (this.selectedAnchorId == null) {
+            return "None";
+        }
+
+        if (this.minecraft != null && this.minecraft.level != null && this.territoryChunkSyncCache != null) {
+            for (TerritoryChunkDataPayload territoryData : this.territoryChunkSyncCache.getAll()) {
+                if (territoryData != null
+                        && territoryData.anchorId() != null
+                        && territoryData.anchorId().equals(this.selectedAnchorId)) {
+                    if (territoryData.anchorName() != null && !territoryData.anchorName().isBlank()) {
+                        return territoryData.anchorName();
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        return this.selectedAnchorId.toString();
     }
 
     private String formatStructureList(List<String> structures) {
@@ -1135,6 +1327,108 @@ public class MapScreen extends Screen {
         return 0xAAAAAA;
     }
 
+    /**
+     * Selects the hovered chunk's anchor for claim/unclaim operations.
+     *
+     * Right-clicking any claimed chunk tied to an anchor selects that anchor.
+     * Server validation still decides whether the player may act with it.
+     *
+     * @return true if an anchor was selected
+     */
+    private boolean trySelectHoveredAnchor() {
+        if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
+            this.showScreenMessage(
+                    Component.literal("Your alliance role cannot select territory anchors."),
+                    1500
+            );
+            return false;
+        }
+
+        if (this.hoveredChunk == null) {
+            return false;
+        }
+
+        TerritoryChunkDataPayload territoryData = this.getTerritoryData(this.hoveredChunk);
+        if (territoryData == null || !territoryData.claimed() || territoryData.anchorId() == null) {
+            return false;
+        }
+
+        this.selectedAnchorId = territoryData.anchorId();
+        this.lastRequestedPreviewChunk = null;
+        this.lastPreviewRequestMillis = 0L;
+        this.territoryPreviewSyncCache.clear();
+
+        if (this.minecraft.player != null) {
+            String anchorLabel = territoryData.anchorName() != null && !territoryData.anchorName().isBlank()
+                    ? territoryData.anchorName()
+                    : String.valueOf(territoryData.anchorId());
+
+            this.showScreenMessage(
+                    Component.literal("Selected anchor: " + anchorLabel),
+                    2000
+            );
+        }
+
+        return true;
+    }
+
+    /**
+     * Executes the current hovered territory action when a valid preview exists.
+     *
+     * Founding remains command-driven for now.
+     * Claim/unclaim actions are sent to the server for full validation.
+     *
+     * @return true if an action request was sent
+     */
+    private boolean tryExecuteHoveredTerritoryAction() {
+        if (this.minecraft == null || this.minecraft.level == null) {
+            return false;
+        }
+
+        if (this.hoveredChunk == null) {
+            return false;
+        }
+
+        if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
+            return false;
+        }
+
+        if (this.territoryPreviewMode == TerritoryPreviewMode.NONE
+                || this.territoryPreviewMode == TerritoryPreviewMode.FOUND) {
+            return false;
+        }
+
+        TerritoryPreviewChunkPayload previewData = this.getTerritoryPreviewData(this.hoveredChunk);
+        if (previewData == null || !previewData.valid()) {
+            return false;
+        }
+
+        RequestTerritoryActionPayload.ActionType actionType = switch (this.territoryPreviewMode) {
+            case CLAIM -> RequestTerritoryActionPayload.ActionType.CLAIM;
+            case UNCLAIM -> RequestTerritoryActionPayload.ActionType.UNCLAIM;
+            default -> null;
+        };
+
+        if (actionType == null) {
+            return false;
+        }
+
+        AlliesandfoesClient.requestTerritoryAction(
+                actionType,
+                this.minecraft.level.dimension().identifier().toString(),
+                this.selectedAnchorId,
+                this.hoveredChunk.x,
+                this.hoveredChunk.z
+        );
+
+        // Clear current preview so the old result does not linger after click.
+        this.territoryPreviewSyncCache.clear();
+        this.lastRequestedPreviewChunk = null;
+        this.lastPreviewRequestMillis = 0L;
+
+        return true;
+    }
+
     private TerritoryChunkDataPayload getTerritoryData(ChunkPos pos) {
         if (this.minecraft == null || this.minecraft.level == null || this.territoryChunkSyncCache == null) {
             return null;
@@ -1166,16 +1460,38 @@ public class MapScreen extends Screen {
             return;
         }
 
+        // Do not preview chunks that do not have map data yet.
+        // This avoids ugly black preview holes on uncached terrain.
+        if (!this.cache.hasChunk(this.hoveredChunk)) {
+            return;
+        }
+
         long now = System.currentTimeMillis();
-        if (this.hoveredChunk.equals(this.lastRequestedPreviewChunk)
+        boolean hoveredChunkChanged = !this.hoveredChunk.equals(this.lastRequestedPreviewChunk);
+
+        // If the player moved to a different chunk, clear the old preview once.
+        // Do NOT clear every request, or the tooltip/overlay will flicker.
+        if (hoveredChunkChanged) {
+            this.territoryPreviewSyncCache.clear();
+        }
+
+        // Prevent spam for the same hovered chunk.
+        if (!hoveredChunkChanged
                 && now - this.lastPreviewRequestMillis < PREVIEW_REQUEST_INTERVAL_MS) {
             return;
         }
 
+        RequestTerritoryPreviewPayload.PreviewType type = switch (this.territoryPreviewMode) {
+            case FOUND -> RequestTerritoryPreviewPayload.PreviewType.FOUND;
+            case CLAIM -> RequestTerritoryPreviewPayload.PreviewType.CLAIM;
+            case UNCLAIM -> RequestTerritoryPreviewPayload.PreviewType.UNCLAIM;
+            default -> RequestTerritoryPreviewPayload.PreviewType.FOUND;
+        };
+
         AlliesandfoesClient.requestTerritoryPreview(
-                RequestTerritoryPreviewPayload.PreviewType.FOUND,
+                type,
                 this.minecraft.level.dimension().identifier().toString(),
-                null,
+                this.selectedAnchorId,
                 List.of(new RequestTerritoryPreviewPayload.ChunkCoord(
                         this.hoveredChunk.x,
                         this.hoveredChunk.z
@@ -1191,29 +1507,128 @@ public class MapScreen extends Screen {
             return;
         }
 
-        String text = switch (this.territoryPreviewMode) {
-            case FOUND -> "Territory Preview: Found Anchor (F active, R reset)";
-            case NONE -> "";
-            case CLAIM -> null;
-            case UNCLAIM -> null;
-        };
+        List<String> lines = new ArrayList<>();
 
-        if (text.isEmpty()) {
-            return;
+        switch (this.territoryPreviewMode) {
+            case FOUND -> {
+                lines.add("Found Mode [F]");
+                lines.add("Hover Chunk");
+                lines.add("/territory found <name>");
+                lines.add("ESC to Exit");
+            }
+            case CLAIM -> {
+                lines.add("Claim Mode [C]");
+                lines.add("Anchor: " + getSelectedAnchorLabel());
+
+                if (this.selectedAnchorId != null) {
+                    lines.add("Hover Chunk");
+                    lines.add("Left Click to Claim");
+                    lines.add("ESC to Exit");
+                } else {
+                    lines.add("Right Click Claimed Chunk");
+                    lines.add("Select Anchor First");
+                }
+            }
+            case UNCLAIM -> {
+                lines.add("Unclaim Mode [U]");
+                lines.add("Anchor: " + getSelectedAnchorLabel());
+
+                if (this.selectedAnchorId != null) {
+                    lines.add("Hover Edge Chunk");
+                    lines.add("Left Click to Unclaim");
+                    lines.add("ESC to Exit");
+                } else {
+                    lines.add("Right Click Claimed Chunk");
+                    lines.add("Select Anchor First");
+                }
+            }
+            case NONE -> {
+                return;
+            }
         }
 
-        int textWidth = this.font.width(text);
-        int x = this.width - textWidth - 14;
+        lines.add("Structure Intel: " + (this.showStructureIntel ? "On" : "Off"));
+
+        int maxWidth = 0;
+        for (String line : lines) {
+            maxWidth = Math.max(maxWidth, this.font.width(line));
+        }
+
+        int lineHeight = 10;
+        int boxWidth = maxWidth + 12;
+        int boxHeight = lines.size() * lineHeight + 8;
+
+        int x = this.width - boxWidth - 12;
         int y = 12;
+
+        context.fill(x, y, x + boxWidth, y + boxHeight, PREVIEW_STATUS_BG_COLOR);
+
         int color = switch (this.territoryPreviewMode) {
-            case FOUND -> PREVIEW_STATUS_FOUND_COLOR;
-            case NONE -> 0xFFFFFF;
-            case CLAIM -> 0;
-            case UNCLAIM -> 0;
+            case FOUND -> 0xFF55FF55;
+            case CLAIM -> 0xFF55AAFF;
+            case UNCLAIM -> 0xFFFFAA55;
+            case NONE -> 0xFFFFFFFF;
         };
 
-        context.fill(x - 6, y - 4, x + textWidth + 6, y + 12, PREVIEW_STATUS_BG_COLOR);
-        context.drawString(this.font, text, x, y, color);
+        for (int i = 0; i < lines.size(); i++) {
+            int lineColor = i == 0 ? color : 0xFFFFFFFF;
+
+            context.drawString(
+                    this.font,
+                    lines.get(i),
+                    x + 6,
+                    y + 4 + i * lineHeight,
+                    lineColor
+            );
+        }
+    }
+
+    private void renderMapControls(GuiGraphics context) {
+        List<String> lines = new ArrayList<>();
+
+        lines.add("R: Recenter");
+
+        if (AllianceMapIntelPolicy.canUseTerritoryActions()) {
+            lines.add("F: Found Preview");
+        }
+
+        if (AllianceMapIntelPolicy.canViewAdminStructureIntel()) {
+            lines.add("I: Structure Intel " + (this.showStructureIntel ? "On" : "Off"));
+        }
+
+        if (AllianceMapIntelPolicy.canUseTerritoryActions()) {
+            if (this.selectedAnchorId != null) {
+                lines.add("C: Claim");
+                lines.add("U: Unclaim");
+                lines.add("Right Click: Select Anchor");
+            } else {
+                lines.add("Right Click Claimed Chunk: Select Anchor");
+            }
+        }
+
+        int maxWidth = 0;
+        for (String line : lines) {
+            maxWidth = Math.max(maxWidth, this.font.width(line));
+        }
+
+        int lineHeight = 10;
+        int boxWidth = maxWidth + 12;
+        int boxHeight = lines.size() * lineHeight + 8;
+
+        int x = this.width - boxWidth - 12;
+        int y = this.height - boxHeight - 12;
+
+        context.fill(x, y, x + boxWidth, y + boxHeight, 0xA0000000);
+
+        for (int i = 0; i < lines.size(); i++) {
+            context.drawString(
+                    this.font,
+                    lines.get(i),
+                    x + 6,
+                    y + 4 + i * lineHeight,
+                    0xFFFFFFFF
+            );
+        }
     }
 
     private void clearTerritoryPreviewState() {
@@ -1223,6 +1638,11 @@ public class MapScreen extends Screen {
         this.lastPreviewRequestMillis = 0L;
 
         MapState.getTerritoryPreviewSyncCache().clear();
+    }
+
+    private void showScreenMessage(Component message, int durationMs) {
+        this.screenMessage = message;
+        this.screenMessageExpiry = System.currentTimeMillis() + durationMs;
     }
 
     private boolean isMouseOverMap(double mouseX, double mouseY) {

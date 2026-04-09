@@ -10,7 +10,9 @@ public record TerritoryChunkDataPayload(
         int chunkZ,
         boolean claimed,
         UUID allianceId,
+        String allianceName,
         UUID anchorId,
+        String anchorName,
         boolean anchorChunk,
         int chunkValue
 ) {
@@ -25,9 +27,19 @@ public record TerritoryChunkDataPayload(
             buf.writeUUID(data.allianceId());
         }
 
+        buf.writeBoolean(data.allianceName() != null);
+        if (data.allianceName() != null) {
+            buf.writeUtf(data.allianceName());
+        }
+
         buf.writeBoolean(data.anchorId() != null);
         if (data.anchorId() != null) {
             buf.writeUUID(data.anchorId());
+        }
+
+        buf.writeBoolean(data.anchorName() != null);
+        if (data.anchorName() != null) {
+            buf.writeUtf(data.anchorName());
         }
 
         buf.writeBoolean(data.anchorChunk());
@@ -45,9 +57,19 @@ public record TerritoryChunkDataPayload(
             allianceId = buf.readUUID();
         }
 
+        String allianceName = null;
+        if (buf.readBoolean()) {
+            allianceName = buf.readUtf();
+        }
+
         UUID anchorId = null;
         if (buf.readBoolean()) {
             anchorId = buf.readUUID();
+        }
+
+        String anchorName = null;
+        if (buf.readBoolean()) {
+            anchorName = buf.readUtf();
         }
 
         boolean anchorChunk = buf.readBoolean();
@@ -59,7 +81,9 @@ public record TerritoryChunkDataPayload(
                 chunkZ,
                 claimed,
                 allianceId,
+                allianceName,
                 anchorId,
+                anchorName,
                 anchorChunk,
                 chunkValue
         );
