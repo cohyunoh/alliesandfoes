@@ -18,7 +18,15 @@ import net.minecraft.world.level.ChunkPos;
  * direction sector rather than a specific chunk.
  */
 public final class ExplorerIntuitionEvaluator {
-    private static final int DEFAULT_RADIUS = 6;
+    private static final int DEFAULT_RADIUS = 5;
+    private static final int MIN_REQUIRED_SAMPLES = 6;
+
+    /*
+     * Random-ish directional noise should feel weak. A sector needs to stand out
+     * meaningfully before the player sees a strong signal.
+     */
+    private static final float MIN_DOMINANCE_FOR_SIGNAL = 0.16f;
+    private static final float DOMINANCE_RANGE_FOR_MAX_SIGNAL = 0.20f;
 
     private ExplorerIntuitionEvaluator() {
     }
@@ -64,8 +72,7 @@ public final class ExplorerIntuitionEvaluator {
         double west = 0.0;
         double northWest = 0.0;
 
-        double totalDirectionalWeight = 0.0;
-        boolean foundAnyCachedChunk = false;
+        int sampledChunkCount = 0;
         boolean foundUnusualPotential = false;
 
         for (int dz = -radius; dz <= radius; dz++) {
@@ -81,7 +88,7 @@ public final class ExplorerIntuitionEvaluator {
                     continue;
                 }
 
-                foundAnyCachedChunk = true;
+                sampledChunkCount++;
 
                 double distance = Math.sqrt((dx * dx) + (dz * dz));
                 if (distance <= 0.0) {
@@ -89,20 +96,20 @@ public final class ExplorerIntuitionEvaluator {
                 }
 
                 /*
-                 * Weight nearby promising chunks more heavily than distant ones.
-                 * Total value is already cached and bounded in your current system.
+                 * Nearby cached chunks should matter more than distant ones.
+                 * Chunk total value is already cached and clamped in the existing system.
                  */
                 double valueWeight = valueData.getTotalValue();
-                double distanceWeight = 1.0 / distance;
+                double distanceWeight = 1.0 / (0.75 + distance);
                 double combinedWeight = valueWeight * distanceWeight;
 
                 /*
-                 * If cached structure presence exists, treat it as "unusual potential"
-                 * without exposing any exact structure intel.
+                 * Treat cached structure presence as "unusual potential" only.
+                 * This should influence intuition without exposing exact intel.
                  */
                 ChunkStructureData structureData = structureSyncCache.get(samplePos);
                 if (structureData != null && structureData.getStructureValue() > 0) {
-                    combinedWeight += 1.5;
+                    combinedWeight += 0.75;
                     foundUnusualPotential = true;
                 }
 
@@ -119,52 +126,75 @@ public final class ExplorerIntuitionEvaluator {
                     default -> {
                     }
                 }
-
-                totalDirectionalWeight += combinedWeight;
             }
         }
 
-        if (!foundAnyCachedChunk || totalDirectionalWeight <= 0.0) {
+        if (sampledChunkCount < MIN_REQUIRED_SAMPLES) {
             return new IntuitionResult(IntuitionDirection.NONE, 0.0f, IntuitionMessageType.UNCERTAIN);
         }
 
-        double bestWeight = north;
-        IntuitionDirection bestDirection = IntuitionDirection.NORTH;
+        double[] sectorWeights = {
+                north, northEast, east, southEast,
+                south, southWest, west, northWest
+        };
 
-        if (northEast > bestWeight) {
-            bestWeight = northEast;
-            bestDirection = IntuitionDirection.NORTH_EAST;
+        IntuitionDirection[] sectorDirections = {
+                IntuitionDirection.NORTH,
+                IntuitionDirection.NORTH_EAST,
+                IntuitionDirection.EAST,
+                IntuitionDirection.SOUTH_EAST,
+                IntuitionDirection.SOUTH,
+                IntuitionDirection.SOUTH_WEST,
+                IntuitionDirection.WEST,
+                IntuitionDirection.NORTH_WEST
+        };
+
+        double totalDirectionalWeight = 0.0;
+        double bestWeight = -1.0;
+        double secondBestWeight = -1.0;
+        IntuitionDirection bestDirection = IntuitionDirection.NONE;
+
+        for (int i = 0; i < sectorWeights.length; i++) {
+            double weight = sectorWeights[i];
+            totalDirectionalWeight += weight;
+
+            if (weight > bestWeight) {
+                secondBestWeight = bestWeight;
+                bestWeight = weight;
+                bestDirection = sectorDirections[i];
+            } else if (weight > secondBestWeight) {
+                secondBestWeight = weight;
+            }
         }
-        if (east > bestWeight) {
-            bestWeight = east;
-            bestDirection = IntuitionDirection.EAST;
-        }
-        if (southEast > bestWeight) {
-            bestWeight = southEast;
-            bestDirection = IntuitionDirection.SOUTH_EAST;
-        }
-        if (south > bestWeight) {
-            bestWeight = south;
-            bestDirection = IntuitionDirection.SOUTH;
-        }
-        if (southWest > bestWeight) {
-            bestWeight = southWest;
-            bestDirection = IntuitionDirection.SOUTH_WEST;
-        }
-        if (west > bestWeight) {
-            bestWeight = west;
-            bestDirection = IntuitionDirection.WEST;
-        }
-        if (northWest > bestWeight) {
-            bestWeight = northWest;
-            bestDirection = IntuitionDirection.NORTH_WEST;
+
+        if (bestWeight <= 0.0 || totalDirectionalWeight <= 0.0 || bestDirection == IntuitionDirection.NONE) {
+            return new IntuitionResult(IntuitionDirection.NONE, 0.0f, IntuitionMessageType.UNCERTAIN);
         }
 
         /*
-         * Strength is based on how dominant the best sector is relative to the
-         * total nearby directional signal. This keeps the result approximate.
+         * Dominance answers:
+         * "How much does the best sector stand out from the overall field?"
+         *
+         * Separation answers:
+         * "How much better is the best sector than the runner-up?"
+         *
+         * Combining both makes the signal feel more stable and less swingy.
          */
-        float strength = (float) (bestWeight / totalDirectionalWeight);
+        float dominance = (float) (bestWeight / totalDirectionalWeight);
+        float separation = secondBestWeight <= 0.0
+                ? 1.0f
+                : (float) ((bestWeight - secondBestWeight) / bestWeight);
+
+        float normalizedDominance = normalizeDominance(dominance);
+        float strength = clamp01((normalizedDominance * 0.7f) + (separation * 0.3f));
+
+        /*
+         * If cache coverage is only barely sufficient, soften the result so that
+         * incomplete nearby data feels weaker and more uncertain.
+         */
+        if (sampledChunkCount < 12) {
+            strength *= 0.75f;
+        }
 
         IntuitionMessageType messageType = classifyMessageType(strength, foundUnusualPotential);
         return new IntuitionResult(bestDirection, strength, messageType);
@@ -206,27 +236,49 @@ public final class ExplorerIntuitionEvaluator {
     }
 
     /**
+     * Normalizes sector dominance so that weak directional bias feels faint,
+     * while clearly stronger sectors feel distinct.
+     */
+    private static float normalizeDominance(float dominance) {
+        return clamp01((dominance - MIN_DOMINANCE_FOR_SIGNAL) / DOMINANCE_RANGE_FOR_MAX_SIGNAL);
+    }
+
+    /**
      * Maps a soft signal into an abstract intuition category.
      *
      * These are interpretation buckets, not data readouts.
      */
     private static IntuitionMessageType classifyMessageType(float strength, boolean foundUnusualPotential) {
-        if (foundUnusualPotential && strength >= 0.18f) {
+        if (strength < 0.10f) {
+            return IntuitionMessageType.UNCERTAIN;
+        }
+
+        if (foundUnusualPotential && strength >= 0.45f) {
             return IntuitionMessageType.UNUSUAL;
         }
 
-        if (strength >= 0.30f) {
+        if (strength >= 0.72f) {
             return IntuitionMessageType.RICH;
         }
 
-        if (strength >= 0.22f) {
+        if (strength >= 0.42f) {
             return IntuitionMessageType.PROMISING;
         }
 
-        if (strength >= 0.14f) {
+        if (strength >= 0.20f) {
             return IntuitionMessageType.QUIET;
         }
 
         return IntuitionMessageType.UNREMARKABLE;
+    }
+
+    private static float clamp01(float value) {
+        if (value < 0.0f) {
+            return 0.0f;
+        }
+        if (value > 1.0f) {
+            return 1.0f;
+        }
+        return value;
     }
 }

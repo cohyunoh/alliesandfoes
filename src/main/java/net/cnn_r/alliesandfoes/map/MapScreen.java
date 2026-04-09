@@ -13,6 +13,11 @@ import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.map.AllianceMapIntelPolicy;
+import net.cnn_r.alliesandfoes.map.intuition.MapIntuitionRenderer;
+import net.cnn_r.alliesandfoes.map.intuition.MapIntuitionMessageController;
+import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
+import net.cnn_r.alliesandfoes.map.intuition.ExplorerIntuitionEvaluator;
+import net.cnn_r.alliesandfoes.map.intuition.IntuitionResult;
 import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
@@ -68,7 +73,6 @@ public class MapScreen extends Screen {
     private static final int PREVIEW_INVALID_BORDER_COLOR = 0xFFFF5555;
 
     private static final int PREVIEW_STATUS_BG_COLOR = 0xA0000000;
-    private static final int PREVIEW_STATUS_FOUND_COLOR = 0x55FF55;
 
     private MapTexture mapTexture;
     private MapRenderer renderer;
@@ -101,9 +105,18 @@ public class MapScreen extends Screen {
     private TerritoryPreviewMode territoryPreviewMode = TerritoryPreviewMode.NONE;
     private UUID selectedAnchorId;
     private boolean showStructureIntel = false;
+    private boolean showExplorerIntuition = true;
+    private ChunkStructureSyncCache chunkStructureSyncCache;
+    private IntuitionResult cachedIntuitionResult;
+    private ChunkPos lastIntuitionEvalChunk;
+    private final MapIntuitionMessageController intuitionMessageController = new MapIntuitionMessageController();
     private ChunkPos lastRequestedPreviewChunk;
     private long lastPreviewRequestMillis;
     private static final long PREVIEW_REQUEST_INTERVAL_MS = 150L;
+    private static final int INTUITION_REFRESH_DISTANCE_CHUNKS = 2;
+    private static final int INTUITION_STATUS_BG_COLOR = 0xA0000000;
+    private static final float MIN_INTUITION_STATUS_STRENGTH = 0.16f;
+    private static final float MIN_INTUITION_LABEL_STRENGTH = 0.22f;
 
     public MapScreen() {
         super(Component.literal("World Map"));
@@ -115,6 +128,7 @@ public class MapScreen extends Screen {
         this.renderer = new MapRenderer(this.mapTexture);
         this.cache = MapState.getChunkCache();
         this.chunkValueCache = MapState.getChunkValueCache();
+        this.chunkStructureSyncCache = MapState.getChunkStructureSyncCache();
         this.territoryChunkSyncCache = MapState.getTerritoryChunkSyncCache();
         this.territoryPreviewSyncCache = MapState.getTerritoryPreviewSyncCache();
         ChunkScanner scanner = MapState.getScanner();
@@ -180,7 +194,7 @@ public class MapScreen extends Screen {
         this.addRenderableWidget(this.joinAllianceButton);
         this.addRenderableWidget(this.inviteButton);
         this.addRenderableWidget(this.requestsButton);
-
+        this.refreshExplorerIntuition(true);
         refreshTopButtons();
     }
 
@@ -268,6 +282,8 @@ public class MapScreen extends Screen {
             this.syncZoomToLoadedRadius(player);
         }
 
+        this.refreshExplorerIntuition(false);
+
         this.rebuildVisibleTexture();
         this.renderer.render(context, this.width, this.height, BLOCK_PIXEL_SIZE);
 
@@ -281,7 +297,9 @@ public class MapScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
         renderTopButtonGlows(context, delta);
 
+        this.renderExplorerIntuitionCue(context);
         this.renderTerritoryPreviewStatus(context);
+        this.renderExplorerIntuitionStatus(context);
         this.renderMapControls(context);
 
         this.renderScreenMessage(context);
@@ -338,6 +356,33 @@ public class MapScreen extends Screen {
                 x,
                 y,
                 0xFFFFFFFF
+        );
+    }
+
+    /**
+     * Renders the subtle explorer intuition cue near the map center.
+     *
+     * The cue is slightly lifted upward so it reads as map guidance and is less
+     * likely to visually collide with lower-center overlays or labels.
+     */
+    private void renderExplorerIntuitionCue(GuiGraphics context) {
+        if (!this.canRenderExplorerIntuition() || this.cachedIntuitionResult == null) {
+            return;
+        }
+
+        if (!this.cachedIntuitionResult.hasDirection()) {
+            return;
+        }
+
+        int centerX = this.width / 2;
+        int centerY = (this.height / 2) - 10;
+
+        MapIntuitionRenderer.render(
+                context,
+                this.font,
+                centerX,
+                centerY,
+                this.cachedIntuitionResult
         );
     }
 
@@ -414,6 +459,7 @@ public class MapScreen extends Screen {
             double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
             this.cameraBlockX -= offsetX / scale;
             this.cameraBlockZ -= offsetY / scale;
+            this.refreshExplorerIntuition(false);
             return true;
         }
 
@@ -449,6 +495,7 @@ public class MapScreen extends Screen {
         this.cameraBlockZ = worldUnderMouseZ - ((mouseY - newTop) / newScale - textureCenter);
 
         this.followPlayer = false;
+        this.refreshExplorerIntuition(true);
         return true;
     }
 
@@ -492,21 +539,25 @@ public class MapScreen extends Screen {
             case 263 -> {
                 this.cameraBlockX -= panAmount;
                 this.followPlayer = false;
+                this.refreshExplorerIntuition(false);
                 return true;
             }
             case 262 -> {
                 this.cameraBlockX += panAmount;
                 this.followPlayer = false;
+                this.refreshExplorerIntuition(false);
                 return true;
             }
             case 265 -> {
                 this.cameraBlockZ -= panAmount;
                 this.followPlayer = false;
+                this.refreshExplorerIntuition(false);
                 return true;
             }
             case 264 -> {
                 this.cameraBlockZ += panAmount;
                 this.followPlayer = false;
+                this.refreshExplorerIntuition(false);
                 return true;
             }
             case 85 -> { // U
@@ -541,12 +592,14 @@ public class MapScreen extends Screen {
                     this.cameraBlockZ = this.minecraft.player.getZ();
                     this.followPlayer = true;
                 }
+
+                this.refreshExplorerIntuition(true);
                 return true;
             }
-            case 73 -> { // I
-                if (!AllianceMapIntelPolicy.canViewAdminStructureIntel()) {
+            case 79 -> { // O
+                if (!AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
                     this.showScreenMessage(
-                            Component.literal("Structure intel is restricted to admins."),
+                            Component.literal("Debug structure intel is restricted to admins."),
                             1500
                     );
                     return true;
@@ -556,8 +609,35 @@ public class MapScreen extends Screen {
 
                 this.showScreenMessage(
                         Component.literal(this.showStructureIntel
-                                ? "Structure intel enabled"
-                                : "Structure intel hidden"),
+                                ? "Admin debug intel enabled"
+                                : "Admin debug intel hidden"),
+                        1500
+                );
+                return true;
+            }
+            case 73 -> { // I
+                if (!AllianceMapIntelPolicy.canUseExplorerIntuition()) {
+                    this.showScreenMessage(
+                            Component.literal("Explorer intuition is unavailable for your current role."),
+                            1500
+                    );
+                    return true;
+                }
+
+                this.showExplorerIntuition = !this.showExplorerIntuition;
+
+                if (!this.showExplorerIntuition) {
+                    this.cachedIntuitionResult = null;
+                    this.lastIntuitionEvalChunk = null;
+                    this.intuitionMessageController.reset();
+                } else {
+                    this.refreshExplorerIntuition(true);
+                }
+
+                this.showScreenMessage(
+                        Component.literal(this.showExplorerIntuition
+                                ? "Explorer intuition enabled"
+                                : "Explorer intuition hidden"),
                         1500
                 );
                 return true;
@@ -609,6 +689,9 @@ public class MapScreen extends Screen {
     @Override
     public void removed() {
         this.clearTerritoryPreviewState();
+        this.cachedIntuitionResult = null;
+        this.lastIntuitionEvalChunk = null;
+        this.intuitionMessageController.reset();
         super.removed();
         MapPersistence.save(this.cache, this.chunkValueCache, getMapId());
     }
@@ -1592,8 +1675,12 @@ public class MapScreen extends Screen {
             lines.add("F: Found Preview");
         }
 
-        if (AllianceMapIntelPolicy.canViewAdminStructureIntel()) {
-            lines.add("I: Structure Intel " + (this.showStructureIntel ? "On" : "Off"));
+        if (AllianceMapIntelPolicy.canUseExplorerIntuition()) {
+            lines.add("I: Explorer Intuition " + (this.showExplorerIntuition ? "On" : "Off"));
+        }
+
+        if (AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
+            lines.add("O: Debug Intel " + (this.showStructureIntel ? "On" : "Off"));
         }
 
         if (AllianceMapIntelPolicy.canUseTerritoryActions()) {
@@ -1629,6 +1716,177 @@ public class MapScreen extends Screen {
                     0xFFFFFFFF
             );
         }
+    }
+
+    /**
+     * Refreshes the cached explorer intuition result when needed.
+     *
+     * This uses cached data only and intentionally avoids per-frame heavy work.
+     * Re-evaluation happens when the map opens, recenters, zoom changes, or the
+     * camera moves far enough in chunk space.
+     */
+    /**
+     * Refreshes the cached explorer intuition result when needed.
+     *
+     * This uses cached data only and intentionally avoids per-frame heavy work.
+     * Re-evaluation happens when the map opens, recenters, zoom changes, or the
+     * camera moves far enough in chunk space.
+     */
+    private void refreshExplorerIntuition(boolean force) {
+        if (!this.canRenderExplorerIntuition()) {
+            this.cachedIntuitionResult = null;
+            this.lastIntuitionEvalChunk = null;
+            this.intuitionMessageController.reset();
+            return;
+        }
+
+        ChunkPos currentCenterChunk = this.getCameraCenterChunk();
+        if (currentCenterChunk == null) {
+            this.cachedIntuitionResult = null;
+            this.lastIntuitionEvalChunk = null;
+            this.intuitionMessageController.reset();
+            return;
+        }
+
+        if (!force && this.lastIntuitionEvalChunk != null) {
+            int dx = Math.abs(currentCenterChunk.x - this.lastIntuitionEvalChunk.x);
+            int dz = Math.abs(currentCenterChunk.z - this.lastIntuitionEvalChunk.z);
+
+            if (dx < INTUITION_REFRESH_DISTANCE_CHUNKS
+                    && dz < INTUITION_REFRESH_DISTANCE_CHUNKS) {
+                return;
+            }
+        }
+
+        this.cachedIntuitionResult = ExplorerIntuitionEvaluator.evaluate(
+                currentCenterChunk,
+                this.chunkValueCache,
+                this.chunkStructureSyncCache
+        );
+        this.lastIntuitionEvalChunk = currentCenterChunk;
+
+        this.maybeShowExplorerIntuitionMessage();
+    }
+
+    /**
+     * Returns whether the intuition layer should currently be rendered.
+     */
+    private boolean canRenderExplorerIntuition() {
+        return this.showExplorerIntuition
+                && AllianceMapIntelPolicy.canUseExplorerIntuition()
+                && this.chunkValueCache != null
+                && this.chunkStructureSyncCache != null;
+    }
+
+    /**
+     * Shows a throttled passive intuition message using the existing in-screen
+     * screen message system.
+     */
+    private void maybeShowExplorerIntuitionMessage() {
+        if (this.cachedIntuitionResult == null) {
+            return;
+        }
+
+        Component message = this.intuitionMessageController.evaluateMessage(
+                this.cachedIntuitionResult,
+                System.currentTimeMillis()
+        );
+
+        if (message != null) {
+            this.showScreenMessage(message, 2200);
+        }
+    }
+
+    /**
+     * Returns the current camera center chunk used for intuition evaluation.
+     */
+    private ChunkPos getCameraCenterChunk() {
+        int blockX = (int) Math.floor(this.cameraBlockX);
+        int blockZ = (int) Math.floor(this.cameraBlockZ);
+        return new ChunkPos(blockX >> 4, blockZ >> 4);
+    }
+
+    /**
+     * Renders a lightweight intuition status panel only when the current signal
+     * is clear enough to be worth surfacing.
+     *
+     * Weak or unclear intuition should remain mostly ambient so the system feels
+     * like guidance rather than a diagnostic overlay.
+     */
+    private void renderExplorerIntuitionStatus(GuiGraphics context) {
+        if (!this.canRenderExplorerIntuition() || this.cachedIntuitionResult == null) {
+            return;
+        }
+
+        if (!this.cachedIntuitionResult.hasDirection()
+                || this.cachedIntuitionResult.getStrength() < MIN_INTUITION_STATUS_STRENGTH) {
+            return;
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add("Explorer Intuition");
+
+        if (this.cachedIntuitionResult.getStrength() >= MIN_INTUITION_LABEL_STRENGTH) {
+            lines.add(this.cachedIntuitionResult.getDirection().getDisplayName());
+        }
+
+        lines.add(this.getIntuitionStrengthLabel(this.cachedIntuitionResult.getStrength()));
+
+        int maxWidth = 0;
+        for (String line : lines) {
+            maxWidth = Math.max(maxWidth, this.font.width(line));
+        }
+
+        int lineHeight = 10;
+        int boxWidth = maxWidth + 12;
+        int boxHeight = lines.size() * lineHeight + 8;
+
+        int x = this.width - boxWidth - 12;
+        int y = this.getExplorerIntuitionStatusY(boxHeight);
+
+        context.fill(x, y, x + boxWidth, y + boxHeight, INTUITION_STATUS_BG_COLOR);
+
+        for (int i = 0; i < lines.size(); i++) {
+            int color = i == 0 ? 0xFFBBDDFF : 0xFFEAF3FF;
+            context.drawString(
+                    this.font,
+                    lines.get(i),
+                    x + 6,
+                    y + 4 + i * lineHeight,
+                    color
+            );
+        }
+    }
+
+    /**
+     * Chooses a top-right Y position that avoids fighting with territory preview
+     * status panels when a territory mode is active.
+     */
+    private int getExplorerIntuitionStatusY(int boxHeight) {
+        if (this.territoryPreviewMode == TerritoryPreviewMode.NONE) {
+            return 12;
+        }
+
+        return 90;
+    }
+
+    /**
+     * Converts a normalized signal strength into restrained player-facing text.
+     *
+     * These labels should feel atmospheric and lightweight rather than numeric
+     * or diagnostic.
+     */
+    private String getIntuitionStrengthLabel(float strength) {
+        if (strength >= 0.72f) {
+            return "Very strong";
+        }
+        if (strength >= 0.42f) {
+            return "Promising";
+        }
+        if (strength >= 0.20f) {
+            return "Faint";
+        }
+        return "Weak";
     }
 
     private void clearTerritoryPreviewState() {
