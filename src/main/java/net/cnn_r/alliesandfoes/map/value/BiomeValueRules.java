@@ -1,58 +1,105 @@
 package net.cnn_r.alliesandfoes.map.value;
 
-import java.util.Map;
-
+/**
+ * Baseline biome desirability rules for chunk value.
+ *
+ * Uses biome name strings (registry path) instead of Holder<Biome>.
+ *
+ * Distribution intent:
+ * - 3-4 should be common across ordinary or mildly harsh terrain
+ * - 5-6 should feel decent rather than automatic
+ * - 7-8 should be uncommon standouts
+ */
 public final class BiomeValueRules {
-    private static final Map<String, Integer> BIOME_SCORES = Map.ofEntries(
-            Map.entry("plains", 9),
-            Map.entry("sunflower_plains", 9),
-            Map.entry("forest", 8),
-            Map.entry("flower_forest", 7),
-            Map.entry("birch_forest", 7),
-            Map.entry("old_growth_birch_forest", 7),
-            Map.entry("jungle", 8),
-            Map.entry("sparse_jungle", 7),
-            Map.entry("bamboo_jungle", 8),
-            Map.entry("meadow", 8),
-            Map.entry("river", 8),
-            Map.entry("beach", 6),
-            Map.entry("savanna", 7),
-            Map.entry("savanna_plateau", 6),
-            Map.entry("taiga", 6),
-            Map.entry("old_growth_pine_taiga", 6),
-            Map.entry("old_growth_spruce_taiga", 6),
-            Map.entry("dark_forest", 6),
-            Map.entry("swamp", 5),
-            Map.entry("mangrove_swamp", 6),
-            Map.entry("desert", 3),
-            Map.entry("badlands", 4),
-            Map.entry("wooded_badlands", 4),
-            Map.entry("eroded_badlands", 3),
-            Map.entry("snowy_plains", 4),
-            Map.entry("ice_spikes", 2),
-            Map.entry("frozen_river", 3),
-            Map.entry("grove", 4),
-            Map.entry("windswept_hills", 4),
-            Map.entry("windswept_forest", 5),
-            Map.entry("stony_peaks", 3),
-            Map.entry("jagged_peaks", 3),
-            Map.entry("frozen_peaks", 2),
-            Map.entry("mushroom_fields", 8),
-            Map.entry("ocean", 4),
-            Map.entry("deep_ocean", 3),
-            Map.entry("cold_ocean", 4),
-            Map.entry("deep_cold_ocean", 3),
-            Map.entry("lukewarm_ocean", 5),
-            Map.entry("deep_lukewarm_ocean", 4),
-            Map.entry("warm_ocean", 5),
-            Map.entry("deep_frozen_ocean", 2),
-            Map.entry("frozen_ocean", 2)
-    );
-
     private BiomeValueRules() {
     }
 
     public static int getBiomeScore(String biomeName) {
-        return BIOME_SCORES.getOrDefault(biomeName, 5);
+        if (biomeName == null || biomeName.isBlank()) {
+            return 4;
+        }
+
+        String b = biomeName.toLowerCase();
+
+        /*
+         * Rare standout biome.
+         */
+        if (b.contains("mushroom_fields")) {
+            return 8;
+        }
+
+        /*
+         * Strong natural settlement / beauty biomes.
+         */
+        if (b.contains("meadow") || b.contains("cherry_grove")) {
+            return 7;
+        }
+
+        /*
+         * Good but not exceptional everyday land.
+         */
+        if (b.contains("plains")
+                || b.contains("sunflower_plains")
+                || b.contains("forest")
+                || b.contains("flower_forest")
+                || b.contains("birch")
+                || b.contains("river")) {
+            return 6;
+        }
+
+        /*
+         * Solid but ordinary terrain.
+         */
+        if (b.contains("taiga")
+                || b.contains("savanna")
+                || b.contains("dark_forest")
+                || b.contains("jungle")
+                || b.contains("bamboo_jungle")
+                || b.contains("sparse_jungle")) {
+            return 5;
+        }
+
+        /*
+         * Common lower-middle terrain.
+         */
+        if (b.contains("swamp")
+                || b.contains("mangrove")
+                || b.contains("beach")
+                || b.contains("stony_shore")
+                || b.contains("windswept")
+                || b.contains("snowy_plains")
+                || b.contains("badlands")
+                || b.contains("wooded_badlands")
+                || b.contains("eroded_badlands")) {
+            return 4;
+        }
+
+        /*
+         * Harsh / inconvenient terrain.
+         */
+        if (b.contains("desert")
+                || b.contains("snowy_taiga")
+                || b.contains("grove")
+                || b.contains("snowy_slopes")
+                || b.contains("frozen_peaks")
+                || b.contains("jagged_peaks")
+                || b.contains("stony_peaks")
+                || b.contains("frozen_river")
+                || b.contains("ice_spikes")) {
+            return 3;
+        }
+
+        /*
+         * Oceanic terrain should usually be poor in baseline settlement value.
+         */
+        if (b.contains("ocean")) {
+            return 2;
+        }
+
+        /*
+         * Default unknown biome:
+         * mildly below-average rather than comfortable.
+         */
+        return 4;
     }
 }

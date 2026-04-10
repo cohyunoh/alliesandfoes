@@ -59,10 +59,10 @@ public class ChunkValueCache {
         );
 
         double weightedScore =
-                updated.getOreValue() * ChunkValueWeights.ORE_WEIGHT +
-                        updated.getStructureValue() * ChunkValueWeights.STRUCTURE_WEIGHT +
-                        updated.getBiomeValue() * ChunkValueWeights.BIOME_WEIGHT +
-                        updated.getWaterValue() * ChunkValueWeights.WATER_WEIGHT;
+                updated.getOreValue() * ChunkValueWeights.ore() +
+                        updated.getStructureValue() * ChunkValueWeights.structure() +
+                        updated.getBiomeValue() * ChunkValueWeights.biome() +
+                        updated.getWaterValue() * ChunkValueWeights.water();
 
         int totalValue = clampToChunkValueRange((int) Math.round(weightedScore));
 

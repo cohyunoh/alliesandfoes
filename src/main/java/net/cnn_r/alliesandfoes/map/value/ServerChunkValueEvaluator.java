@@ -14,6 +14,9 @@ import java.util.List;
 import java.util.function.Function;
 
 public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
+    private static final int WATER_SAMPLE_STEP = 4;
+    private static final int WATER_SAMPLE_DEPTH = 5;
+    private static final int BIOME_SAMPLE_INSET = 4;
     private final Function<String, ServerLevel> levelResolver;
     private final ChunkStructureResolver structureResolver;
 
@@ -61,12 +64,15 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
         ChunkStructureData structureData = this.getStructureData(dimensionId, pos);
         int structureValue = structureData.getStructureValue();
 
-        String biomeName = this.getChunkCenterBiomeName(level, pos);
+        String biomeName = this.getRepresentativeBiomeName(level, pos);
         int biomeValue = BiomeValueRules.getBiomeScore(biomeName);
 
-        boolean hasWaterInChunk = this.hasWaterInChunk(level, pos);
-        boolean hasWaterNearby = hasWaterInChunk || this.hasWaterNearby(level, pos);
-        int waterValue = WaterValueRules.getWaterScore(hasWaterInChunk, hasWaterNearby);
+        WaterStats waterStats = this.getWaterStats(level, pos);
+        int waterValue = WaterValueRules.getWaterScore(
+                waterStats.waterColumnsInChunk,
+                waterStats.sampledColumnsInChunk,
+                waterStats.nearbyWaterChunkCount
+        );
 
         return ChunkValueScoring.computeTotalValue(
                 oreValue,
@@ -84,12 +90,47 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
         return data;
     }
 
-    protected String getChunkCenterBiomeName(ServerLevel level, ChunkPos pos) {
-        int centerX = pos.getMiddleBlockX();
-        int centerZ = pos.getMiddleBlockZ();
+    protected String getRepresentativeBiomeName(ServerLevel level, ChunkPos pos) {
+        int minX = pos.getMinBlockX();
+        int minZ = pos.getMinBlockZ();
+        int maxX = pos.getMaxBlockX();
+        int maxZ = pos.getMaxBlockZ();
+
+        String[] samples = new String[] {
+                this.getBiomeNameAt(level, minX + BIOME_SAMPLE_INSET, minZ + BIOME_SAMPLE_INSET),
+                this.getBiomeNameAt(level, maxX - BIOME_SAMPLE_INSET, minZ + BIOME_SAMPLE_INSET),
+                this.getBiomeNameAt(level, minX + BIOME_SAMPLE_INSET, maxZ - BIOME_SAMPLE_INSET),
+                this.getBiomeNameAt(level, maxX - BIOME_SAMPLE_INSET, maxZ - BIOME_SAMPLE_INSET),
+                this.getBiomeNameAt(level, pos.getMiddleBlockX(), pos.getMiddleBlockZ())
+        };
+
+        String bestBiome = "unknown";
+        int bestCount = -1;
+        int bestScore = Integer.MIN_VALUE;
+
+        for (String candidate : samples) {
+            int count = 0;
+            for (String sample : samples) {
+                if (candidate.equals(sample)) {
+                    count++;
+                }
+            }
+
+            int score = BiomeValueRules.getBiomeScore(candidate);
+            if (count > bestCount || (count == bestCount && score > bestScore)) {
+                bestBiome = candidate;
+                bestCount = count;
+                bestScore = score;
+            }
+        }
+
+        return bestBiome;
+    }
+
+    protected String getBiomeNameAt(ServerLevel level, int blockX, int blockZ) {
         int y = level.getSeaLevel();
 
-        var biomeHolder = level.getBiome(new BlockPos(centerX, y, centerZ));
+        var biomeHolder = level.getBiome(new BlockPos(blockX, y, blockZ));
         var biomeKeyOptional = biomeHolder.unwrapKey();
 
         if (biomeKeyOptional.isEmpty()) {
@@ -99,9 +140,14 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
         return biomeKeyOptional.get().identifier().getPath();
     }
 
-    protected boolean hasWaterInChunk(ServerLevel level, ChunkPos pos) {
-        for (int localX = 0; localX < 16; localX++) {
-            for (int localZ = 0; localZ < 16; localZ++) {
+    protected SurfaceWaterSample sampleWaterColumnsInChunk(ServerLevel level, ChunkPos pos) {
+        int waterColumns = 0;
+        int sampledColumns = 0;
+
+        for (int localX = 0; localX < 16; localX += WATER_SAMPLE_STEP) {
+            for (int localZ = 0; localZ < 16; localZ += WATER_SAMPLE_STEP) {
+                sampledColumns++;
+
                 int worldX = pos.getMinBlockX() + localX;
                 int worldZ = pos.getMinBlockZ() + localZ;
 
@@ -112,19 +158,22 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
 
                 BlockPos.MutableBlockPos blockPos = new BlockPos.MutableBlockPos(worldX, y - 1, worldZ);
 
-                for (int depth = 0; depth < 5 && blockPos.getY() > level.getMinY(); depth++) {
+                for (int depth = 0; depth < WATER_SAMPLE_DEPTH && blockPos.getY() > level.getMinY(); depth++) {
                     if (level.getBlockState(blockPos).is(Blocks.WATER)) {
-                        return true;
+                        waterColumns++;
+                        break;
                     }
                     blockPos.move(0, -1, 0);
                 }
             }
         }
 
-        return false;
+        return new SurfaceWaterSample(waterColumns, sampledColumns);
     }
 
-    protected boolean hasWaterNearby(ServerLevel level, ChunkPos pos) {
+    protected int countNearbyWaterChunks(ServerLevel level, ChunkPos pos) {
+        int nearbyWaterChunks = 0;
+
         for (int chunkX = pos.x - 1; chunkX <= pos.x + 1; chunkX++) {
             for (int chunkZ = pos.z - 1; chunkZ <= pos.z + 1; chunkZ++) {
                 if (chunkX == pos.x && chunkZ == pos.z) {
@@ -132,13 +181,24 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
                 }
 
                 ChunkPos nearby = new ChunkPos(chunkX, chunkZ);
-                if (this.hasWaterInChunk(level, nearby)) {
-                    return true;
+                if (this.sampleWaterColumnsInChunk(level, nearby).waterColumns > 0) {
+                    nearbyWaterChunks++;
                 }
             }
         }
 
-        return false;
+        return nearbyWaterChunks;
+    }
+
+    protected WaterStats getWaterStats(ServerLevel level, ChunkPos pos) {
+        SurfaceWaterSample localSample = this.sampleWaterColumnsInChunk(level, pos);
+        int nearbyWaterChunkCount = this.countNearbyWaterChunks(level, pos);
+
+        return new WaterStats(
+                localSample.waterColumns,
+                localSample.sampledColumns,
+                nearbyWaterChunkCount
+        );
     }
 
     protected OreCounts countValuableOres(LevelChunk chunk) {
@@ -176,6 +236,34 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
         }
 
         return counts;
+
+
+    }
+
+    protected static class SurfaceWaterSample {
+        private final int waterColumns;
+        private final int sampledColumns;
+
+        private SurfaceWaterSample(int waterColumns, int sampledColumns) {
+            this.waterColumns = waterColumns;
+            this.sampledColumns = sampledColumns;
+        }
+    }
+
+    protected static class WaterStats {
+        private final int waterColumnsInChunk;
+        private final int sampledColumnsInChunk;
+        private final int nearbyWaterChunkCount;
+
+        private WaterStats(
+                int waterColumnsInChunk,
+                int sampledColumnsInChunk,
+                int nearbyWaterChunkCount
+        ) {
+            this.waterColumnsInChunk = waterColumnsInChunk;
+            this.sampledColumnsInChunk = sampledColumnsInChunk;
+            this.nearbyWaterChunkCount = nearbyWaterChunkCount;
+        }
     }
 
     protected static class OreCounts {

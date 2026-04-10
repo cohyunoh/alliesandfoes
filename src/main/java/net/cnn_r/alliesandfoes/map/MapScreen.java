@@ -12,7 +12,7 @@ import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
-import net.cnn_r.alliesandfoes.map.AllianceMapIntelPolicy;
+import net.cnn_r.alliesandfoes.map.intuition.IntuitionMessageType;
 import net.cnn_r.alliesandfoes.map.intuition.MapIntuitionRenderer;
 import net.cnn_r.alliesandfoes.map.intuition.MapIntuitionMessageController;
 import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
@@ -117,6 +117,9 @@ public class MapScreen extends Screen {
     private static final int INTUITION_STATUS_BG_COLOR = 0xA0000000;
     private static final float MIN_INTUITION_STATUS_STRENGTH = 0.16f;
     private static final float MIN_INTUITION_LABEL_STRENGTH = 0.22f;
+    private static final int INTUITION_DEBUG_BG_COLOR = 0xB0000000;
+    private static final int CHUNK_VALUE_DEBUG_BG_COLOR = 0xB0000000;
+    private static final int CHUNK_VALUE_DEBUG_MIN_WIDTH = 170;
 
     public MapScreen() {
         super(Component.literal("World Map"));
@@ -300,6 +303,8 @@ public class MapScreen extends Screen {
         this.renderExplorerIntuitionCue(context);
         this.renderTerritoryPreviewStatus(context);
         this.renderExplorerIntuitionStatus(context);
+        this.renderExplorerIntuitionDebugPanel(context);
+        this.renderChunkValueDebugPanel(context);
         this.renderMapControls(context);
 
         this.renderScreenMessage(context);
@@ -1859,6 +1864,217 @@ public class MapScreen extends Screen {
     }
 
     /**
+     * Renders a temporary founder/admin debug panel for intuition verification.
+     *
+     * This is only shown when admin debug intel is enabled. It exists so the
+     * evaluator can be tested without making normal gameplay intuition reveal
+     * too much information.
+     */
+    private void renderExplorerIntuitionDebugPanel(GuiGraphics context) {
+        if (!this.showStructureIntel || !AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
+            return;
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add("Intuition Debug [O]");
+
+        if (!this.showExplorerIntuition) {
+            lines.add("State: Intuition hidden");
+        } else if (!AllianceMapIntelPolicy.canUseExplorerIntuition()) {
+            lines.add("State: Role blocked");
+        } else if (this.cachedIntuitionResult == null) {
+            lines.add("State: No cached result");
+        } else {
+            lines.add("Active: Yes");
+
+            if (this.cachedIntuitionResult.hasDirection()) {
+                lines.add("Direction: " + this.cachedIntuitionResult.getDirection().getDisplayName());
+            } else {
+                lines.add("Direction: Unclear");
+            }
+
+            lines.add(String.format("Strength: %.2f", this.cachedIntuitionResult.getStrength()));
+            lines.add("Message: " + this.getDebugIntuitionMessageLabel(this.cachedIntuitionResult.getMessageType()));
+
+            ChunkPos centerChunk = this.getCameraCenterChunk();
+            if (centerChunk != null) {
+                lines.add("Center Chunk: " + centerChunk.x + ", " + centerChunk.z);
+            }
+        }
+
+        int maxWidth = 0;
+        for (String line : lines) {
+            maxWidth = Math.max(maxWidth, this.font.width(line));
+        }
+
+        int lineHeight = 10;
+        int boxWidth = maxWidth + 12;
+        int boxHeight = lines.size() * lineHeight + 8;
+
+        int x = 12;
+        int y = 12;
+
+        context.fill(x, y, x + boxWidth, y + boxHeight, INTUITION_DEBUG_BG_COLOR);
+
+        for (int i = 0; i < lines.size(); i++) {
+            int color = i == 0 ? 0xFFFFD27A : 0xFFFFFFFF;
+            context.drawString(
+                    this.font,
+                    lines.get(i),
+                    x + 6,
+                    y + 4 + i * lineHeight,
+                    color
+            );
+        }
+    }
+
+    /**
+     * Renders a founder/admin-only chunk value debug panel.
+     *
+     * This panel exists for tuning the hidden chunk scoring model. It is shown
+     * only when debug intel is enabled and surfaces the current factor values
+     * for the hovered chunk, or the camera-center chunk if nothing is hovered.
+     */
+    private void renderChunkValueDebugPanel(GuiGraphics context) {
+        if (!this.showStructureIntel || !AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
+            return;
+        }
+
+        ChunkPos debugChunk = this.hoveredChunk != null ? this.hoveredChunk : this.getCameraCenterChunk();
+        if (debugChunk == null) {
+            return;
+        }
+
+        ChunkValueData valueData = this.chunkValueCache.get(debugChunk);
+
+        List<String> lines = new ArrayList<>();
+        lines.add("Chunk Value Debug");
+
+        lines.add("Chunk: [" + debugChunk.x + ", " + debugChunk.z + "]");
+
+        if (valueData == null) {
+            lines.add("State: No cached value data");
+            this.renderDebugTextPanel(
+                    context,
+                    lines,
+                    12,
+                    this.getChunkValueDebugPanelY(lines.size()),
+                    CHUNK_VALUE_DEBUG_BG_COLOR,
+                    0xFF9FE3FF
+            );
+            return;
+        }
+
+        ChunkValueBreakdown breakdown = valueData.getBreakdown();
+
+        lines.add("Total: " + valueData.getTotalValue() + "/10");
+        lines.add("Biome: " + formatDisplayName(breakdown.getBiomeName()) + " (" + breakdown.getBiomeValue() + ")");
+        lines.add("Water: " + breakdown.getWaterValue() + (breakdown.isNearWater() ? " [near]" : " [none]"));
+        lines.add("Ore: " + breakdown.getOreValue());
+        lines.add("Structure: " + breakdown.getStructureValue());
+
+        int rawOreCount =
+                breakdown.getDiamondOreCount()
+                        + breakdown.getEmeraldOreCount()
+                        + breakdown.getIronOreCount()
+                        + breakdown.getGoldOreCount()
+                        + breakdown.getRedstoneOreCount()
+                        + breakdown.getLapisOreCount()
+                        + breakdown.getCoalOreCount();
+
+        lines.add("Raw Ore Count: " + rawOreCount);
+        lines.add("Diamond: " + breakdown.getDiamondOreCount());
+        lines.add("Emerald: " + breakdown.getEmeraldOreCount());
+        lines.add("Iron: " + breakdown.getIronOreCount());
+        lines.add("Gold: " + breakdown.getGoldOreCount());
+        lines.add("Redstone: " + breakdown.getRedstoneOreCount());
+        lines.add("Lapis: " + breakdown.getLapisOreCount());
+        lines.add("Coal: " + breakdown.getCoalOreCount());
+
+        if (!breakdown.getStructures().isEmpty()) {
+            lines.add("Structures: " + formatStructureList(breakdown.getStructures()));
+        } else {
+            lines.add("Structures: None");
+        }
+
+        this.renderDebugTextPanel(
+                context,
+                lines,
+                12,
+                this.getChunkValueDebugPanelY(lines.size()),
+                CHUNK_VALUE_DEBUG_BG_COLOR,
+                0xFF9FE3FF
+        );
+    }
+
+    /**
+     * Renders a simple text debug panel with a title-colored first line.
+     */
+    private void renderDebugTextPanel(
+            GuiGraphics context,
+            List<String> lines,
+            int x,
+            int y,
+            int backgroundColor,
+            int titleColor
+    ) {
+        int maxWidth = CHUNK_VALUE_DEBUG_MIN_WIDTH;
+        for (String line : lines) {
+            maxWidth = Math.max(maxWidth, this.font.width(line));
+        }
+
+        int lineHeight = 10;
+        int boxWidth = maxWidth + 12;
+        int boxHeight = lines.size() * lineHeight + 8;
+
+        context.fill(x, y, x + boxWidth, y + boxHeight, backgroundColor);
+
+        for (int i = 0; i < lines.size(); i++) {
+            int color = i == 0 ? titleColor : 0xFFFFFFFF;
+            context.drawString(
+                    this.font,
+                    lines.get(i),
+                    x + 6,
+                    y + 4 + i * lineHeight,
+                    color
+            );
+        }
+    }
+
+    /**
+     * Places the chunk value debug panel below the intuition debug panel so the
+     * two founder/admin debug panels do not overlap.
+     */
+    private int getChunkValueDebugPanelY(int lineCount) {
+        int intuitionLines = this.getExplorerIntuitionDebugLineCount();
+        int intuitionPanelHeight = intuitionLines * 10 + 8;
+        return 12 + intuitionPanelHeight + 8;
+    }
+
+    /**
+     * Returns the current line count used by the intuition debug panel.
+     */
+    private int getExplorerIntuitionDebugLineCount() {
+        if (!this.showStructureIntel || !AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
+            return 0;
+        }
+
+        if (!this.showExplorerIntuition) {
+            return 2;
+        }
+
+        if (!AllianceMapIntelPolicy.canUseExplorerIntuition()) {
+            return 2;
+        }
+
+        if (this.cachedIntuitionResult == null) {
+            return 2;
+        }
+
+        return this.getCameraCenterChunk() != null ? 5 : 4;
+    }
+
+    /**
      * Chooses a top-right Y position that avoids fighting with territory preview
      * status panels when a territory mode is active.
      */
@@ -1887,6 +2103,25 @@ public class MapScreen extends Screen {
             return "Faint";
         }
         return "Weak";
+    }
+
+    /**
+     * Converts an intuition message type into a compact debug label.
+     */
+    private String getDebugIntuitionMessageLabel(IntuitionMessageType messageType) {
+        if (messageType == null) {
+            return "None";
+        }
+
+        return switch (messageType) {
+            case NONE -> "None";
+            case PROMISING -> "Promising";
+            case RICH -> "Rich";
+            case UNUSUAL -> "Unusual";
+            case QUIET -> "Quiet";
+            case UNREMARKABLE -> "Unremarkable";
+            case UNCERTAIN -> "Uncertain";
+        };
     }
 
     private void clearTerritoryPreviewState() {

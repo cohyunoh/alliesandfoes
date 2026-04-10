@@ -31,8 +31,6 @@ public final class AllianceMapIntelPolicy {
     }
 
     /**
-     * Returns whether the player can use territory action modes from the map.
-     *
      * Founder/Admin roles may found, claim, and unclaim.
      */
     public static boolean canUseTerritoryActions() {
@@ -40,60 +38,55 @@ public final class AllianceMapIntelPolicy {
             return false;
         }
 
-        String role = normalizeRole(AllianceClientState.getMemberRole());
-        return role.equals("founder") || role.equals("admin");
+        return isFounder() || isAdmin();
     }
 
     /**
-     * Returns whether the player can use explorer intuition.
-     *
-     * V1 policy:
-     * - Explorer role gets intuition as gameplay-facing interpretation
-     * - Admin also gets access so the system can be tested without role swapping
+     * Explorer is the intended gameplay role.
+     * Founder/Admin are also allowed for development and testing.
      */
     public static boolean canUseExplorerIntuition() {
         if (!AllianceClientState.isInAlliance()) {
             return false;
         }
 
-        String role = normalizeRole(AllianceClientState.getMemberRole());
-        return role.equals("explorer") || role.equals("admin");
+        return isExplorer() || isFounder() || isAdmin();
     }
 
     /**
-     * Returns whether the player can view raw structure intel (debug-level data).
-     *
-     * This is restricted to admins only and should remain separate from the
-     * explorer intuition system.
+     * Raw structure intel remains a debug capability.
+     * Founder is temporarily allowed here too so you can test without role swapping.
      */
     public static boolean canViewAdminStructureIntel() {
         if (!AllianceClientState.isInAlliance()) {
             return false;
         }
 
-        return isAdmin();
+        return isFounder() || isAdmin();
     }
 
     /**
-     * Returns whether the player can toggle admin debug intel on the map.
-     *
-     * Keep this separate from normal gameplay-facing permissions so that
-     * Explorer intuition and admin debug visibility do not become coupled.
+     * Admin debug toggle permission.
      */
     public static boolean canToggleAdminDebugIntel() {
         if (!AllianceClientState.isInAlliance()) {
             return false;
         }
 
-        return isAdmin();
+        return isFounder() || isAdmin();
     }
 
-    /**
-     * Returns whether the player is an admin.
-     */
     public static boolean isAdmin() {
+        return normalizeRole(AllianceClientState.getMemberRole()).equals("admin");
+    }
+
+    public static boolean isFounder() {
         String role = normalizeRole(AllianceClientState.getMemberRole());
-        return role.equals("admin");
+        return role.equals("founder") || role.equals("owner");
+    }
+
+    public static boolean isExplorer() {
+        return normalizeRole(AllianceClientState.getMemberRole()).equals("explorer");
     }
 
     private static String normalizeRole(String role) {

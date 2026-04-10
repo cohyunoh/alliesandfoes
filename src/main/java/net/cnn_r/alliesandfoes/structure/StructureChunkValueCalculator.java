@@ -15,12 +15,14 @@ import java.util.Set;
 
 public final class StructureChunkValueCalculator {
     private static final int STRUCTURE_SCAN_RADIUS = 2;
+    private static final double SECONDARY_STRUCTURE_WEIGHT = 0.50;
 
     private StructureChunkValueCalculator() {
     }
 
     public static ChunkStructureData analyze(ServerLevel level, ChunkPos centerPos) {
-        int bestScore = 0;
+        int strongestScore = 0;
+        int secondStrongestScore = 0;
         Set<String> names = new LinkedHashSet<>();
 
         var structureRegistry = level.registryAccess().lookupOrThrow(Registries.STRUCTURE);
@@ -60,7 +62,16 @@ public final class StructureChunkValueCalculator {
                     }
 
                     int weightedScore = (int) Math.round(baseScore * multiplier);
-                    bestScore = Math.max(bestScore, weightedScore);
+                    if (weightedScore <= 0) {
+                        continue;
+                    }
+
+                    if (weightedScore > strongestScore) {
+                        secondStrongestScore = strongestScore;
+                        strongestScore = weightedScore;
+                    } else if (weightedScore > secondStrongestScore) {
+                        secondStrongestScore = weightedScore;
+                    }
 
                     if (chunkDistance == 0) {
                         names.add(structureName);
@@ -71,8 +82,16 @@ public final class StructureChunkValueCalculator {
             }
         }
 
+        /*
+         * Structure value should feel like unusual opportunity, not a hard takeover.
+         * Use the strongest nearby contribution fully, then allow a second nearby
+         * contribution to help with diminishing returns.
+         */
+        int combinedScore = strongestScore
+                + (int) Math.round(secondStrongestScore * SECONDARY_STRUCTURE_WEIGHT);
+
         return new ChunkStructureData(
-                StructureValueRules.getFinalStructureScore(bestScore),
+                StructureValueRules.getFinalStructureScore(combinedScore),
                 new ArrayList<>(names)
         );
     }

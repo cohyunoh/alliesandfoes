@@ -3,6 +3,7 @@ package net.cnn_r.alliesandfoes;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
 import net.cnn_r.alliesandfoes.network.*;
+import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.structure.StructureChunkValueCalculator;
 import net.cnn_r.alliesandfoes.territory.*;
 import net.fabricmc.api.ModInitializer;
@@ -10,6 +11,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -270,6 +272,36 @@ public class Alliesandfoes implements ModInitializer {
 
 			for (ServerPlayer receiver : players) {
 				ServerPlayNetworking.send(receiver, payload);
+			}
+		});
+
+		ServerChunkEvents.CHUNK_LOAD.register((world, chunk) -> {
+			if (!(world instanceof ServerLevel level)) {
+				return;
+			}
+
+			ChunkPos pos = chunk.getPos();
+			var structureData = StructureChunkValueCalculator.analyze(level, pos);
+
+			ChunkStructurePayload payload = new ChunkStructurePayload(
+					pos.x,
+					pos.z,
+					structureData.getStructureValue(),
+					structureData.getStructureNames()
+			);
+
+			for (ServerPlayer player : level.players()) {
+				ChunkPos playerPos = player.chunkPosition();
+
+				/*
+				 * Only sync to nearby players so this stays bounded.
+				 */
+				int dx = Math.abs(playerPos.x - pos.x);
+				int dz = Math.abs(playerPos.z - pos.z);
+
+				if (Math.max(dx, dz) <= 8) {
+					ServerPlayNetworking.send(player, payload);
+				}
 			}
 		});
 
