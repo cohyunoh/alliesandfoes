@@ -88,7 +88,8 @@ public class ChunkValueAnalyzer {
                 oreValue,
                 structureValue,
                 biomeValue,
-                waterValue
+                waterValue,
+                biomeName
         );
 
         return new ChunkValueData(pos, totalValue, breakdown);
@@ -150,9 +151,15 @@ public class ChunkValueAnalyzer {
     }
 
     private String getBiomeNameAt(int blockX, int blockZ) {
-        int y = this.level.getSeaLevel();
+        int y = this.level.getHeight(Heightmap.Types.WORLD_SURFACE, blockX, blockZ);
 
-        var biomeHolder = this.level.getBiome(new BlockPos(blockX, y, blockZ));
+        /*
+         * Clamp to a valid in-world position just in case the sampled surface
+         * height reaches or exceeds the build ceiling.
+         */
+        int sampleY = Math.max(this.level.getMinY(), Math.min(this.level.getMaxY() - 1, y));
+
+        var biomeHolder = this.level.getBiome(new BlockPos(blockX, sampleY, blockZ));
         var biomeKeyOptional = biomeHolder.unwrapKey();
 
         if (biomeKeyOptional.isEmpty()) {

@@ -1,16 +1,31 @@
 package net.cnn_r.alliesandfoes.map.value;
 
+/**
+ * Water scoring rules for chunk value.
+ *
+ * Design intent:
+ * - Water is a settlement / livability modifier.
+ * - Dry chunks should stay low.
+ * - Mild nearby water should help, but not dominate.
+ * - Strong local water access should matter noticeably.
+ *
+ * Distribution intent:
+ * - 1-3 should be common on dry land
+ * - 4-6 should represent useful but ordinary access
+ * - 7-8 should represent clearly strong access
+ * - 9-10 should be uncommon
+ */
 public final class WaterValueRules {
     private WaterValueRules() {
     }
 
     /**
      * Scores water access using:
-     * - how much surface water is actually present in this chunk
+     * - how much sampled surface water is present in this chunk
      * - how many nearby chunks also contain water
      *
      * Inputs:
-     * - waterColumnsInChunk: number of sampled columns in this chunk that found water
+     * - waterColumnsInChunk: sampled columns in this chunk that found water
      * - sampledColumnsInChunk: total sampled columns checked in this chunk
      * - nearbyWaterChunkCount: number of neighboring chunks that contain water
      *
@@ -26,22 +41,52 @@ public final class WaterValueRules {
         }
 
         double localCoverage = (double) waterColumnsInChunk / sampledColumnsInChunk;
-
-        /*
-         * Nearby water influence is based on the 8 neighboring chunks.
-         */
         double nearbyInfluence = Math.min(1.0, nearbyWaterChunkCount / 8.0);
 
         /*
-         * Local coverage should matter more than nearby presence.
-         * This gives a smoother range than the old boolean 9 / 6 / 1 behavior.
+         * Local water matters more than nearby water.
+         * Nearby water still helps represent rivers, coasts, and lakes just
+         * outside the chunk boundary.
          */
-        double rawScore =
-                1.0 +
-                        (localCoverage * 6.0) +
-                        (nearbyInfluence * 3.0);
+        double localComponent = localCoverage * 6.5;
+        double nearbyComponent = nearbyInfluence * 2.5;
+        double rawScore = 1.0 + localComponent + nearbyComponent;
 
-        int score = (int) Math.round(rawScore);
-        return Math.max(1, Math.min(10, score));
+        return mapRawWaterScore(rawScore);
+    }
+
+    /**
+     * Curves the raw score so high water values are possible but uncommon.
+     */
+    private static int mapRawWaterScore(double rawScore) {
+        if (rawScore <= 1.4) {
+            return 1;
+        }
+        if (rawScore <= 2.1) {
+            return 2;
+        }
+        if (rawScore <= 2.9) {
+            return 3;
+        }
+        if (rawScore <= 3.8) {
+            return 4;
+        }
+        if (rawScore <= 4.8) {
+            return 5;
+        }
+        if (rawScore <= 5.9) {
+            return 6;
+        }
+        if (rawScore <= 7.0) {
+            return 7;
+        }
+        if (rawScore <= 8.1) {
+            return 8;
+        }
+        if (rawScore <= 9.0) {
+            return 9;
+        }
+
+        return 10;
     }
 }

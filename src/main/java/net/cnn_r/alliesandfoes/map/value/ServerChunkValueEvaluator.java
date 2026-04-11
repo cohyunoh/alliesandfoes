@@ -78,7 +78,8 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
                 oreValue,
                 structureValue,
                 biomeValue,
-                waterValue
+                waterValue,
+                biomeName
         );
     }
 
@@ -128,9 +129,15 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
     }
 
     protected String getBiomeNameAt(ServerLevel level, int blockX, int blockZ) {
-        int y = level.getSeaLevel();
+        int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, blockX, blockZ);
 
-        var biomeHolder = level.getBiome(new BlockPos(blockX, y, blockZ));
+        /*
+         * Clamp to a valid in-world position just in case the sampled surface
+         * height reaches or exceeds the build ceiling.
+         */
+        int sampleY = Math.max(level.getMinY(), Math.min(level.getMaxY() - 1, y));
+
+        var biomeHolder = level.getBiome(new BlockPos(blockX, sampleY, blockZ));
         var biomeKeyOptional = biomeHolder.unwrapKey();
 
         if (biomeKeyOptional.isEmpty()) {

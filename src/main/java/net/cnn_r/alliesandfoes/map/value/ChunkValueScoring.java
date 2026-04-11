@@ -14,6 +14,9 @@ package net.cnn_r.alliesandfoes.map.value;
  * - 5-6 should feel decent / solid
  * - 7-8 should feel genuinely good
  * - 9-10 should be rare standouts
+ *
+ * Interaction intent:
+ * - Some biome + water pairings should feel more intuitive than a plain sum.
  */
 public final class ChunkValueScoring {
     public static final int MIN_TOTAL_VALUE = 1;
@@ -26,7 +29,8 @@ public final class ChunkValueScoring {
             int oreValue,
             int structureValue,
             int biomeValue,
-            int waterValue
+            int waterValue,
+            String biomeName
     ) {
         double weightedScore =
                 oreValue * ChunkValueWeights.ore()
@@ -34,7 +38,92 @@ public final class ChunkValueScoring {
                         + biomeValue * ChunkValueWeights.biome()
                         + waterValue * ChunkValueWeights.water();
 
+        weightedScore += getBiomeWaterSynergyBonus(biomeName, waterValue);
+
         return mapWeightedScoreToChunkValue(weightedScore);
+    }
+
+    /**
+     * Small surface-quality bonus based on how intuitive the biome/water pairing is.
+     *
+     * This is intentionally modest:
+     * - it should help chunks feel right
+     * - it should not overpower the underlying factor scores
+     */
+    private static double getBiomeWaterSynergyBonus(String biomeName, int waterValue) {
+        if (biomeName == null || biomeName.isBlank() || waterValue <= 2) {
+            return 0.0;
+        }
+
+        String b = biomeName.toLowerCase();
+
+        /*
+         * Rivers, beaches, and meadows should feel naturally strong when water is present.
+         */
+        if (b.contains("river")
+                || b.contains("beach")
+                || b.contains("meadow")
+                || b.contains("plains")
+                || b.contains("cherry_grove")) {
+            if (waterValue >= 7) {
+                return 0.7;
+            }
+            if (waterValue >= 5) {
+                return 0.4;
+            }
+            return 0.2;
+        }
+
+        /*
+         * Deserts and badlands benefit meaningfully from nearby water,
+         * because water improves otherwise harsh terrain.
+         */
+        if (b.contains("desert")
+                || b.contains("badlands")
+                || b.contains("wooded_badlands")
+                || b.contains("eroded_badlands")) {
+            if (waterValue >= 7) {
+                return 0.8;
+            }
+            if (waterValue >= 5) {
+                return 0.5;
+            }
+            return 0.25;
+        }
+
+        /*
+         * Swamps and mangroves already imply water-heavy terrain.
+         * Keep the bonus smaller so they do not get double-rewarded too hard.
+         */
+        if (b.contains("swamp") || b.contains("mangrove")) {
+            if (waterValue >= 7) {
+                return 0.3;
+            }
+            if (waterValue >= 5) {
+                return 0.15;
+            }
+            return 0.0;
+        }
+
+        /*
+         * Ocean biomes already get lots of water naturally.
+         * Do not reward them heavily just for being wet.
+         */
+        if (b.contains("ocean")) {
+            return 0.0;
+        }
+
+        /*
+         * Default moderate interaction for ordinary land.
+         */
+        if (waterValue >= 7) {
+            return 0.35;
+        }
+        if (waterValue >= 5) {
+            return 0.2;
+        }
+
+        return 0.0;
     }
 
     /**
