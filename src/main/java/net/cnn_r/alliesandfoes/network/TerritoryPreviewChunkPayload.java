@@ -9,6 +9,10 @@ public record TerritoryPreviewChunkPayload(
         boolean valid,
         String reason,
         int cost,
+        int chunkValue,
+        int currentUsedCapacity,
+        int maxCapacity,
+        int remainingCapacityAfterAction,
         PreviewType previewType
 ) {
     public enum PreviewType {
@@ -37,6 +41,10 @@ public record TerritoryPreviewChunkPayload(
         buf.writeBoolean(payload.valid());
         buf.writeUtf(payload.reason());
         buf.writeVarInt(payload.cost());
+        buf.writeVarInt(payload.chunkValue());
+        buf.writeVarInt(payload.currentUsedCapacity());
+        buf.writeVarInt(payload.maxCapacity());
+        buf.writeVarInt(payload.remainingCapacityAfterAction());
         PreviewType.write(buf, payload.previewType());
     }
 
@@ -47,6 +55,10 @@ public record TerritoryPreviewChunkPayload(
                 buf.readInt(),
                 buf.readBoolean(),
                 buf.readUtf(),
+                buf.readVarInt(),
+                buf.readVarInt(),
+                buf.readVarInt(),
+                buf.readVarInt(),
                 buf.readVarInt(),
                 PreviewType.read(buf)
         );

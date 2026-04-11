@@ -62,15 +62,21 @@ public final class TerritoryPreviewSyncService {
             boolean hasCreateAnchorPermission,
             ChunkKey chunkKey
     ) {
+        AnchorTier tier = AnchorTier.getDefault();
+
         TerritoryPlacementRules.RuleResult result = queryService.getFoundingPreview(
                 playerAllianceId,
                 hasCreateAnchorPermission,
                 chunkKey,
-                AnchorTier.getDefault(),
+                tier,
                 dimensionId -> queryService.getTerritoryManager().isAllowedDimensionForPreview(dimensionId)
         );
 
+        int chunkValue = queryService.getOrCreateChunkValue(chunkKey);
         int cost = queryService.getFoundingCost(chunkKey);
+        int currentUsedCapacity = 0;
+        int maxCapacity = tier.getMaxClaimValue();
+        int remainingCapacityAfterAction = Math.max(0, maxCapacity - chunkValue);
 
         return new TerritoryPreviewChunkPayload(
                 chunkKey.getDimensionId(),
@@ -79,6 +85,10 @@ public final class TerritoryPreviewSyncService {
                 result.allowed(),
                 result.allowed() ? "" : result.failureReason(),
                 cost,
+                chunkValue,
+                currentUsedCapacity,
+                maxCapacity,
+                remainingCapacityAfterAction,
                 TerritoryPreviewChunkPayload.PreviewType.FOUND
         );
     }
@@ -93,7 +103,13 @@ public final class TerritoryPreviewSyncService {
                 ? queryService.getClaimPreview(anchorId, chunkKey)
                 : TerritoryClaimRules.RuleResult.deny("You do not have permission to claim territory.");
 
+        int chunkValue = queryService.getOrCreateChunkValue(chunkKey);
         int cost = queryService.getExpansionCost(chunkKey);
+
+        int currentUsedCapacity = queryService.getTotalClaimValueForAnchor(anchorId);
+        int remainingCapacity = queryService.getRemainingCapacityForAnchor(anchorId);
+        int maxCapacity = currentUsedCapacity + remainingCapacity;
+        int remainingCapacityAfterAction = Math.max(0, remainingCapacity - chunkValue);
 
         return new TerritoryPreviewChunkPayload(
                 chunkKey.getDimensionId(),
@@ -102,6 +118,10 @@ public final class TerritoryPreviewSyncService {
                 result.allowed(),
                 result.allowed() ? "" : result.failureReason(),
                 cost,
+                chunkValue,
+                currentUsedCapacity,
+                maxCapacity,
+                remainingCapacityAfterAction,
                 TerritoryPreviewChunkPayload.PreviewType.CLAIM
         );
     }
@@ -116,6 +136,12 @@ public final class TerritoryPreviewSyncService {
                 ? queryService.getUnclaimPreview(anchorId, chunkKey)
                 : TerritoryClaimRules.RuleResult.deny("You do not have permission to unclaim territory.");
 
+        int chunkValue = queryService.getOrCreateChunkValue(chunkKey);
+        int currentUsedCapacity = queryService.getTotalClaimValueForAnchor(anchorId);
+        int remainingCapacity = queryService.getRemainingCapacityForAnchor(anchorId);
+        int maxCapacity = currentUsedCapacity + remainingCapacity;
+        int remainingCapacityAfterAction = Math.min(maxCapacity, remainingCapacity + chunkValue);
+
         return new TerritoryPreviewChunkPayload(
                 chunkKey.getDimensionId(),
                 chunkKey.getChunkX(),
@@ -123,6 +149,10 @@ public final class TerritoryPreviewSyncService {
                 result.allowed(),
                 result.allowed() ? "" : result.failureReason(),
                 0,
+                chunkValue,
+                currentUsedCapacity,
+                maxCapacity,
+                remainingCapacityAfterAction,
                 TerritoryPreviewChunkPayload.PreviewType.UNCLAIM
         );
     }

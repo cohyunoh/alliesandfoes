@@ -74,6 +74,9 @@ public class MapScreen extends Screen {
 
     private static final int PREVIEW_STATUS_BG_COLOR = 0xA0000000;
 
+    private static final int MODE_GLOW_THICKNESS = 6;
+    private static final int MODE_GLOW_ALPHA = 70;
+
     private MapTexture mapTexture;
     private MapRenderer renderer;
     private ChunkCache cache;
@@ -104,6 +107,7 @@ public class MapScreen extends Screen {
 
     private TerritoryPreviewMode territoryPreviewMode = TerritoryPreviewMode.NONE;
     private UUID selectedAnchorId;
+    private String selectedAnchorName;
     private boolean showStructureIntel = false;
     private boolean showExplorerIntuition = true;
     private ChunkStructureSyncCache chunkStructureSyncCache;
@@ -299,6 +303,8 @@ public class MapScreen extends Screen {
 
         super.render(context, mouseX, mouseY, delta);
         renderTopButtonGlows(context, delta);
+
+        this.renderTerritoryModeGlow(context);
 
         this.renderExplorerIntuitionCue(context);
         this.renderTerritoryPreviewStatus(context);
@@ -518,28 +524,22 @@ public class MapScreen extends Screen {
 
         switch (key) {
             case 256 -> { // ESC
-                if (this.territoryPreviewMode != TerritoryPreviewMode.NONE
-                        || this.selectedAnchorId != null) {
+                if (this.territoryPreviewMode != TerritoryPreviewMode.NONE) {
+                    String exitedModeMessage = switch (this.territoryPreviewMode) {
+                        case FOUND -> "Exited Found Mode";
+                        case CLAIM -> "Exited Claim Mode";
+                        case UNCLAIM -> "Exited Unclaim Mode";
+                        case NONE -> "Exited Territory Mode";
+                    };
 
-                    Component exitMessage;
-
-                    if (this.territoryPreviewMode == TerritoryPreviewMode.FOUND) {
-                        exitMessage = Component.literal("Exited founding mode");
-                    } else if (this.territoryPreviewMode == TerritoryPreviewMode.CLAIM) {
-                        exitMessage = Component.literal("Exited claim mode");
-                    } else if (this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM) {
-                        exitMessage = Component.literal("Exited unclaim mode");
-                    } else {
-                        exitMessage = Component.literal("Exited territory mode");
-                    }
-
+                    this.territoryPreviewMode = TerritoryPreviewMode.NONE;
                     this.clearTerritoryPreviewState();
-
-                    this.showScreenMessage(exitMessage, 1500);
+                    this.showScreenMessage(
+                            Component.literal(exitedModeMessage).withColor(0xFFFFFFFF),
+                            2200
+                    );
                     return true;
                 }
-
-                return super.keyPressed(input);
             }
             case 263 -> {
                 this.cameraBlockX -= panAmount;
@@ -568,25 +568,29 @@ public class MapScreen extends Screen {
             case 85 -> { // U
                 if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
                     this.showScreenMessage(
-                            Component.literal("Your alliance role cannot use unclaim mode."),
-                            1500
+                            Component.literal("You do not have permission to unclaim territory."),
+                            1800
                     );
                     return true;
                 }
-                if (this.selectedAnchorId == null) {
-                    if (this.minecraft.player != null) {
-                        this.showScreenMessage(
-                                Component.literal("Select an anchor first by right-clicking one of your claimed chunks."),
-                                2000
-                        );
-                    }
+
+                if (this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM) {
+                    this.territoryPreviewMode = TerritoryPreviewMode.NONE;
+                    this.clearTerritoryPreviewState();
+                    this.showScreenMessage(
+                            Component.literal("Exited Unclaim Mode").withColor(0xFFFFFFFF),
+                            2200
+                    );
                     return true;
                 }
 
-                UUID anchorId = this.selectedAnchorId;
-                this.clearTerritoryPreviewState();
-                this.selectedAnchorId = anchorId;
                 this.territoryPreviewMode = TerritoryPreviewMode.UNCLAIM;
+                this.clearTerritoryPreviewState();
+                this.showScreenMessage(
+                        Component.literal("Entered Unclaim Mode — Left Click to unclaim, Right Click to select anchor, ESC to cancel")
+                                .withColor(0xFFFF6666),
+                        2800
+                );
                 return true;
             }
             case 82 -> { // R
@@ -650,38 +654,57 @@ public class MapScreen extends Screen {
             case 70 -> { // F
                 if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
                     this.showScreenMessage(
-                            Component.literal("Your alliance role cannot use founding mode."),
-                            1500
+                            Component.literal("You do not have permission to found territory."),
+                            1800
                     );
                     return true;
                 }
 
-                this.clearTerritoryPreviewState();
+                if (this.territoryPreviewMode == TerritoryPreviewMode.FOUND) {
+                    this.territoryPreviewMode = TerritoryPreviewMode.NONE;
+                    this.clearTerritoryPreviewState();
+                    this.showScreenMessage(
+                            Component.literal("Exited Found Mode").withColor(0xFFFFFFFF),
+                            2200
+                    );
+                    return true;
+                }
+
                 this.territoryPreviewMode = TerritoryPreviewMode.FOUND;
+                this.clearTerritoryPreviewState();
+                this.showScreenMessage(
+                        Component.literal("Entered Found Mode — Left Click to found, ESC to cancel")
+                                .withColor(0xFFFFCC55),
+                        2600
+                );
                 return true;
             }
             case 67 -> { // C
                 if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
                     this.showScreenMessage(
-                            Component.literal("Your alliance role cannot use claim mode."),
-                            1500
+                            Component.literal("You do not have permission to claim territory."),
+                            1800
                     );
                     return true;
                 }
-                if (this.selectedAnchorId == null) {
-                    if (this.minecraft.player != null) {
-                        this.showScreenMessage(
-                                Component.literal("Select an anchor first by right-clicking one of your claimed chunks."),
-                                2000
-                        );
-                    }
+
+                if (this.territoryPreviewMode == TerritoryPreviewMode.CLAIM) {
+                    this.territoryPreviewMode = TerritoryPreviewMode.NONE;
+                    this.clearTerritoryPreviewState();
+                    this.showScreenMessage(
+                            Component.literal("Exited Claim Mode").withColor(0xFFFFFFFF),
+                            2200
+                    );
                     return true;
                 }
 
-                UUID anchorId = this.selectedAnchorId;
-                this.clearTerritoryPreviewState();
-                this.selectedAnchorId = anchorId;
                 this.territoryPreviewMode = TerritoryPreviewMode.CLAIM;
+                this.clearTerritoryPreviewState();
+                this.showScreenMessage(
+                        Component.literal("Entered Claim Mode — Left Click to claim, Right Click to select anchor, ESC to cancel")
+                                .withColor(0xFF55FF55),
+                        2800
+                );
                 return true;
             }
 
@@ -890,17 +913,13 @@ public class MapScreen extends Screen {
                 : null;
 
         if (previewData != null) {
-            int previewFill = previewData.valid()
-                    ? PREVIEW_VALID_FILL_COLOR
-                    : PREVIEW_INVALID_FILL_COLOR;
+            int previewFill = this.getTerritoryPreviewFillColor(previewData);
             context.fill(x1, y1, x2, y2, previewFill);
         }
 
         int borderColor;
         if (previewData != null) {
-            borderColor = previewData.valid()
-                    ? PREVIEW_VALID_BORDER_COLOR
-                    : PREVIEW_INVALID_BORDER_COLOR;
+            borderColor = this.getTerritoryPreviewOutlineColor(previewData);
         } else if (territoryData != null && territoryData.claimed()) {
             borderColor = territoryData.anchorChunk()
                     ? ANCHOR_CHUNK_BORDER_COLOR
@@ -1160,7 +1179,31 @@ public class MapScreen extends Screen {
                             .getVisualOrderText()
             );
 
-            lines.add(Component.literal("Cost: " + previewData.cost()).getVisualOrderText());
+            if (previewData.chunkValue() > 0) {
+                lines.add(
+                        Component.literal("Chunk Value: ")
+                                .append(Component.literal(String.valueOf(previewData.chunkValue()))
+                                        .withColor(getOverallValueColor(previewData.chunkValue())))
+                                .getVisualOrderText()
+                );
+            }
+
+            if (previewData.previewType() != TerritoryPreviewChunkPayload.PreviewType.UNCLAIM) {
+                lines.add(Component.literal("Cost: " + previewData.cost()).getVisualOrderText());
+            }
+
+            if (previewData.maxCapacity() > 0) {
+                lines.add(Component.literal(
+                        "Capacity: "
+                                + previewData.currentUsedCapacity()
+                                + "/"
+                                + previewData.maxCapacity()
+                ).getVisualOrderText());
+
+                lines.add(Component.literal(
+                        "Remaining After: " + previewData.remainingCapacityAfterAction()
+                ).getVisualOrderText());
+            }
 
             if (!previewData.reason().isEmpty()) {
                 lines.add(Component.literal(previewData.reason()).withColor(0xFFAA55).getVisualOrderText());
@@ -1171,7 +1214,14 @@ public class MapScreen extends Screen {
                 return;
             }
         } else if (isPreviewing) {
-            lines.add(Component.literal("Checking...").withColor(0xAAAAAA).getVisualOrderText());
+            if ((this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
+                    || this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM)
+                    && this.selectedAnchorId == null) {
+                lines.add(Component.literal("Select an anchor with Right Click").withColor(0xFFAA55).getVisualOrderText());
+            } else {
+                lines.add(Component.literal("Checking...").withColor(0xAAAAAA).getVisualOrderText());
+            }
+
             context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
             return;
         }
@@ -1442,6 +1492,7 @@ public class MapScreen extends Screen {
         }
 
         this.selectedAnchorId = territoryData.anchorId();
+        this.selectedAnchorName = territoryData.anchorName();
         this.lastRequestedPreviewChunk = null;
         this.lastPreviewRequestMillis = 0L;
         this.territoryPreviewSyncCache.clear();
@@ -1548,6 +1599,12 @@ public class MapScreen extends Screen {
             return;
         }
 
+        if ((this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
+                || this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM)
+                && this.selectedAnchorId == null) {
+            return;
+        }
+
         // Do not preview chunks that do not have map data yet.
         // This avoids ugly black preview holes on uncached terrain.
         if (!this.cache.hasChunk(this.hoveredChunk)) {
@@ -1590,52 +1647,75 @@ public class MapScreen extends Screen {
         this.lastPreviewRequestMillis = now;
     }
 
+    /**
+     * Renders the active territory preview status in the top-right corner.
+     *
+     * This keeps the currently selected mode readable and, when a preview exists,
+     * surfaces the most important chunk-value gameplay information without
+     * requiring the player to rely only on the hover tooltip.
+     */
     private void renderTerritoryPreviewStatus(GuiGraphics context) {
         if (this.territoryPreviewMode == TerritoryPreviewMode.NONE) {
             return;
         }
 
         List<String> lines = new ArrayList<>();
+        lines.add(switch (this.territoryPreviewMode) {
+            case FOUND -> "Found Territory";
+            case CLAIM -> "Claim Territory";
+            case UNCLAIM -> "Unclaim Territory";
+            case NONE -> "Territory Preview";
+        });
 
-        switch (this.territoryPreviewMode) {
-            case FOUND -> {
-                lines.add("Found Mode [F]");
-                lines.add("Hover Chunk");
-                lines.add("/territory found <name>");
-                lines.add("ESC to Exit");
-            }
-            case CLAIM -> {
-                lines.add("Claim Mode [C]");
-                lines.add("Anchor: " + getSelectedAnchorLabel());
+        if (this.selectedAnchorId != null) {
+            String anchorLabel = this.selectedAnchorName != null && !this.selectedAnchorName.isBlank()
+                    ? this.selectedAnchorName
+                    : this.selectedAnchorId.toString().substring(0, 8);
 
-                if (this.selectedAnchorId != null) {
-                    lines.add("Hover Chunk");
-                    lines.add("Left Click to Claim");
-                    lines.add("ESC to Exit");
-                } else {
-                    lines.add("Right Click Claimed Chunk");
-                    lines.add("Select Anchor First");
-                }
-            }
-            case UNCLAIM -> {
-                lines.add("Unclaim Mode [U]");
-                lines.add("Anchor: " + getSelectedAnchorLabel());
-
-                if (this.selectedAnchorId != null) {
-                    lines.add("Hover Edge Chunk");
-                    lines.add("Left Click to Unclaim");
-                    lines.add("ESC to Exit");
-                } else {
-                    lines.add("Right Click Claimed Chunk");
-                    lines.add("Select Anchor First");
-                }
-            }
-            case NONE -> {
-                return;
-            }
+            lines.add("Anchor: " + anchorLabel);
         }
 
-        lines.add("Structure Intel: " + (this.showStructureIntel ? "On" : "Off"));
+        TerritoryPreviewChunkPayload previewData = null;
+        if (this.hoveredChunk != null && this.minecraft != null && this.minecraft.level != null) {
+            ChunkKey chunkKey = new ChunkKey(
+                    this.minecraft.level.dimension().toString(),
+                    this.hoveredChunk.x,
+                    this.hoveredChunk.z
+            );
+
+            previewData = this.territoryPreviewSyncCache.get(chunkKey);
+        }
+
+        if (previewData != null) {
+            lines.add(previewData.valid() ? "Status: Valid" : "Status: Invalid");
+
+            if (previewData.chunkValue() > 0) {
+                lines.add("Chunk Value: " + previewData.chunkValue());
+            }
+
+            if (previewData.previewType() != TerritoryPreviewChunkPayload.PreviewType.UNCLAIM) {
+                lines.add("Cost: " + previewData.cost());
+            }
+
+            if (previewData.maxCapacity() > 0) {
+                lines.add("Capacity: " + previewData.currentUsedCapacity() + "/" + previewData.maxCapacity());
+                lines.add("Remaining After: " + previewData.remainingCapacityAfterAction());
+            }
+
+            if (!previewData.reason().isEmpty()) {
+                lines.add("Reason: " + previewData.reason());
+            }
+        } else if (this.hoveredChunk != null) {
+            if ((this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
+                    || this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM)
+                    && this.selectedAnchorId == null) {
+                lines.add("Select an anchor with Right Click");
+            } else {
+                lines.add("Checking...");
+            }
+        } else {
+            lines.add("Hover a chunk for preview");
+        }
 
         int maxWidth = 0;
         for (String line : lines) {
@@ -1649,52 +1729,176 @@ public class MapScreen extends Screen {
         int x = this.width - boxWidth - 12;
         int y = 12;
 
-        context.fill(x, y, x + boxWidth, y + boxHeight, PREVIEW_STATUS_BG_COLOR);
-
-        int color = switch (this.territoryPreviewMode) {
-            case FOUND -> 0xFF55FF55;
-            case CLAIM -> 0xFF55AAFF;
-            case UNCLAIM -> 0xFFFFAA55;
-            case NONE -> 0xFFFFFFFF;
-        };
+        context.fill(x, y, x + boxWidth, y + boxHeight, 0xA0000000);
 
         for (int i = 0; i < lines.size(); i++) {
-            int lineColor = i == 0 ? color : 0xFFFFFFFF;
+            int color = 0xFFFFFFFF;
+
+            if (i == 0) {
+                color = 0xFFFFFFAA;
+            } else if (previewData != null && i == 1) {
+                color = previewData.valid() ? 0xFF55FF55 : 0xFFFF5555;
+            } else if (lines.get(i).startsWith("Chunk Value: ")) {
+                int value = previewData != null ? previewData.chunkValue() : 0;
+                color = this.getOverallValueColor(value);
+            } else if (lines.get(i).startsWith("Reason: ")) {
+                color = 0xFFFFAA55;
+            }
 
             context.drawString(
                     this.font,
                     lines.get(i),
                     x + 6,
                     y + 4 + i * lineHeight,
-                    lineColor
+                    color
             );
         }
     }
 
+    /**
+     * Renders a subtle mode-colored glow around the screen edges while a
+     * territory interaction mode is active.
+     *
+     * This is intentionally light so it reinforces mode state without becoming
+     * visually noisy or obscuring the map.
+     */
+    private void renderTerritoryModeGlow(GuiGraphics context) {
+        if (this.territoryPreviewMode == TerritoryPreviewMode.NONE) {
+            return;
+        }
+
+        int rgb = switch (this.territoryPreviewMode) {
+            case FOUND -> 0xFFCC55;
+            case CLAIM -> 0x55FF55;
+            case UNCLAIM -> 0xFF6666;
+            case NONE -> 0xFFFFFF;
+        };
+
+        int outerColor = ((MODE_GLOW_ALPHA) << 24) | rgb;
+        int innerColor = ((MODE_GLOW_ALPHA / 2) << 24) | rgb;
+
+        int w = this.width;
+        int h = this.height;
+        int t = MODE_GLOW_THICKNESS;
+
+        // Outer edge
+        context.fill(0, 0, w, t, outerColor);           // top
+        context.fill(0, h - t, w, h, outerColor);       // bottom
+        context.fill(0, 0, t, h, outerColor);           // left
+        context.fill(w - t, 0, w, h, outerColor);       // right
+
+        // Inner soft edge
+        context.fill(t, t, w - t, t * 2, innerColor);               // top inner
+        context.fill(t, h - (t * 2), w - t, h - t, innerColor);     // bottom inner
+        context.fill(t, t, t * 2, h - t, innerColor);               // left inner
+        context.fill(w - (t * 2), t, w - t, h - t, innerColor);     // right inner
+    }
+
+    /**
+     * Returns the outline color for the currently previewed chunk.
+     *
+     * Valid previews inherit the active territory mode color.
+     * Invalid previews override to warning red so blocked actions remain obvious.
+     */
+    private int getTerritoryPreviewOutlineColor(TerritoryPreviewChunkPayload previewData) {
+        if (previewData != null && !previewData.valid()) {
+            return PREVIEW_INVALID_BORDER_COLOR;
+        }
+
+        return switch (this.territoryPreviewMode) {
+            case FOUND -> 0xFFFFCC55;
+            case CLAIM -> 0xFF55FF55;
+            case UNCLAIM -> 0xFFFF8888;
+            case NONE -> PREVIEW_VALID_BORDER_COLOR;
+        };
+    }
+
+    /**
+     * Returns the translucent fill color for the currently previewed chunk.
+     *
+     * Valid previews inherit the active territory mode color.
+     * Invalid previews override to warning red so blocked actions remain obvious.
+     */
+    private int getTerritoryPreviewFillColor(TerritoryPreviewChunkPayload previewData) {
+        if (previewData != null && !previewData.valid()) {
+            return PREVIEW_INVALID_FILL_COLOR;
+        }
+
+        return switch (this.territoryPreviewMode) {
+            case FOUND -> 0x44FFCC55;
+            case CLAIM -> 0x4455FF55;
+            case UNCLAIM -> 0x44FF6666;
+            case NONE -> PREVIEW_VALID_FILL_COLOR;
+        };
+    }
+
+    /**
+     * Renders the bottom-right control legend.
+     *
+     * When a territory interaction mode is active, this panel becomes mode-aware
+     * so the player can immediately understand:
+     * - what mode they are in
+     * - what left/right click do
+     * - how to exit the mode
+     */
     private void renderMapControls(GuiGraphics context) {
         List<String> lines = new ArrayList<>();
 
-        lines.add("R: Recenter");
+        TerritoryPreviewMode mode = this.territoryPreviewMode;
+        boolean inTerritoryMode = mode != TerritoryPreviewMode.NONE;
 
-        if (AllianceMapIntelPolicy.canUseTerritoryActions()) {
+        if (inTerritoryMode) {
+            switch (mode) {
+                case FOUND -> {
+                    lines.add("FOUND MODE");
+                    lines.add("F: Exit Found Mode");
+                    lines.add("Left Click: Found Anchor");
+                    lines.add("ESC: Cancel");
+                    lines.add("R: Recenter");
+                }
+                case CLAIM -> {
+                    lines.add("CLAIM MODE");
+                    lines.add("C: Exit Claim Mode");
+                    lines.add("Left Click: Claim Chunk");
+                    lines.add("Right Click: Select Anchor");
+                    lines.add("ESC: Cancel");
+                    lines.add("R: Recenter");
+                }
+                case UNCLAIM -> {
+                    lines.add("UNCLAIM MODE");
+                    lines.add("U: Exit Unclaim Mode");
+                    lines.add("Left Click: Unclaim Chunk");
+                    lines.add("Right Click: Select Anchor");
+                    lines.add("ESC: Cancel");
+                    lines.add("R: Recenter");
+                }
+                case NONE -> {
+                }
+            }
+
+            if (AllianceMapIntelPolicy.canUseExplorerIntuition()) {
+                lines.add("I: Explorer Intuition " + (this.showExplorerIntuition ? "On" : "Off"));
+            }
+
+            if (AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
+                lines.add("O: Debug Intel " + (this.showStructureIntel ? "On" : "Off"));
+            }
+        } else {
+            lines.add("R: Recenter");
             lines.add("F: Found Preview");
-        }
 
-        if (AllianceMapIntelPolicy.canUseExplorerIntuition()) {
-            lines.add("I: Explorer Intuition " + (this.showExplorerIntuition ? "On" : "Off"));
-        }
+            if (AllianceMapIntelPolicy.canUseExplorerIntuition()) {
+                lines.add("I: Explorer Intuition " + (this.showExplorerIntuition ? "On" : "Off"));
+            }
 
-        if (AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
-            lines.add("O: Debug Intel " + (this.showStructureIntel ? "On" : "Off"));
-        }
+            if (AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
+                lines.add("O: Debug Intel " + (this.showStructureIntel ? "On" : "Off"));
+            }
 
-        if (AllianceMapIntelPolicy.canUseTerritoryActions()) {
-            if (this.selectedAnchorId != null) {
+            if (AllianceMapIntelPolicy.canUseTerritoryActions()) {
                 lines.add("C: Claim");
                 lines.add("U: Unclaim");
                 lines.add("Right Click: Select Anchor");
-            } else {
-                lines.add("Right Click Claimed Chunk: Select Anchor");
             }
         }
 
@@ -1713,12 +1917,23 @@ public class MapScreen extends Screen {
         context.fill(x, y, x + boxWidth, y + boxHeight, 0xA0000000);
 
         for (int i = 0; i < lines.size(); i++) {
+            int color = 0xFFFFFFFF;
+
+            if (i == 0 && inTerritoryMode) {
+                color = switch (mode) {
+                    case FOUND -> 0xFFFFFF66;
+                    case CLAIM -> 0xFF66FF66;
+                    case UNCLAIM -> 0xFFFF8888;
+                    case NONE -> 0xFFFFFFFF;
+                };
+            }
+
             context.drawString(
                     this.font,
                     lines.get(i),
                     x + 6,
                     y + 4 + i * lineHeight,
-                    0xFFFFFFFF
+                    color
             );
         }
     }
@@ -2125,7 +2340,6 @@ public class MapScreen extends Screen {
     }
 
     private void clearTerritoryPreviewState() {
-        this.territoryPreviewMode = TerritoryPreviewMode.NONE;
         this.selectedAnchorId = null;
         this.lastRequestedPreviewChunk = null;
         this.lastPreviewRequestMillis = 0L;

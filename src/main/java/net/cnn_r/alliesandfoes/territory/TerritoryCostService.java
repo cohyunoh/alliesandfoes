@@ -1,5 +1,13 @@
 package net.cnn_r.alliesandfoes.territory;
 
+/**
+ * Territory cost rules tied to hidden chunk value.
+ *
+ * Design intent:
+ * - Founding should be a real investment.
+ * - Expansion into better land should cost disproportionately more.
+ * - High-value land should feel desirable, but not free to spam.
+ */
 public class TerritoryCostService {
     public static final int DEFAULT_FOUNDING_MULTIPLIER = 3;
     public static final int DEFAULT_EXPANSION_MULTIPLIER = 1;
@@ -34,14 +42,31 @@ public class TerritoryCostService {
         return this.expansionMultiplier;
     }
 
+    /**
+     * Founding an anchor is intentionally expensive.
+     *
+     * It uses the stronger founding multiplier plus the same value-band surcharge
+     * logic used by expansion so exceptional founding chunks feel like a real
+     * commitment.
+     */
     public int getFoundingCost(int chunkValue) {
         validateChunkValue(chunkValue);
-        return chunkValue * this.foundingMultiplier;
+
+        int baseCost = chunkValue * this.foundingMultiplier;
+        int surcharge = getValueBandSurcharge(chunkValue, true);
+        return baseCost + surcharge;
     }
 
+    /**
+     * Expansion cost scales with chunk value, but high-value chunks also gain
+     * additional surcharges so strong land is more contested and meaningful.
+     */
     public int getExpansionCost(int chunkValue) {
         validateChunkValue(chunkValue);
-        return chunkValue * this.expansionMultiplier;
+
+        int baseCost = chunkValue * this.expansionMultiplier;
+        int surcharge = getValueBandSurcharge(chunkValue, false);
+        return baseCost + surcharge;
     }
 
     public int getFoundingCost(ChunkKey chunkKey, TerritoryValueService valueService) {
@@ -64,6 +89,35 @@ public class TerritoryCostService {
         }
 
         return this.getExpansionCost(valueService.getOrCreateChunkValue(chunkKey));
+    }
+
+    /**
+     * Adds additional cost pressure to better chunks.
+     *
+     * Example intent:
+     * - 1-3: little or no surcharge
+     * - 4-5: light surcharge
+     * - 6-7: meaningful surcharge
+     * - 8-10: strong surcharge
+     */
+    protected int getValueBandSurcharge(int chunkValue, boolean founding) {
+        if (chunkValue <= 3) {
+            return 0;
+        }
+
+        if (chunkValue <= 5) {
+            return founding ? 1 : 1;
+        }
+
+        if (chunkValue <= 7) {
+            return founding ? 3 : 2;
+        }
+
+        if (chunkValue <= 9) {
+            return founding ? 6 : 4;
+        }
+
+        return founding ? 9 : 6;
     }
 
     private void validateChunkValue(int chunkValue) {

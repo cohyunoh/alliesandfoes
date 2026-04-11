@@ -66,8 +66,16 @@ public final class TerritoryPlacementRules {
         }
 
         int foundingChunkValue = territoryManager.getValueService().getOrCreateChunkValue(targetChunk);
+        int tierCapacity = resolvedTier.getMaxClaimValue();
+        int remainingCapacity = Math.max(0, tierCapacity - foundingChunkValue);
+
         if (!resolvedTier.canSupportTotalValue(foundingChunkValue)) {
-            return RuleResult.deny("This anchor tier cannot support the founding chunk's value.");
+            return RuleResult.deny(buildFoundingCapacityFailureMessage(
+                    foundingChunkValue,
+                    tierCapacity,
+                    remainingCapacity,
+                    resolvedTier
+            ));
         }
 
         return RuleResult.allow();
@@ -134,6 +142,19 @@ public final class TerritoryPlacementRules {
                 Math.abs(a.getChunkX() - b.getChunkX()),
                 Math.abs(a.getChunkZ() - b.getChunkZ())
         );
+    }
+
+    private static String buildFoundingCapacityFailureMessage(
+            int foundingChunkValue,
+            int tierCapacity,
+            int remainingCapacity,
+            AnchorTier tier
+    ) {
+        return "This anchor tier cannot support the founding chunk. "
+                + "Chunk value: " + foundingChunkValue
+                + ", tier capacity: " + tierCapacity
+                + ", remaining after founding: " + remainingCapacity
+                + ", tier: " + tier.name() + ".";
     }
 
     public record RuleResult(boolean allowed, String failureReason) {

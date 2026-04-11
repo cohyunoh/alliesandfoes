@@ -72,9 +72,17 @@ public final class TerritoryClaimRules {
 
         // Capacity check
         int chunkValue = territoryManager.getValueService().getOrCreateChunkValue(targetChunk);
+        int currentUsed = territoryManager.getTotalClaimValueForAnchor(anchorId);
+        int maxCapacity = anchor.getMaxClaimValue();
+        int remainingCapacity = Math.max(0, maxCapacity - currentUsed);
 
         if (!territoryManager.canAnchorSupportAdditionalValue(anchorId, chunkValue)) {
-            return RuleResult.deny("Anchor cannot support additional territory value.");
+            return RuleResult.deny(buildCapacityFailureMessage(
+                    chunkValue,
+                    currentUsed,
+                    maxCapacity,
+                    remainingCapacity
+            ));
         }
 
         return RuleResult.allow();
@@ -133,6 +141,18 @@ public final class TerritoryClaimRules {
         }
 
         return false;
+    }
+
+    private static String buildCapacityFailureMessage(
+            int chunkValue,
+            int currentUsed,
+            int maxCapacity,
+            int remainingCapacity
+    ) {
+        return "Anchor cannot support this chunk. "
+                + "Chunk value: " + chunkValue
+                + ", used: " + currentUsed + "/" + maxCapacity
+                + ", remaining: " + remainingCapacity + ".";
     }
 
     // =========================
