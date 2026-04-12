@@ -624,33 +624,6 @@ public class MapScreen extends Screen {
                 );
                 return true;
             }
-            case 73 -> { // I
-                if (!AllianceMapIntelPolicy.canUseExplorerIntuition()) {
-                    this.showScreenMessage(
-                            Component.literal("Explorer intuition is unavailable for your current role."),
-                            1500
-                    );
-                    return true;
-                }
-
-                this.showExplorerIntuition = !this.showExplorerIntuition;
-
-                if (!this.showExplorerIntuition) {
-                    this.cachedIntuitionResult = null;
-                    this.lastIntuitionEvalChunk = null;
-                    this.intuitionMessageController.reset();
-                } else {
-                    this.refreshExplorerIntuition(true);
-                }
-
-                this.showScreenMessage(
-                        Component.literal(this.showExplorerIntuition
-                                ? "Explorer intuition enabled"
-                                : "Explorer intuition hidden"),
-                        1500
-                );
-                return true;
-            }
             case 70 -> { // F
                 if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
                     this.showScreenMessage(
@@ -1876,20 +1849,12 @@ public class MapScreen extends Screen {
                 }
             }
 
-            if (AllianceMapIntelPolicy.canUseExplorerIntuition()) {
-                lines.add("I: Explorer Intuition " + (this.showExplorerIntuition ? "On" : "Off"));
-            }
-
             if (AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
                 lines.add("O: Debug Intel " + (this.showStructureIntel ? "On" : "Off"));
             }
         } else {
             lines.add("R: Recenter");
             lines.add("F: Found Preview");
-
-            if (AllianceMapIntelPolicy.canUseExplorerIntuition()) {
-                lines.add("I: Explorer Intuition " + (this.showExplorerIntuition ? "On" : "Off"));
-            }
 
             if (AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
                 lines.add("O: Debug Intel " + (this.showStructureIntel ? "On" : "Off"));
@@ -1938,13 +1903,6 @@ public class MapScreen extends Screen {
         }
     }
 
-    /**
-     * Refreshes the cached explorer intuition result when needed.
-     *
-     * This uses cached data only and intentionally avoids per-frame heavy work.
-     * Re-evaluation happens when the map opens, recenters, zoom changes, or the
-     * camera moves far enough in chunk space.
-     */
     /**
      * Refreshes the cached explorer intuition result when needed.
      *

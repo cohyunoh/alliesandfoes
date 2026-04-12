@@ -42,15 +42,11 @@ public final class AllianceMapIntelPolicy {
     }
 
     /**
-     * Explorer is the intended gameplay role.
-     * Founder/Admin are also allowed for development and testing.
+     * Any alliance member may use the map screen's explorer intuition cues.
+     * The HUD layer is gated by the Monocle item instead (checked in HudMinimapRenderer).
      */
     public static boolean canUseExplorerIntuition() {
-        if (!AllianceClientState.isInAlliance()) {
-            return false;
-        }
-
-        return isExplorer() || isFounder() || isAdmin();
+        return AllianceClientState.isInAlliance();
     }
 
     /**

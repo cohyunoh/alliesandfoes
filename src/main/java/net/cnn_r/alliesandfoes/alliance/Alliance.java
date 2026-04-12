@@ -7,8 +7,9 @@ import java.util.Set;
 import java.util.UUID;
 
 public class Alliance {
-    private static final String DEFAULT_MEMBER_ROLE = "Member";
-    private static final String OWNER_ROLE = "Founder";
+    public static final String DEFAULT_MEMBER_ROLE = "Member";
+    public static final String OWNER_ROLE = "Founder";
+    public static final String EXPLORER_ROLE = "Explorer";
 
     private final UUID id;
     private final String name;

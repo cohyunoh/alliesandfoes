@@ -1,4 +1,14 @@
 {
   "key.alliesandfoes.open_map": "Open Map",
-  "category.alliesandfoes": "Allies & Foes"
+  "key.alliesandfoes.open_journal": "Open Explorer Journal",
+  "category.alliesandfoes": "Allies & Foes",
+  "item.alliesandfoes.monocle": "Monocle",
+  "screen.alliesandfoes.journal.title": "Explorer Journal",
+  "screen.alliesandfoes.journal.tab.explorer": "Explorer",
+  "screen.alliesandfoes.journal.tab.miner": "Miner",
+  "screen.alliesandfoes.journal.biomes_header": "Biomes (%s)",
+  "screen.alliesandfoes.journal.structures_header": "Structures (%s)",
+  "screen.alliesandfoes.journal.searching_for": "Searching for: %s",
+  "screen.alliesandfoes.journal.clear_target": "Clear Target",
+  "screen.alliesandfoes.journal.miner_coming_soon": "Coming soon"
 }

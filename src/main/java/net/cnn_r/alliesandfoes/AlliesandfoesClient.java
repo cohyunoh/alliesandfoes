@@ -2,6 +2,9 @@ package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteManagementScreen;
+import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
+import net.cnn_r.alliesandfoes.explorer.ExplorerSkillClientState;
+import net.cnn_r.alliesandfoes.hud.HudMinimapRenderer;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
@@ -9,10 +12,12 @@ import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.network.*;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.toasts.SystemToast;
@@ -271,6 +276,24 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(ExplorerSkillSyncPayload.TYPE, (payload, context) -> {
+            context.client().execute(() ->
+                    ExplorerSkillClientState.setExploredChunkCount(payload.exploredChunkCount()));
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(ExplorerDiscoverySyncPayload.TYPE, (payload, context) -> {
+            context.client().execute(() ->
+                    ExplorerDiscoveryClientState.update(
+                            payload.biomes(),
+                            payload.structures(),
+                            payload.targetType(),
+                            payload.targetId()
+                    ));
+        });
+
+        HudRenderCallback.EVENT.register((drawContext, tickCounter) ->
+                HudMinimapRenderer.render(drawContext, tickCounter));
+
         ClientChunkEvents.CHUNK_LOAD.register((world, chunk) -> {
             MapState.onChunkLoaded(chunk);
         });
@@ -308,6 +331,25 @@ public class AlliesandfoesClient implements ClientModInitializer {
         });
 
         KeyBindings.register();
+
+        // Clear all client-side caches when leaving a world so stale data
+        // from a previous world never bleeds into the next one.
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            MapState.clearAll();
+            ExplorerSkillClientState.reset();
+            ExplorerDiscoveryClientState.reset();
+            HudMinimapRenderer.reset();
+        });
+
+        // Also clear at the very start of a new connection (before any world
+        // data arrives) to catch any stale writes that leaked past the DISCONNECT
+        // clear from the previous world's background scanner thread.
+        ClientPlayConnectionEvents.INIT.register((handler, client) -> {
+            MapState.clearAll();
+            ExplorerSkillClientState.reset();
+            ExplorerDiscoveryClientState.reset();
+            HudMinimapRenderer.reset();
+        });
     }
 
     private static void showAllianceUpdateToast(

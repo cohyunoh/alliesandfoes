@@ -2,20 +2,30 @@ package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
+import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryService;
+import net.cnn_r.alliesandfoes.explorer.ExplorerSkillService;
+import net.cnn_r.alliesandfoes.item.ModItems;
+import net.cnn_r.alliesandfoes.map.intuition.IntuitionTarget;
 import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.structure.StructureChunkValueCalculator;
 import net.cnn_r.alliesandfoes.territory.*;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.loot.v3.LootTableEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.storage.loot.LootPool;
+import net.minecraft.world.level.storage.loot.entries.LootItem;
+import net.minecraft.world.level.storage.loot.predicates.LootItemRandomChanceCondition;
+import net.minecraft.world.level.storage.loot.providers.number.ConstantValue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,6 +33,7 @@ import java.util.List;
 public class Alliesandfoes implements ModInitializer {
 	@Override
 	public void onInitialize() {
+		ModItems.register();
 		TerritoryCommands.register();
 		AllianceProgressionCommands.register();
 		PayloadTypeRegistry.playS2C().register(PlayerPositionsPayload.TYPE, PlayerPositionsPayload.STREAM_CODEC);
@@ -49,10 +60,13 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(RespondAllianceJoinRequestPayload.TYPE, RespondAllianceJoinRequestPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(RequestInviteAllianceManagementScreenPayload.TYPE, RequestInviteAllianceManagementScreenPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(SendAllianceInvitesPayload.TYPE, SendAllianceInvitesPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(ExplorerSkillSyncPayload.TYPE, ExplorerSkillSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(TerritoryChunkBatchPayload.TYPE, TerritoryChunkBatchPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playS2C().register(TerritoryPreviewBatchPayload.TYPE, TerritoryPreviewBatchPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(RequestTerritoryPreviewPayload.TYPE, RequestTerritoryPreviewPayload.STREAM_CODEC);
 		PayloadTypeRegistry.playC2S().register(RequestTerritoryActionPayload.TYPE, RequestTerritoryActionPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playS2C().register(ExplorerDiscoverySyncPayload.TYPE, ExplorerDiscoverySyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.playC2S().register(SetIntuitionTargetPayload.TYPE, SetIntuitionTargetPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -251,6 +265,33 @@ public class Alliesandfoes implements ModInitializer {
 			});
 		});
 
+		ServerPlayNetworking.registerGlobalReceiver(SetIntuitionTargetPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				IntuitionTarget target = null;
+				if (!"NONE".equals(payload.targetType()) && !payload.targetId().isEmpty()) {
+					try {
+						IntuitionTarget.TargetType type = IntuitionTarget.TargetType.valueOf(payload.targetType());
+						target = new IntuitionTarget(type, Identifier.parse(payload.targetId()));
+					} catch (Exception ignored) {
+					}
+				}
+				ExplorerDiscoveryService.get(context.server()).setActiveTarget(context.player(), target);
+			});
+		});
+
+		// Inject the Monocle into ruined portal chest loot tables (~10% chance)
+		LootTableEvents.MODIFY.register((key, tableBuilder, source, registries) -> {
+			Identifier ruinedPortal = Identifier.fromNamespaceAndPath("minecraft", "chests/ruined_portal");
+			if (ruinedPortal.equals(key.identifier())) {
+				tableBuilder.withPool(
+						LootPool.lootPool()
+								.setRolls(ConstantValue.exactly(1))
+								.when(LootItemRandomChanceCondition.randomChance(0.10f))
+								.add(LootItem.lootTableItem(ModItems.MONOCLE))
+				);
+			}
+		});
+
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			List<ServerPlayer> players = server.getPlayerList().getPlayers();
 
@@ -258,9 +299,11 @@ public class Alliesandfoes implements ModInitializer {
 				return;
 			}
 
+			ExplorerSkillService explorerSkillService = ExplorerSkillService.get(server);
 			List<PlayerPositionsPayload.Entry> entries = new ArrayList<>();
 
 			for (ServerPlayer player : players) {
+				explorerSkillService.onPlayerTick(player);
 				entries.add(new PlayerPositionsPayload.Entry(
 						player.getUUID(),
 						player.getName().getString(),
@@ -315,6 +358,7 @@ public class Alliesandfoes implements ModInitializer {
 			ChunkPos center = player.chunkPosition();
 
 			AllianceManager.get(server).syncPlayer(player);
+			ExplorerSkillService.get(server).syncPlayer(player);
 
 			for (int chunkX = center.x - 8; chunkX <= center.x + 8; chunkX++) {
 

@@ -53,6 +53,10 @@ public class ChunkScanner {
     }
 
     private void scanChunk(LevelChunk chunk) {
+        if (this.executor.isShutdown()) {
+            return;
+        }
+
         ChunkPos pos = chunk.getPos();
         int[] pixels = new int[256];
 
@@ -99,10 +103,17 @@ public class ChunkScanner {
             }
         }
 
+        if (this.executor.isShutdown()) {
+            return;
+        }
+
         this.cache.put(pos, pixels);
 
         ChunkValueData valueData = this.chunkValueAnalyzer.analyze(chunk);
-        this.chunkValueCache.put(pos, valueData);
+
+        if (!this.executor.isShutdown()) {
+            this.chunkValueCache.put(pos, valueData);
+        }
     }
 
     private boolean shouldSkipTopBlock(BlockState state) {

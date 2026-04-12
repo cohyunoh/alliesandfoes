@@ -1,5 +1,6 @@
 package net.cnn_r.alliesandfoes.map.intuition;
 
+import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -141,6 +142,20 @@ public class MapIntuitionMessageController {
      * They should feel like instinct, not instructions.
      */
     private Component toComponent(IntuitionMessageType messageType, IntuitionResult result) {
+        IntuitionTarget target = ExplorerDiscoveryClientState.getActiveTarget();
+
+        if (target != null) {
+            String name = target.displayName();
+            String dir = result.getDirection().getDisplayName();
+            return switch (messageType) {
+                case RICH -> Component.literal("You sense " + name + " to the " + dir + ".");
+                case PROMISING -> Component.literal("A pull toward " + name + " — " + dir + ".");
+                case UNUSUAL -> Component.literal("Something stirs. " + name + " may be near.");
+                case QUIET -> Component.literal("A faint trace of " + name + " to the " + dir + ".");
+                case UNREMARKABLE, UNCERTAIN, NONE -> null;
+            };
+        }
+
         return switch (messageType) {
             case RICH -> Component.literal("This direction feels especially promising.");
             case PROMISING -> Component.literal("This direction feels more promising.");
