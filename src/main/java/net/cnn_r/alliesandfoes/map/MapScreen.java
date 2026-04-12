@@ -306,9 +306,7 @@ public class MapScreen extends Screen {
 
         this.renderTerritoryModeGlow(context);
 
-        this.renderExplorerIntuitionCue(context);
         this.renderTerritoryPreviewStatus(context);
-        this.renderExplorerIntuitionStatus(context);
         this.renderExplorerIntuitionDebugPanel(context);
         this.renderChunkValueDebugPanel(context);
         this.renderMapControls(context);
