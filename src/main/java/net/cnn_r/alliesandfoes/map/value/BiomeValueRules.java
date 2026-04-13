@@ -90,6 +90,52 @@ public final class BiomeValueRules {
         }
 
         /*
+         * Lush Caves — glow berries, moss, azalea, genuinely beautiful.
+         */
+        if (b.contains("lush_caves")) {
+            return 6;
+        }
+
+        /*
+         * Deep Dark — echo shards, but extremely hostile (warden territory).
+         * Pale Garden — rare, distinctive biome with pale oak and eyeblossoms.
+         */
+        if (b.contains("deep_dark") || b.contains("pale_garden")) {
+            return 5;
+        }
+
+        /*
+         * Dripstone Caves — useful dripstone but common and unremarkable.
+         * End Highlands — chorus plants; the best outer-End terrain.
+         * Crimson/Warped Forest — material-rich, relatively navigable Nether biomes.
+         */
+        if (b.contains("dripstone_caves")
+                || b.contains("end_highlands")
+                || b.contains("crimson_forest")
+                || b.contains("warped_forest")) {
+            return 4;
+        }
+
+        /*
+         * Hostile Nether biomes — fragmented terrain, poor settlement value.
+         */
+        if (b.contains("nether_wastes")
+                || b.contains("soul_sand_valley")
+                || b.contains("basalt_deltas")) {
+            return 2;
+        }
+
+        /*
+         * Remaining End biomes — barren outer-End terrain, effectively useless for settlement.
+         */
+        if (b.contains("the_end")
+                || b.contains("end_midlands")
+                || b.contains("end_barrens")
+                || b.contains("small_end_islands")) {
+            return 2;
+        }
+
+        /*
          * Oceanic terrain should usually be poor in baseline settlement value.
          */
         if (b.contains("ocean")) {

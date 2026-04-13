@@ -7,13 +7,15 @@ public class PlayerMarker {
     public final String name;
     public double x;
     public double z;
+    public float yaw;
     public long lastSeenTick;
 
-    public PlayerMarker(UUID uuid, String name, double x, double z, long lastSeenTick) {
+    public PlayerMarker(UUID uuid, String name, double x, double z, float yaw, long lastSeenTick) {
         this.uuid = uuid;
         this.name = name;
         this.x = x;
         this.z = z;
+        this.yaw = yaw;
         this.lastSeenTick = lastSeenTick;
     }
 }

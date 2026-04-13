@@ -29,6 +29,7 @@ public record PlayerPositionsPayload(List<Entry> players) implements CustomPacke
             buf.writeUtf(entry.name());
             buf.writeDouble(entry.x());
             buf.writeDouble(entry.z());
+            buf.writeFloat(entry.yaw());
         }
     }
 
@@ -41,12 +42,13 @@ public record PlayerPositionsPayload(List<Entry> players) implements CustomPacke
                     buf.readUUID(),
                     buf.readUtf(),
                     buf.readDouble(),
-                    buf.readDouble()
+                    buf.readDouble(),
+                    buf.readFloat()
             ));
         }
 
         return new PlayerPositionsPayload(players);
     }
 
-    public record Entry(UUID uuid, String name, double x, double z) {}
+    public record Entry(UUID uuid, String name, double x, double z, float yaw) {}
 }

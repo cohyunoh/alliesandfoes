@@ -1,5 +1,6 @@
 package net.cnn_r.alliesandfoes.mixin;
 
+import net.cnn_r.alliesandfoes.map.JournalIconButton;
 import net.cnn_r.alliesandfoes.map.MapScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
@@ -23,11 +24,18 @@ public abstract class InventoryScreenMixin extends AbstractRecipeBookScreen<Inve
 
 	@Inject(at = @At("RETURN"), method = "init")
 	private void addCustomButton(CallbackInfo info) {
-        // When the button is clicked, we can display a toast to the screen.
-        Button teamsWidget = Button.builder(Component.literal("View Map"), (btn) -> {
-            // When the button is clicked, open map screen
-			Minecraft.getInstance().setScreen(new MapScreen());
-        }).bounds((this.width / 2) - (96 / 2), this.height - ((this.height - this.imageHeight) / 2), 96, 20).build();
-		this.addRenderableWidget(teamsWidget);
+        int btnY = this.height - ((this.height - this.imageHeight) / 2);
+
+        // Map button — centered below the inventory panel
+        this.addRenderableWidget(Button.builder(
+                Component.literal("View Map"),
+                btn -> Minecraft.getInstance().setScreen(new MapScreen()))
+                .bounds((this.width / 2) - 48, btnY, 96, 20)
+                .build());
+
+        // Journal icon button — top-right corner of the inventory GUI panel
+        int journalX = this.leftPos + this.imageWidth - 22;
+        int journalY = this.topPos + 2;
+        this.addRenderableWidget(new JournalIconButton(journalX, journalY));
 	}
 }

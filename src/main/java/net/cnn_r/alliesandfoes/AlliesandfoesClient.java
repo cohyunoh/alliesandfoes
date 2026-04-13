@@ -3,6 +3,7 @@ package net.cnn_r.alliesandfoes;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteManagementScreen;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
+import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryRules;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillClientState;
 import net.cnn_r.alliesandfoes.hud.HudMinimapRenderer;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
@@ -23,7 +24,14 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.ChunkPos;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class AlliesandfoesClient implements ClientModInitializer {
     private static final int STRUCTURE_REFRESH_RADIUS = 2;
@@ -53,6 +61,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
                                     entry.name(),
                                     entry.x(),
                                     entry.z(),
+                                    entry.yaw(),
                                     tick
                             )
                     );
@@ -282,13 +291,41 @@ public class AlliesandfoesClient implements ClientModInitializer {
         });
 
         ClientPlayNetworking.registerGlobalReceiver(ExplorerDiscoverySyncPayload.TYPE, (payload, context) -> {
-            context.client().execute(() ->
-                    ExplorerDiscoveryClientState.update(
-                            payload.biomes(),
-                            payload.structures(),
-                            payload.targetType(),
-                            payload.targetId()
-                    ));
+            context.client().execute(() -> {
+                boolean isFirstSync = !ExplorerDiscoveryClientState.hasReceivedInitialSync();
+
+                Set<String> knownBiomes = ExplorerDiscoveryClientState.getDiscoveredBiomes()
+                        .stream().map(Identifier::toString).collect(Collectors.toSet());
+                Set<String> knownStructures = ExplorerDiscoveryClientState.getDiscoveredStructures()
+                        .stream().map(Identifier::toString).collect(Collectors.toSet());
+
+                ExplorerDiscoveryClientState.update(
+                        payload.biomes(),
+                        payload.structures(),
+                        payload.targetType(),
+                        payload.targetId()
+                );
+
+                if (isFirstSync) return;
+
+                List<String> newEntries = new ArrayList<>();
+                for (String b : payload.biomes())
+                    if (!knownBiomes.contains(b)) newEntries.add("Biome: " + discoveryDisplayName(b));
+                for (String s : payload.structures())
+                    if (!knownStructures.contains(s)) newEntries.add("Structure: " + discoveryDisplayName(s));
+
+                if (newEntries.isEmpty()) return;
+
+                ExplorerDiscoveryClientState.markDiscovery();
+
+                Component title = Component.literal("Journal Discovery");
+                Component body  = newEntries.size() == 1
+                        ? Component.literal(newEntries.get(0))
+                        : Component.literal(newEntries.size() + " new journal entries");
+
+                SystemToast.add(context.client().getToastManager(),
+                        SystemToast.SystemToastId.PERIODIC_NOTIFICATION, title, body);
+            });
         });
 
         HudRenderCallback.EVENT.register((drawContext, tickCounter) ->
@@ -423,5 +460,19 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 chunkX,
                 chunkZ
         ));
+    }
+
+    private static String discoveryDisplayName(String id) {
+        return ExplorerDiscoveryRules.ALL.stream()
+                .filter(e -> e.id().equals(id))
+                .findFirst()
+                .map(ExplorerDiscoveryRules.DiscoveryEntry::displayName)
+                .orElseGet(() -> {
+                    String path = id.contains(":") ? id.substring(id.indexOf(':') + 1) : id;
+                    return Arrays.stream(path.split("[/_]"))
+                            .filter(w -> !w.isEmpty())
+                            .map(w -> Character.toUpperCase(w.charAt(0)) + w.substring(1).toLowerCase())
+                            .collect(Collectors.joining(" "));
+                });
     }
 }

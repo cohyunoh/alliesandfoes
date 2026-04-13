@@ -28,6 +28,7 @@ import net.minecraft.world.level.storage.loot.predicates.LootItemRandomChanceCon
 import net.minecraft.world.level.storage.loot.providers.number.ConstantValue;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 public class Alliesandfoes implements ModInitializer {
@@ -309,7 +310,8 @@ public class Alliesandfoes implements ModInitializer {
 						player.getUUID(),
 						player.getName().getString(),
 						player.getX(),
-						player.getZ()
+						player.getZ(),
+						player.getYRot()
 				));
 			}
 			PlayerPositionsPayload payload = new PlayerPositionsPayload(entries);
@@ -362,6 +364,20 @@ public class Alliesandfoes implements ModInitializer {
 			ExplorerSkillService.get(server).syncPlayer(player);
 			ExplorerDiscoveryService.get(server).syncPlayer(player);
 
+			// Sync all existing territory claims so the player sees persisted
+			// territory immediately on join (not just after a live territory action).
+			TerritoryManager tm = TerritoryManager.get(server);
+			Collection<TerritoryClaim> allClaims = tm.getAllClaims();
+			if (!allClaims.isEmpty()) {
+				TerritoryQueryService queryService = new TerritoryQueryService(tm);
+				List<ChunkKey> allChunkKeys = new ArrayList<>(allClaims.size());
+				for (TerritoryClaim claim : allClaims) {
+					allChunkKeys.add(claim.getChunkKey());
+				}
+				ServerPlayNetworking.send(player,
+						TerritoryMapSyncService.buildChunkBatch(queryService, allChunkKeys));
+			}
+
 			for (int chunkX = center.x - 8; chunkX <= center.x + 8; chunkX++) {
 
 				for (int chunkZ = center.z - 8; chunkZ <= center.z + 8; chunkZ++) {
@@ -394,6 +410,9 @@ public class Alliesandfoes implements ModInitializer {
 			}
 
 		});
+
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+				ExplorerSkillService.get(server).onPlayerDisconnect(handler.player.getUUID()));
 	}
 
 	private static TerritoryChunkBatchPayload buildTerritoryPayloadForChunks(

@@ -67,6 +67,11 @@ public class MapScreen extends Screen {
     private static final int ANCHOR_CHUNK_FILL_COLOR = 0x6644DDFF;
     private static final int ANCHOR_CHUNK_BORDER_COLOR = 0xFF99EEFF;
 
+    private static final int ENEMY_CLAIMED_FILL_COLOR  = 0x44993333;
+    private static final int ENEMY_CLAIMED_BORDER_COLOR = 0xAAFF5555;
+    private static final int ENEMY_ANCHOR_FILL_COLOR   = 0x66BB2222;
+    private static final int ENEMY_ANCHOR_BORDER_COLOR  = 0xFFFF6666;
+
     private static final int PREVIEW_VALID_FILL_COLOR = 0x4433DD33;
     private static final int PREVIEW_VALID_BORDER_COLOR = 0xFF55FF55;
     private static final int PREVIEW_INVALID_FILL_COLOR = 0x44DD3333;
@@ -872,9 +877,11 @@ public class MapScreen extends Screen {
         boolean showValueColors = this.renderer.getZoom() >= VALUE_BORDER_ZOOM_THRESHOLD;
 
         if (territoryData != null && territoryData.claimed()) {
+            boolean myAlliance = AllianceClientState.isInAlliance()
+                    && AllianceClientState.getAllianceName().equals(territoryData.allianceName());
             int territoryFill = territoryData.anchorChunk()
-                    ? ANCHOR_CHUNK_FILL_COLOR
-                    : CLAIMED_CHUNK_FILL_COLOR;
+                    ? (myAlliance ? ANCHOR_CHUNK_FILL_COLOR : ENEMY_ANCHOR_FILL_COLOR)
+                    : (myAlliance ? CLAIMED_CHUNK_FILL_COLOR : ENEMY_CLAIMED_FILL_COLOR);
 
             context.fill(x1, y1, x2, y2, territoryFill);
         }
@@ -892,9 +899,11 @@ public class MapScreen extends Screen {
         if (previewData != null) {
             borderColor = this.getTerritoryPreviewOutlineColor(previewData);
         } else if (territoryData != null && territoryData.claimed()) {
+            boolean myAlliance = AllianceClientState.isInAlliance()
+                    && AllianceClientState.getAllianceName().equals(territoryData.allianceName());
             borderColor = territoryData.anchorChunk()
-                    ? ANCHOR_CHUNK_BORDER_COLOR
-                    : CLAIMED_CHUNK_BORDER_COLOR;
+                    ? (myAlliance ? ANCHOR_CHUNK_BORDER_COLOR : ENEMY_ANCHOR_BORDER_COLOR)
+                    : (myAlliance ? CLAIMED_CHUNK_BORDER_COLOR : ENEMY_CLAIMED_BORDER_COLOR);
         } else if (valueData != null && showValueColors) {
             borderColor = hovered
                     ? getOverallValueColor(valueData.getTotalValue())
@@ -906,9 +915,11 @@ public class MapScreen extends Screen {
         if (hovered) {
             int fillColor;
             if (territoryData != null && territoryData.claimed()) {
+                boolean myAlliance = AllianceClientState.isInAlliance()
+                        && AllianceClientState.getAllianceName().equals(territoryData.allianceName());
                 fillColor = territoryData.anchorChunk()
-                        ? ANCHOR_CHUNK_FILL_COLOR
-                        : CLAIMED_CHUNK_FILL_COLOR;
+                        ? (myAlliance ? ANCHOR_CHUNK_FILL_COLOR : ENEMY_ANCHOR_FILL_COLOR)
+                        : (myAlliance ? CLAIMED_CHUNK_FILL_COLOR : ENEMY_CLAIMED_FILL_COLOR);
             } else if (valueData != null && showValueColors) {
                 fillColor = getOverallValueFillColor(valueData.getTotalValue());
             } else {
@@ -1023,8 +1034,34 @@ public class MapScreen extends Screen {
                 continue;
             }
 
+            float yaw = (this.minecraft != null && this.minecraft.player != null
+                    && marker.uuid.equals(this.minecraft.player.getUUID()))
+                    ? this.minecraft.player.getYRot()
+                    : marker.yaw;
+            renderPlayerCone(context, screenX, screenY, yaw, headSize);
+
             Identifier skin = this.getSkinForMarker(marker);
             this.renderPlayerHead(context, skin, marker.name, screenX, screenY, headSize);
+        }
+    }
+
+    private static final double CONE_HALF_FOV_COS = Math.cos(Math.toRadians(35.0));
+
+    private static void renderPlayerCone(GuiGraphics context, int cx, int cy, float yaw, int headSize) {
+        int coneLen = headSize + 4;
+        double yawRad = Math.toRadians(yaw);
+        double facingDX = -Math.sin(yawRad);
+        double facingDY =  Math.cos(yawRad);
+
+        for (int dy = -coneLen; dy <= coneLen; dy++) {
+            for (int dx = -coneLen; dx <= coneLen; dx++) {
+                double mag = Math.sqrt(dx * dx + dy * dy);
+                if (mag < 1.0 || mag > coneLen) continue;
+                double cosAngle = (dx * facingDX + dy * facingDY) / mag;
+                if (cosAngle >= CONE_HALF_FOV_COS) {
+                    context.fill(cx + dx, cy + dy, cx + dx + 1, cy + dy + 1, 0x44FFFFFF);
+                }
+            }
         }
     }
 

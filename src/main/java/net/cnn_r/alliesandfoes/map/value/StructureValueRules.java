@@ -35,6 +35,7 @@ public final class StructureValueRules {
                 || path.contains("stronghold")
                 || path.contains("woodland_mansion")
                 || path.contains("monument")
+                || path.contains("end_city")
                 || path.contains("trial_chambers")) {
             return 7;
         }
@@ -54,6 +55,7 @@ public final class StructureValueRules {
         if (path.contains("igloo")
                 || path.contains("ocean_ruin")
                 || path.contains("nether_fossil")
+                || path.contains("monster_room")
                 || path.contains("fortress")
                 || path.contains("bastion_remnant")) {
             return 4;
