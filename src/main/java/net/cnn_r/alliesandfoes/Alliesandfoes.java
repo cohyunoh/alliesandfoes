@@ -279,6 +279,7 @@ public class Alliesandfoes implements ModInitializer {
 			});
 		});
 
+
 		// Inject the Monocle into ruined portal chest loot tables (~10% chance)
 		LootTableEvents.MODIFY.register((key, tableBuilder, source, registries) -> {
 			Identifier ruinedPortal = Identifier.fromNamespaceAndPath("minecraft", "chests/ruined_portal");
@@ -286,7 +287,7 @@ public class Alliesandfoes implements ModInitializer {
 				tableBuilder.withPool(
 						LootPool.lootPool()
 								.setRolls(ConstantValue.exactly(1))
-								.when(LootItemRandomChanceCondition.randomChance(0.10f))
+								.when(LootItemRandomChanceCondition.randomChance(0.1f))
 								.add(LootItem.lootTableItem(ModItems.MONOCLE))
 				);
 			}
@@ -359,6 +360,7 @@ public class Alliesandfoes implements ModInitializer {
 
 			AllianceManager.get(server).syncPlayer(player);
 			ExplorerSkillService.get(server).syncPlayer(player);
+			ExplorerDiscoveryService.get(server).syncPlayer(player);
 
 			for (int chunkX = center.x - 8; chunkX <= center.x + 8; chunkX++) {
 

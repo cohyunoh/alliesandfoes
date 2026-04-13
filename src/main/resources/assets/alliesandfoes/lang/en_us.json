@@ -1,9 +1,9 @@
 {
   "key.alliesandfoes.open_map": "Open Map",
-  "key.alliesandfoes.open_journal": "Open Explorer Journal",
+  "key.alliesandfoes.open_journal": "Open Journal",
   "category.alliesandfoes": "Allies & Foes",
   "item.alliesandfoes.monocle": "Monocle",
-  "screen.alliesandfoes.journal.title": "Explorer Journal",
+  "screen.alliesandfoes.journal.title": "Journal",
   "screen.alliesandfoes.journal.tab.explorer": "Explorer",
   "screen.alliesandfoes.journal.tab.miner": "Miner",
   "screen.alliesandfoes.journal.biomes_header": "Biomes (%s)",
