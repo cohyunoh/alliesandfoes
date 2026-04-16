@@ -7,6 +7,7 @@ import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -81,6 +82,7 @@ public final class ExplorerIntuitionEvaluator {
      */
     public static IntuitionResult evaluate(
             ChunkPos center,
+            String dimensionId,
             ChunkValueCache chunkValueCache,
             ChunkStructureSyncCache structureSyncCache
     ) {
@@ -96,7 +98,7 @@ public final class ExplorerIntuitionEvaluator {
             level = mc.level;
         }
 
-        return evaluate(center, radius, minDominance, chunkValueCache, structureSyncCache,
+        return evaluate(center, dimensionId, radius, minDominance, chunkValueCache, structureSyncCache,
                 ExplorerIntuitionProfile.INSTANCE, target, level);
     }
 
@@ -106,11 +108,12 @@ public final class ExplorerIntuitionEvaluator {
      */
     public static IntuitionResult evaluate(
             ChunkPos center,
+            String dimensionId,
             int radius,
             ChunkValueCache chunkValueCache,
             ChunkStructureSyncCache structureSyncCache
     ) {
-        return evaluate(center, radius, 0.16f, chunkValueCache, structureSyncCache,
+        return evaluate(center, dimensionId, radius, 0.16f, chunkValueCache, structureSyncCache,
                 ExplorerIntuitionProfile.INSTANCE, null, null);
     }
 
@@ -119,12 +122,13 @@ public final class ExplorerIntuitionEvaluator {
      */
     public static IntuitionResult evaluate(
             ChunkPos center,
+            String dimensionId,
             int radius,
             ChunkValueCache chunkValueCache,
             ChunkStructureSyncCache structureSyncCache,
             IntuitionProfile profile
     ) {
-        return evaluate(center, radius, 0.16f, chunkValueCache, structureSyncCache, profile, null, null);
+        return evaluate(center, dimensionId, radius, 0.16f, chunkValueCache, structureSyncCache, profile, null, null);
     }
 
     // -------------------------------------------------------------------------
@@ -133,6 +137,7 @@ public final class ExplorerIntuitionEvaluator {
 
     private static IntuitionResult evaluate(
             ChunkPos center,
+            String dimensionId,
             int radius,
             float minDominanceForSignal,
             ChunkValueCache chunkValueCache,
@@ -141,7 +146,7 @@ public final class ExplorerIntuitionEvaluator {
             IntuitionTarget target,
             Level level
     ) {
-        if (center == null || chunkValueCache == null || structureSyncCache == null || profile == null) {
+        if (center == null || dimensionId == null || chunkValueCache == null || structureSyncCache == null || profile == null) {
             return new IntuitionResult(IntuitionDirection.NONE, 0.0f, IntuitionMessageType.NONE);
         }
 
@@ -164,7 +169,8 @@ public final class ExplorerIntuitionEvaluator {
                 }
 
                 ChunkPos samplePos = new ChunkPos(center.x + dx, center.z + dz);
-                ChunkValueData valueData = chunkValueCache.get(samplePos);
+                ChunkKey sampleKey = new ChunkKey(dimensionId, samplePos.x, samplePos.z);
+                ChunkValueData valueData = chunkValueCache.get(sampleKey);
 
                 if (valueData == null) {
                     continue;
@@ -177,7 +183,7 @@ public final class ExplorerIntuitionEvaluator {
                     continue;
                 }
 
-                ChunkStructureData structureData = structureSyncCache.get(samplePos);
+                ChunkStructureData structureData = structureSyncCache.get(sampleKey);
 
                 double chunkScore = profile.scoreChunk(valueData, structureData);
                 double distanceWeight = 1.0 / (0.75 + distance);

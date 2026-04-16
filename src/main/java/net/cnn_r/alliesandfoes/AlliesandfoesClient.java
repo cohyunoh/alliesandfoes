@@ -12,20 +12,27 @@ import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
+import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
+import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.network.*;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -72,15 +79,16 @@ public class AlliesandfoesClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(ChunkStructurePayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 ChunkPos pos = new ChunkPos(payload.chunkX(), payload.chunkZ());
+                ChunkKey structureKey = new ChunkKey(payload.dimensionId(), payload.chunkX(), payload.chunkZ());
 
                 ChunkStructureData data = new ChunkStructureData(
                         payload.structureValue(),
                         payload.structureNames()
                 );
 
-                MapState.getChunkStructureSyncCache().put(pos, data);
+                MapState.getChunkStructureSyncCache().put(structureKey, data);
                 MapState.getChunkValueCache().applyStructureData(
-                        pos,
+                        structureKey,
                         payload.structureValue(),
                         payload.structureNames()
                 );
@@ -90,9 +98,9 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     if (scanner != null) {
                         for (int chunkX = pos.x - STRUCTURE_REFRESH_RADIUS; chunkX <= pos.x + STRUCTURE_REFRESH_RADIUS; chunkX++) {
                             for (int chunkZ = pos.z - STRUCTURE_REFRESH_RADIUS; chunkZ <= pos.z + STRUCTURE_REFRESH_RADIUS; chunkZ++) {
-                                ChunkPos nearbyPos = new ChunkPos(chunkX, chunkZ);
+                                ChunkKey nearbyKey = new ChunkKey(payload.dimensionId(), chunkX, chunkZ);
 
-                                if (!MapState.isCurrentlyLoaded(nearbyPos) || scanner.isQueued(nearbyPos)) {
+                                if (!MapState.isCurrentlyLoaded(nearbyKey) || scanner.isQueued(new ChunkPos(chunkX, chunkZ))) {
                                     continue;
                                 }
 
@@ -331,6 +339,44 @@ public class AlliesandfoesClient implements ClientModInitializer {
         HudRenderCallback.EVENT.register((drawContext, tickCounter) ->
                 HudMinimapRenderer.render(drawContext, tickCounter));
 
+        // Update the Y level and ceiling state used for chunk scanning each tick.
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            LocalPlayer player = client.player;
+            if (player != null && client.level != null) {
+                int playerY = player.getBlockY();
+                MapState.setPlayerScanY(playerY);
+
+                // MOTION_BLOCKING_NO_LEAVES excludes leaf blocks from the surface height,
+                // so tree canopy never falsely triggers cave mode.
+                int surfaceAtPlayer = client.level.getHeight(
+                        Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                        player.getBlockX(),
+                        player.getBlockZ()
+                );
+                boolean hasCeiling = surfaceAtPlayer > playerY + MapState.CEILING_DETECTION_THRESHOLD;
+                MapState.setPlayerHasCeiling(hasCeiling);
+
+                if (hasCeiling) {
+                    if (lastCavePlayerY == Integer.MIN_VALUE
+                            || Math.abs(playerY - lastCavePlayerY) >= CAVE_Y_RESCAN_THRESHOLD) {
+                        MapState.clearNearbyCaveChunks(client.level, player.chunkPosition(),
+                                CAVE_SCAN_RADIUS + 1);
+                        lastCavePlayerY = playerY;
+                    }
+                    maybeScanNearbyCaveChunks(client, player);
+                } else {
+                    lastCavePlayerY = Integer.MIN_VALUE;
+                }
+
+                // Periodically rescan nearby chunks to pick up placed/broken blocks.
+                nearbyRescanTicker++;
+                if (nearbyRescanTicker >= NEARBY_RESCAN_INTERVAL_TICKS) {
+                    nearbyRescanTicker = 0;
+                    maybeRescanNearbyChunks(client, player);
+                }
+            }
+        });
+
         ClientChunkEvents.CHUNK_LOAD.register((world, chunk) -> {
             MapState.onChunkLoaded(chunk);
         });
@@ -460,6 +506,59 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 chunkX,
                 chunkZ
         ));
+    }
+
+    private static final int CAVE_SCAN_RADIUS = 2;
+    private static final int CAVE_Y_RESCAN_THRESHOLD = 3;
+    private static int lastCavePlayerY = Integer.MIN_VALUE;
+
+    private static final int NEARBY_RESCAN_INTERVAL_TICKS = 80; // ~4 seconds
+    private static final int NEARBY_RESCAN_RADIUS = 1;
+    private static int nearbyRescanTicker = 0;
+
+    private static void maybeRescanNearbyChunks(Minecraft client, LocalPlayer player) {
+        ChunkScanner scanner = MapState.getScanner();
+        ClientLevel level = client.level;
+        if (scanner == null || level == null) return;
+
+        ChunkPos playerChunk = player.chunkPosition();
+        ChunkCache surfaceCache = MapState.getChunkCache();
+        String dimId = level.dimension().identifier().toString();
+
+        for (int dx = -NEARBY_RESCAN_RADIUS; dx <= NEARBY_RESCAN_RADIUS; dx++) {
+            for (int dz = -NEARBY_RESCAN_RADIUS; dz <= NEARBY_RESCAN_RADIUS; dz++) {
+                int cx = playerChunk.x + dx;
+                int cz = playerChunk.z + dz;
+                if (!level.hasChunk(cx, cz)) continue;
+                surfaceCache.remove(new ChunkKey(dimId, cx, cz));
+                scanner.requestScan(level.getChunk(cx, cz));
+            }
+        }
+
+        if (MapState.getPlayerHasCeiling()) {
+            MapState.clearNearbyCaveChunks(level, playerChunk, NEARBY_RESCAN_RADIUS);
+        }
+    }
+
+    private static void maybeScanNearbyCaveChunks(Minecraft client, LocalPlayer player) {
+        ChunkScanner scanner = MapState.getScanner();
+        ChunkCache caveCache = MapState.getCaveChunkCache();
+        ClientLevel level = client.level;
+        if (scanner == null || level == null) return;
+
+        ChunkPos playerChunk = player.chunkPosition();
+
+        for (int dx = -CAVE_SCAN_RADIUS; dx <= CAVE_SCAN_RADIUS; dx++) {
+            for (int dz = -CAVE_SCAN_RADIUS; dz <= CAVE_SCAN_RADIUS; dz++) {
+                int cx = playerChunk.x + dx;
+                int cz = playerChunk.z + dz;
+                ChunkPos chunkPos = new ChunkPos(cx, cz);
+                ChunkKey key = ChunkKey.of(level, chunkPos);
+                if (!caveCache.hasChunk(key) && !scanner.isCaveQueued(chunkPos) && level.hasChunk(cx, cz)) {
+                    scanner.requestCaveScan(level.getChunk(cx, cz));
+                }
+            }
+        }
     }
 
     private static String discoveryDisplayName(String id) {

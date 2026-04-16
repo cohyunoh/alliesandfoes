@@ -1,6 +1,6 @@
 package net.cnn_r.alliesandfoes.mixin;
 
-import net.cnn_r.alliesandfoes.map.JournalIconButton;
+import net.cnn_r.alliesandfoes.journal.JournalIconButton;
 import net.cnn_r.alliesandfoes.map.MapScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;

@@ -1,7 +1,7 @@
 package net.cnn_r.alliesandfoes.keybind;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import net.cnn_r.alliesandfoes.map.ExplorerJournalScreen;
+import net.cnn_r.alliesandfoes.journal.JournalScreen;
 import net.cnn_r.alliesandfoes.map.MapScreen;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
@@ -48,10 +48,10 @@ public class KeyBindings {
 
             while (OPEN_JOURNAL.consumeClick()) {
                 if (client.player != null && client.level != null) {
-                    if (client.screen instanceof ExplorerJournalScreen) {
+                    if (client.screen instanceof JournalScreen) {
                         client.setScreen(null);
                     } else if (client.screen == null) {
-                        client.setScreen(new ExplorerJournalScreen());
+                        client.setScreen(new JournalScreen());
                         client.player.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 0.8f, 1.0f);
                     }
                 }

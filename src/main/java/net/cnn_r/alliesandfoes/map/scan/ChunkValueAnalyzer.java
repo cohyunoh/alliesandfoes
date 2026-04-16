@@ -7,6 +7,7 @@ import net.cnn_r.alliesandfoes.map.value.BiomeValueRules;
 import net.cnn_r.alliesandfoes.map.value.OreValueRules;
 import net.cnn_r.alliesandfoes.map.value.WaterValueRules;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
@@ -31,6 +32,7 @@ public class ChunkValueAnalyzer {
 
     public ChunkValueData analyze(LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
+        ChunkKey key = ChunkKey.of(this.level, pos);
 
         OreCounts oreCounts = this.countValuableOres(chunk);
 
@@ -92,16 +94,17 @@ public class ChunkValueAnalyzer {
                 biomeName
         );
 
-        return new ChunkValueData(pos, totalValue, breakdown);
+        return new ChunkValueData(key, totalValue, breakdown);
     }
 
     private StructureFields getStructureFields(ChunkPos pos) {
-        ChunkStructureData synced = MapState.getChunkStructureSyncCache().get(pos);
+        ChunkKey key = ChunkKey.of(this.level, pos);
+        ChunkStructureData synced = MapState.getChunkStructureSyncCache().get(key);
         if (synced != null) {
             return new StructureFields(synced.getStructureValue(), new ArrayList<>(synced.getStructureNames()));
         }
 
-        ChunkValueData existing = MapState.getChunkValueCache().get(pos);
+        ChunkValueData existing = MapState.getChunkValueCache().get(key);
         if (existing != null) {
             ChunkValueBreakdown breakdown = existing.getBreakdown();
             return new StructureFields(

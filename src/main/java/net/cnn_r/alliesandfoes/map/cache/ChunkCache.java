@@ -1,27 +1,31 @@
 package net.cnn_r.alliesandfoes.map.cache;
 
-import net.minecraft.world.level.ChunkPos;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
 
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ChunkCache {
-    private final Map<ChunkPos, int[]> chunkColors = new ConcurrentHashMap<>();
+    private final Map<ChunkKey, int[]> chunkColors = new ConcurrentHashMap<>();
 
-    public boolean hasChunk(ChunkPos pos) {
-        return this.chunkColors.containsKey(pos);
+    public boolean hasChunk(ChunkKey key) {
+        return this.chunkColors.containsKey(key);
     }
 
-    public void put(ChunkPos pos, int[] colors) {
-        this.chunkColors.put(pos, colors);
+    public void put(ChunkKey key, int[] colors) {
+        this.chunkColors.put(key, colors);
     }
 
-    public int[] get(ChunkPos pos) {
-        return this.chunkColors.get(pos);
+    public int[] get(ChunkKey key) {
+        return this.chunkColors.get(key);
     }
 
-    public Set<ChunkPos> positions() {
+    public void remove(ChunkKey key) {
+        this.chunkColors.remove(key);
+    }
+
+    public Set<ChunkKey> positions() {
         return this.chunkColors.keySet();
     }
 

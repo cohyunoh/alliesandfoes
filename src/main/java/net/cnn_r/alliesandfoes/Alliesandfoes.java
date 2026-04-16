@@ -330,6 +330,7 @@ public class Alliesandfoes implements ModInitializer {
 			var structureData = StructureChunkValueCalculator.analyze(level, pos);
 
 			ChunkStructurePayload payload = new ChunkStructurePayload(
+					level.dimension().identifier().toString(),
 					pos.x,
 					pos.z,
 					structureData.getStructureValue(),
@@ -393,14 +394,11 @@ public class Alliesandfoes implements ModInitializer {
 					var structureData = StructureChunkValueCalculator.analyze(level, pos);
 
 					ChunkStructurePayload payload = new ChunkStructurePayload(
-
+							level.dimension().identifier().toString(),
 							pos.x,
-
 							pos.z,
 							structureData.getStructureValue(),
-
 							structureData.getStructureNames()
-
 					);
 
 					ServerPlayNetworking.send(player, payload);

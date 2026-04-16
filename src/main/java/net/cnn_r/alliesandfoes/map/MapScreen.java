@@ -90,6 +90,15 @@ public class MapScreen extends Screen {
     private TerritoryChunkSyncCache territoryChunkSyncCache;
     private TerritoryPreviewSyncCache territoryPreviewSyncCache;
 
+    /** Dimension ID captured at init time, used as the cache key prefix. */
+    private String dimensionId;
+
+    /** Dirty flag: only rebuild the map texture when data or camera has changed. */
+    private boolean textureDirty = true;
+    private int lastCameraBlockXInt = Integer.MIN_VALUE;
+    private int lastCameraBlockZInt = Integer.MIN_VALUE;
+    private float lastZoom = -1f;
+
     private double cameraBlockX;
     private double cameraBlockZ;
     private boolean followPlayer = true;
@@ -145,7 +154,11 @@ public class MapScreen extends Screen {
         this.territoryPreviewSyncCache = MapState.getTerritoryPreviewSyncCache();
         ChunkScanner scanner = MapState.getScanner();
         this.playerMarkerCache = MapState.getPlayerMarkerCache();
+        this.dimensionId = (this.minecraft.level != null)
+                ? this.minecraft.level.dimension().identifier().toString()
+                : "minecraft:overworld";
         MapPersistence.load(this.cache, this.chunkValueCache, getMapId());
+        this.textureDirty = true;
 
         if (this.minecraft.player != null) {
             this.cameraBlockX = this.minecraft.player.getX();
@@ -296,7 +309,23 @@ public class MapScreen extends Screen {
 
         this.refreshExplorerIntuition(false);
 
-        this.rebuildVisibleTexture();
+        // Only rebuild the texture when data or camera actually changed.
+        if (MapState.pollMapDirty()) {
+            this.textureDirty = true;
+        }
+        float currentZoom = this.renderer.getZoom();
+        int blockXNow = (int) Math.floor(this.cameraBlockX);
+        int blockZNow = (int) Math.floor(this.cameraBlockZ);
+        if (this.textureDirty
+                || blockXNow != this.lastCameraBlockXInt
+                || blockZNow != this.lastCameraBlockZInt
+                || currentZoom != this.lastZoom) {
+            this.rebuildVisibleTexture();
+            this.lastCameraBlockXInt = blockXNow;
+            this.lastCameraBlockZInt = blockZNow;
+            this.lastZoom = currentZoom;
+            this.textureDirty = false;
+        }
         this.renderer.render(context, this.width, this.height, BLOCK_PIXEL_SIZE);
 
         this.hoveredChunk = this.getChunkAtMouse(mouseX, mouseY);
@@ -745,7 +774,7 @@ public class MapScreen extends Screen {
     }
 
     private void rebuildVisibleTexture() {
-        this.mapTexture.clear(0xFF202020);
+        this.mapTexture.clear(0xFF101010);
 
         int centerWorldX = (int) Math.floor(this.cameraBlockX);
         int centerWorldZ = (int) Math.floor(this.cameraBlockZ);
@@ -758,15 +787,21 @@ public class MapScreen extends Screen {
         int minChunkZ = (centerWorldZ - textureCenterY) >> 4;
         int maxChunkZ = (centerWorldZ + textureCenterY) >> 4;
 
+        boolean inCaveMode = MapState.getPlayerHasCeiling();
+        ChunkCache caveCache = inCaveMode ? MapState.getCaveChunkCache() : null;
+
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
-                ChunkPos pos = new ChunkPos(chunkX, chunkZ);
-                int[] colors = this.cache.get(pos);
+                ChunkKey key = new ChunkKey(this.dimensionId, chunkX, chunkZ);
+                int[] surfaceColors = this.cache.get(key);
+                int[] caveColors = (caveCache != null) ? caveCache.get(key) : null;
 
-                if (colors == null) {
+                // Skip chunk entirely only if there is nothing to render.
+                if (surfaceColors == null && caveColors == null) {
                     continue;
                 }
 
+                ChunkPos pos = new ChunkPos(chunkX, chunkZ);
                 int chunkMinWorldX = pos.getMinBlockX();
                 int chunkMinWorldZ = pos.getMinBlockZ();
 
@@ -782,7 +817,18 @@ public class MapScreen extends Screen {
                             continue;
                         }
 
-                        int color = colors[localX + localZ * 16];
+                        int blockIdx = localX + localZ * 16;
+                        int color;
+                        if (caveColors != null) {
+                            // Explored cave floor — show at full brightness.
+                            color = caveColors[blockIdx];
+                        } else if (surfaceColors != null) {
+                            // Surface map always shows — dimmed when in cave mode.
+                            color = inCaveMode ? darken(surfaceColors[blockIdx], 0.4f) : surfaceColors[blockIdx];
+                        } else {
+                            continue;
+                        }
+
                         this.mapTexture.setPixel(texX, texY, color);
                     }
                 }
@@ -790,6 +836,13 @@ public class MapScreen extends Screen {
         }
 
         this.mapTexture.upload();
+    }
+
+    private static int darken(int argb, float factor) {
+        int r = (int)(((argb >> 16) & 0xFF) * factor);
+        int g = (int)(((argb >> 8)  & 0xFF) * factor);
+        int b = (int)((argb & 0xFF)          * factor);
+        return (argb & 0xFF000000) | (r << 16) | (g << 8) | b;
     }
 
     private void renderChunkOverlays(GuiGraphics context) {
@@ -814,31 +867,33 @@ public class MapScreen extends Screen {
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+                ChunkKey key = new ChunkKey(this.dimensionId, chunkX, chunkZ);
 
-                if (!this.cache.hasChunk(pos)) {
+                if (!this.cache.hasChunk(key)) {
                     continue;
                 }
 
-                this.renderStructureHeatmapOverlay(context, pos);
+                this.renderStructureHeatmapOverlay(context, pos, key);
             }
         }
 
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+                ChunkKey key = new ChunkKey(this.dimensionId, chunkX, chunkZ);
 
-                if (!this.cache.hasChunk(pos)) {
+                if (!this.cache.hasChunk(key)) {
                     continue;
                 }
 
-                this.renderChunkOverlay(context, pos, pos.equals(this.hoveredChunk));
+                this.renderChunkOverlay(context, pos, key, pos.equals(this.hoveredChunk));
             }
         }
 
         context.disableScissor();
     }
 
-    private void renderChunkOverlay(GuiGraphics context, ChunkPos pos, boolean hovered) {
+    private void renderChunkOverlay(GuiGraphics context, ChunkPos pos, ChunkKey key, boolean hovered) {
         double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
         int textureCenter = this.mapTexture.getSize() / 2;
 
@@ -873,7 +928,7 @@ public class MapScreen extends Screen {
             return;
         }
 
-        ChunkValueData valueData = this.chunkValueCache.get(pos);
+        ChunkValueData valueData = this.chunkValueCache.get(key);
         boolean showValueColors = this.renderer.getZoom() >= VALUE_BORDER_ZOOM_THRESHOLD;
 
         if (territoryData != null && territoryData.claimed()) {
@@ -1014,8 +1069,9 @@ public class MapScreen extends Screen {
             }
 
             ChunkPos playerChunk = new ChunkPos(playerChunkX, playerChunkZ);
+            ChunkKey playerChunkKey = new ChunkKey(this.dimensionId, playerChunkX, playerChunkZ);
 
-            if (!this.cache.hasChunk(playerChunk)) {
+            if (!this.cache.hasChunk(playerChunkKey)) {
                 continue;
             }
 
@@ -1048,7 +1104,7 @@ public class MapScreen extends Screen {
     private static final double CONE_HALF_FOV_COS = Math.cos(Math.toRadians(35.0));
 
     private static void renderPlayerCone(GuiGraphics context, int cx, int cy, float yaw, int headSize) {
-        int coneLen = headSize + 4;
+        int coneLen = headSize + 10;
         double yawRad = Math.toRadians(yaw);
         double facingDX = -Math.sin(yawRad);
         double facingDY =  Math.cos(yawRad);
@@ -1059,13 +1115,13 @@ public class MapScreen extends Screen {
                 if (mag < 1.0 || mag > coneLen) continue;
                 double cosAngle = (dx * facingDX + dy * facingDY) / mag;
                 if (cosAngle >= CONE_HALF_FOV_COS) {
-                    context.fill(cx + dx, cy + dy, cx + dx + 1, cy + dy + 1, 0x44FFFFFF);
+                    context.fill(cx + dx, cy + dy, cx + dx + 1, cy + dy + 1, 0x77FFFFFF);
                 }
             }
         }
     }
 
-    private void renderStructureHeatmapOverlay(GuiGraphics context, ChunkPos pos) {
+    private void renderStructureHeatmapOverlay(GuiGraphics context, ChunkPos pos, ChunkKey key) {
         if (!this.showStructureIntel || !AllianceMapIntelPolicy.canViewAdminStructureIntel()) {
             return;
         }
@@ -1074,7 +1130,7 @@ public class MapScreen extends Screen {
             return;
         }
 
-        ChunkValueData valueData = this.chunkValueCache.get(pos);
+        ChunkValueData valueData = this.chunkValueCache.get(key);
         if (valueData == null) {
             return;
         }
@@ -1120,7 +1176,8 @@ public class MapScreen extends Screen {
             return;
         }
 
-        if (!this.cache.hasChunk(this.hoveredChunk)) {
+        ChunkKey hoveredKey = new ChunkKey(this.dimensionId, this.hoveredChunk.x, this.hoveredChunk.z);
+        if (!this.cache.hasChunk(hoveredKey)) {
             return;
         }
 
@@ -1233,7 +1290,7 @@ public class MapScreen extends Screen {
             context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
             return;
         }
-        ChunkValueData valueData = this.chunkValueCache.get(this.hoveredChunk);
+        ChunkValueData valueData = this.chunkValueCache.get(hoveredKey);
         if (valueData != null) {
             ChunkValueBreakdown breakdown = valueData.getBreakdown();
 
@@ -1306,7 +1363,9 @@ public class MapScreen extends Screen {
 
     private void syncZoomToLoadedRadius(Player player) {
         ChunkPos center = player.chunkPosition();
-        int loadedRadius = Math.max(2, MapState.getLoadedRadiusAround(center));
+        ChunkKey centerKey = new ChunkKey(this.dimensionId != null ? this.dimensionId : "minecraft:overworld",
+                center.x, center.z);
+        int loadedRadius = Math.max(2, MapState.getLoadedRadiusAround(centerKey));
         int blocksAcross = (loadedRadius * 2 + 1) * 16;
 
         float zoomX = (float) this.width / (blocksAcross * BLOCK_PIXEL_SIZE);
@@ -1615,7 +1674,7 @@ public class MapScreen extends Screen {
 
         // Do not preview chunks that do not have map data yet.
         // This avoids ugly black preview holes on uncached terrain.
-        if (!this.cache.hasChunk(this.hoveredChunk)) {
+        if (!this.cache.hasChunk(new ChunkKey(this.dimensionId, this.hoveredChunk.x, this.hoveredChunk.z))) {
             return;
         }
 
@@ -1973,6 +2032,7 @@ public class MapScreen extends Screen {
 
         this.cachedIntuitionResult = ExplorerIntuitionEvaluator.evaluate(
                 currentCenterChunk,
+                this.dimensionId,
                 this.chunkValueCache,
                 this.chunkStructureSyncCache
         );
@@ -2153,7 +2213,8 @@ public class MapScreen extends Screen {
             return;
         }
 
-        ChunkValueData valueData = this.chunkValueCache.get(debugChunk);
+        ChunkKey debugKey = new ChunkKey(this.dimensionId, debugChunk.x, debugChunk.z);
+        ChunkValueData valueData = this.chunkValueCache.get(debugKey);
 
         List<String> lines = new ArrayList<>();
         lines.add("Chunk Value Debug");

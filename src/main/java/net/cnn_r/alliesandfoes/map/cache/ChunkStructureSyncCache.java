@@ -1,24 +1,24 @@
 package net.cnn_r.alliesandfoes.map.cache;
 
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
-import net.minecraft.world.level.ChunkPos;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ChunkStructureSyncCache {
-    private final Map<ChunkPos, ChunkStructureData> values = new ConcurrentHashMap<>();
+    private final Map<ChunkKey, ChunkStructureData> values = new ConcurrentHashMap<>();
 
-    public void put(ChunkPos pos, ChunkStructureData data) {
-        this.values.put(pos, data);
+    public void put(ChunkKey key, ChunkStructureData data) {
+        this.values.put(key, data);
     }
 
-    public ChunkStructureData get(ChunkPos pos) {
-        return this.values.get(pos);
+    public ChunkStructureData get(ChunkKey key) {
+        return this.values.get(key);
     }
 
-    public boolean has(ChunkPos pos) {
-        return this.values.containsKey(pos);
+    public boolean has(ChunkKey key) {
+        return this.values.containsKey(key);
     }
 
     public void clear() {

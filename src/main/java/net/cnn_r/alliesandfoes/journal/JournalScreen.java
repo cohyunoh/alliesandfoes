@@ -1,4 +1,4 @@
-package net.cnn_r.alliesandfoes.map;
+package net.cnn_r.alliesandfoes.journal;
 
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryRules;
@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  *
  * Opened with the Journal keybinding (default J).
  */
-public class ExplorerJournalScreen extends Screen {
+public class JournalScreen extends Screen {
 
     // Dialog dimensions
     private static final int DIALOG_W = 320;
@@ -136,7 +136,7 @@ public class ExplorerJournalScreen extends Screen {
     private int hoveredBiomeIndex     = -1;
     private int hoveredStructureIndex = -1;
 
-    public ExplorerJournalScreen() {
+    public JournalScreen() {
         super(Component.translatable("screen.alliesandfoes.journal.title"));
     }
 
@@ -765,6 +765,18 @@ public class ExplorerJournalScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    @Override
+    public boolean keyPressed(net.minecraft.client.input.KeyEvent input) {
+        // Allow J (the journal keybind) to close the screen even while it is open,
+        // because Minecraft does not deliver keybind consumeClick() events to screens.
+        if (net.cnn_r.alliesandfoes.keybind.KeyBindings.OPEN_JOURNAL != null
+                && net.cnn_r.alliesandfoes.keybind.KeyBindings.OPEN_JOURNAL.matches(input)) {
+            this.onClose();
+            return true;
+        }
+        return super.keyPressed(input);
     }
 
     // -------------------------------------------------------------------------

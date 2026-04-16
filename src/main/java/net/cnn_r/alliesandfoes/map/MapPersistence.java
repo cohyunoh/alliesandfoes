@@ -4,12 +4,12 @@ import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
-import net.minecraft.world.level.ChunkPos;
 
 import java.io.File;
 import java.io.IOException;
@@ -60,15 +60,16 @@ public class MapPersistence {
     private static ListTag saveChunkColors(ChunkCache chunkCache) {
         ListTag chunks = new ListTag();
 
-        for (ChunkPos pos : chunkCache.positions()) {
-            int[] colors = chunkCache.get(pos);
+        for (ChunkKey key : chunkCache.positions()) {
+            int[] colors = chunkCache.get(key);
             if (colors == null) {
                 continue;
             }
 
             CompoundTag chunkTag = new CompoundTag();
-            chunkTag.putInt("x", pos.x);
-            chunkTag.putInt("z", pos.z);
+            chunkTag.putString("dimension", key.getDimensionId());
+            chunkTag.putInt("x", key.getChunkX());
+            chunkTag.putInt("z", key.getChunkZ());
             chunkTag.putIntArray("colors", colors);
 
             chunks.add(chunkTag);
@@ -88,6 +89,7 @@ public class MapPersistence {
             ChunkValueBreakdown breakdown = data.getBreakdown();
             CompoundTag valueTag = new CompoundTag();
 
+            valueTag.putString("dimension", data.getKey().getDimensionId());
             valueTag.putInt("x", data.getPos().x);
             valueTag.putInt("z", data.getPos().z);
             valueTag.putInt("total_value", data.getTotalValue());
@@ -133,6 +135,16 @@ public class MapPersistence {
 
             CompoundTag chunkTag = chunkTagOptional.get();
 
+            // Skip entries without dimension info (old format)
+            if (!chunkTag.contains("dimension")) {
+                continue;
+            }
+
+            String dimensionId = chunkTag.getStringOr("dimension", "");
+            if (dimensionId.isBlank()) {
+                continue;
+            }
+
             int x = chunkTag.getIntOr("x", 0);
             int z = chunkTag.getIntOr("z", 0);
 
@@ -143,7 +155,7 @@ public class MapPersistence {
 
             int[] colors = colorsOptional.get();
             if (colors.length == 256) {
-                chunkCache.put(new ChunkPos(x, z), colors);
+                chunkCache.put(new ChunkKey(dimensionId, x, z), colors);
             }
         }
     }
@@ -159,9 +171,19 @@ public class MapPersistence {
 
             CompoundTag valueTag = valueTagOptional.get();
 
+            // Skip entries without dimension info (old format)
+            if (!valueTag.contains("dimension")) {
+                continue;
+            }
+
+            String dimensionId = valueTag.getStringOr("dimension", "");
+            if (dimensionId.isBlank()) {
+                continue;
+            }
+
             int x = valueTag.getIntOr("x", 0);
             int z = valueTag.getIntOr("z", 0);
-            ChunkPos pos = new ChunkPos(x, z);
+            ChunkKey key = new ChunkKey(dimensionId, x, z);
 
             int totalValue = valueTag.getIntOr("total_value", 1);
 
@@ -212,8 +234,8 @@ public class MapPersistence {
                     structures
             );
 
-            ChunkValueData data = new ChunkValueData(pos, totalValue, breakdown);
-            chunkValueCache.put(pos, data);
+            ChunkValueData data = new ChunkValueData(key, totalValue, breakdown);
+            chunkValueCache.put(key, data);
         }
     }
 

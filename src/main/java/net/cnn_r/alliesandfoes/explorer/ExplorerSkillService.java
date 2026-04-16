@@ -1,5 +1,6 @@
 package net.cnn_r.alliesandfoes.explorer;
 
+import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.network.ExplorerSkillSyncPayload;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -55,13 +56,16 @@ public class ExplorerSkillService {
         if (!current.equals(last)) {
             this.lastKnownChunkPos.put(player.getUUID(), current);
 
-            ChunkKey key = ChunkKey.of(player.level(), current);
-            Set<ChunkKey> explored = this.exploredByPlayer.computeIfAbsent(
-                    player.getUUID(), uuid -> new LinkedHashSet<>()
-            );
+            // Chunk discoveries only register when the player holds the Monocle.
+            if (isHoldingMonocle(player)) {
+                ChunkKey key = ChunkKey.of(player.level(), current);
+                Set<ChunkKey> explored = this.exploredByPlayer.computeIfAbsent(
+                        player.getUUID(), uuid -> new LinkedHashSet<>()
+                );
 
-            if (!explored.contains(key)) {
-                this.discoverChunk(player, key, explored);
+                if (!explored.contains(key)) {
+                    this.discoverChunk(player, key, explored);
+                }
             }
         }
 
@@ -92,6 +96,11 @@ public class ExplorerSkillService {
         seenItemIds.remove(uuid);
         itemCheckCooldown.remove(uuid);
         lastKnownChunkPos.remove(uuid);
+    }
+
+    private boolean isHoldingMonocle(ServerPlayer player) {
+        return player.getMainHandItem().is(ModItems.MONOCLE)
+                || player.getOffhandItem().is(ModItems.MONOCLE);
     }
 
     private void discoverChunk(ServerPlayer player, ChunkKey key, Set<ChunkKey> explored) {

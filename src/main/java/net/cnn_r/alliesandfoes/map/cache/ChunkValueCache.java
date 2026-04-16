@@ -3,7 +3,7 @@ package net.cnn_r.alliesandfoes.map.cache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.value.ChunkValueWeights;
-import net.minecraft.world.level.ChunkPos;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
 
 import java.util.Collection;
 import java.util.List;
@@ -11,26 +11,26 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ChunkValueCache {
-    private final Map<ChunkPos, ChunkValueData> values = new ConcurrentHashMap<>();
+    private final Map<ChunkKey, ChunkValueData> values = new ConcurrentHashMap<>();
 
-    public void put(ChunkPos pos, ChunkValueData data) {
-        this.values.put(pos, data);
+    public void put(ChunkKey key, ChunkValueData data) {
+        this.values.put(key, data);
     }
 
-    public ChunkValueData get(ChunkPos pos) {
-        return this.values.get(pos);
+    public ChunkValueData get(ChunkKey key) {
+        return this.values.get(key);
     }
 
-    public boolean has(ChunkPos pos) {
-        return this.values.containsKey(pos);
+    public boolean has(ChunkKey key) {
+        return this.values.containsKey(key);
     }
 
     public Collection<ChunkValueData> values() {
         return this.values.values();
     }
 
-    public void applyStructureData(ChunkPos pos, int structureValue, List<String> structureNames) {
-        ChunkValueData existing = this.values.get(pos);
+    public void applyStructureData(ChunkKey key, int structureValue, List<String> structureNames) {
+        ChunkValueData existing = this.values.get(key);
 
         // IMPORTANT:
         // Do not create placeholder entries with biome "unknown".
@@ -66,7 +66,7 @@ public class ChunkValueCache {
 
         int totalValue = clampToChunkValueRange((int) Math.round(weightedScore));
 
-        this.values.put(pos, new ChunkValueData(pos, totalValue, updated));
+        this.values.put(key, new ChunkValueData(key, totalValue, updated));
     }
 
     private int clampToChunkValueRange(int value) {

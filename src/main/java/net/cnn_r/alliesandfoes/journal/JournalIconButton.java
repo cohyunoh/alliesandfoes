@@ -1,4 +1,4 @@
-package net.cnn_r.alliesandfoes.map;
+package net.cnn_r.alliesandfoes.journal;
 
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.minecraft.client.Minecraft;
@@ -90,7 +90,7 @@ public class JournalIconButton extends AbstractWidget {
     @Override
     public void onClick(MouseButtonEvent event, boolean bl) {
         ExplorerDiscoveryClientState.clearUnreadDiscoveries();
-        Minecraft.getInstance().setScreen(new ExplorerJournalScreen());
+        Minecraft.getInstance().setScreen(new JournalScreen());
     }
 
     @Override
