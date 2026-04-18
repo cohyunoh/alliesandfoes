@@ -1,7 +1,11 @@
 package net.cnn_r.alliesandfoes;
 
+import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
+import net.cnn_r.alliesandfoes.alliance.war.AllianceWarCommands;
+import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
+import net.cnn_r.alliesandfoes.alliance.war.WarSnapshotService;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryService;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillService;
 import net.cnn_r.alliesandfoes.item.ModItems;
@@ -13,30 +17,52 @@ import net.cnn_r.alliesandfoes.territory.*;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.loot.v3.LootTableEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.storage.loot.LootPool;
 import net.minecraft.world.level.storage.loot.entries.LootItem;
 import net.minecraft.world.level.storage.loot.predicates.LootItemRandomChanceCondition;
 import net.minecraft.world.level.storage.loot.providers.number.ConstantValue;
+import net.cnn_r.alliesandfoes.territory.ChestLootScorer;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public class Alliesandfoes implements ModInitializer {
+	// pos key → chest score for chests cleared during a war break event
+	private static final Map<String, Integer> pendingWarChestDrops = new HashMap<>();
+
 	@Override
 	public void onInitialize() {
 		ModItems.register();
 		TerritoryCommands.register();
 		AllianceProgressionCommands.register();
+		AllianceWarCommands.register();
+
+		registerTerritoryProtection();
 		PayloadTypeRegistry.clientboundPlay().register(PlayerPositionsPayload.TYPE, PlayerPositionsPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(ChunkStructurePayload.TYPE, ChunkStructurePayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(AllianceCreationScreenPayload.TYPE, AllianceCreationScreenPayload.STREAM_CODEC);
@@ -421,5 +447,135 @@ public class Alliesandfoes implements ModInitializer {
 		}
 
 		return TerritoryMapSyncService.buildChunkBatch(queryService, chunkKeys);
+	}
+
+	private static void registerTerritoryProtection() {
+
+		// Block breaking: blocked in enemy territory unless at war.
+		// Chests cleared before breaking to produce war loot instead of real drops.
+		PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) -> {
+			if (!(level instanceof ServerLevel sl)) return true;
+			MinecraftServer server = sl.getServer();
+
+			ChunkKey chunk = ChunkKey.of(sl, new ChunkPos(pos.getX() >> 4, pos.getZ() >> 4));
+			TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
+			if (claim == null) return true;
+
+			if (!isAllowedBlockInteraction(server, player.getUUID(), claim)) {
+				if (player instanceof ServerPlayer sp)
+					sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED));
+				return false;
+			}
+
+			// At war: snapshot before modifying, and handle chest loot substitution.
+			Alliance pAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+			if (pAlliance != null) {
+				AllianceWarService.get(server)
+						.getActiveWarBetween(claim.getAllianceId(), pAlliance.getId())
+						.ifPresent(war -> {
+							WarSnapshotService.get(server).snapshotIfFirst(war.id(), sl, pos);
+
+							// If it's a container: score contents, clear them, queue war loot drop.
+							if (blockEntity instanceof Container container) {
+								int score = ChestLootScorer.score(container);
+								pendingWarChestDrops.put(makePosKey(sl, pos), score);
+								container.clearContent();
+							}
+						});
+			}
+			return true;
+		});
+
+		// After break: spawn war loot if a chest was intercepted.
+		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
+			String key = makePosKey(level, pos);
+			Integer score = pendingWarChestDrops.remove(key);
+			if (score == null) return;
+
+			ChestLootScorer.DropTier tier = ChestLootScorer.tierFor(score);
+			spawnWarLoot(level, pos, tier);
+		});
+
+		// Block placement: blocked in enemy territory unless at war + snapshot.
+		// Container opening: always blocked in enemy territory (peace and war).
+		UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+			if (!(world instanceof ServerLevel sl)) return InteractionResult.PASS;
+			MinecraftServer server = sl.getServer();
+			ItemStack stack = player.getItemInHand(hand);
+			boolean isPlacing = stack.getItem() instanceof BlockItem;
+			BlockPos targetPos = hitResult.getBlockPos();
+
+			if (!isPlacing) {
+				// Only intercept containers; leave all other interactions alone.
+				BlockEntity be = world.getBlockEntity(targetPos);
+				if (be instanceof Container) {
+					ChunkKey chunk = ChunkKey.of(sl, new ChunkPos(targetPos.getX() >> 4, targetPos.getZ() >> 4));
+					TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
+					if (claim != null && !isOwnTerritory(server, player.getUUID(), claim)) {
+						if (player instanceof ServerPlayer sp)
+							sp.sendSystemMessage(Component.literal("You cannot open containers in enemy territory.").withStyle(ChatFormatting.RED));
+						return InteractionResult.FAIL;
+					}
+				}
+				return InteractionResult.PASS;
+			}
+
+			// Block placement: check position where the block would land.
+			BlockPos placePos = targetPos.relative(hitResult.getDirection());
+			ChunkKey chunk = ChunkKey.of(sl, new ChunkPos(placePos.getX() >> 4, placePos.getZ() >> 4));
+			TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
+			if (claim == null) return InteractionResult.PASS;
+
+			if (!isAllowedBlockInteraction(server, player.getUUID(), claim)) {
+				if (player instanceof ServerPlayer sp)
+					sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED));
+				return InteractionResult.FAIL;
+			}
+
+			// At war: snapshot the position before placing.
+			Alliance pAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+			if (pAlliance != null) {
+				AllianceWarService.get(server)
+						.getActiveWarBetween(claim.getAllianceId(), pAlliance.getId())
+						.ifPresent(war -> WarSnapshotService.get(server).snapshotIfFirst(war.id(), sl, placePos));
+			}
+			return InteractionResult.PASS;
+		});
+	}
+
+	private static boolean isOwnTerritory(MinecraftServer server, UUID playerUuid, TerritoryClaim claim) {
+		Alliance a = AllianceManager.get(server).getAllianceFor(playerUuid);
+		return a != null && a.getId().equals(claim.getAllianceId());
+	}
+
+	private static boolean isAllowedBlockInteraction(MinecraftServer server, UUID playerUuid, TerritoryClaim claim) {
+		if (isOwnTerritory(server, playerUuid, claim)) return true;
+		Alliance a = AllianceManager.get(server).getAllianceFor(playerUuid);
+		return a != null && AllianceWarService.get(server).areAtWar(claim.getAllianceId(), a.getId());
+	}
+
+	private static String makePosKey(net.minecraft.world.level.Level level, BlockPos pos) {
+		return level.dimension().identifier() + ":" + pos.getX() + ":" + pos.getY() + ":" + pos.getZ();
+	}
+
+	private static void spawnWarLoot(net.minecraft.world.level.Level level, BlockPos pos,
+			ChestLootScorer.DropTier tier) {
+		ItemStack drop = switch (tier) {
+			case JUNK    -> new ItemStack(Items.COBWEB, 1 + level.getRandom().nextInt(2));
+			case IRON    -> new ItemStack(Items.IRON_INGOT, 1 + level.getRandom().nextInt(3));
+			case EMERALD -> new ItemStack(Items.EMERALD, 1 + level.getRandom().nextInt(3));
+			case DIAMOND -> new ItemStack(Items.DIAMOND, 1 + level.getRandom().nextInt(2));
+			case RICH    -> new ItemStack(Items.DIAMOND, 3 + level.getRandom().nextInt(3));
+		};
+
+		double x = pos.getX() + 0.5;
+		double y = pos.getY() + 0.5;
+		double z = pos.getZ() + 0.5;
+
+		level.addFreshEntity(new ItemEntity(level, x, y, z, drop));
+
+		if (tier == ChestLootScorer.DropTier.RICH) {
+			level.addFreshEntity(new ItemEntity(level, x, y, z, new ItemStack(Items.EMERALD, 1)));
+		}
 	}
 }

@@ -53,6 +53,12 @@ public class AllianceManager {
         return this.alliancesById.get(allianceId);
     }
 
+    public Alliance getAllianceByName(String name) {
+        if (name == null) return null;
+        UUID id = this.allianceNameToId.get(name.toLowerCase(Locale.ROOT));
+        return id == null ? null : this.alliancesById.get(id);
+    }
+
     public void syncPlayer(ServerPlayer player) {
         Alliance alliance = this.getAllianceFor(player.getUUID());
 

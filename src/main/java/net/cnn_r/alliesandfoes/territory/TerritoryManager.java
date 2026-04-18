@@ -513,6 +513,47 @@ public class TerritoryManager {
     public boolean isAllowedDimensionForPreview(String dimensionId) {
         return this.resolveLevelByDimensionId(dimensionId) != null;
     }
+
+    /**
+     * Forcibly removes a single enemy chunk during war. Does not re-assign ownership
+     * — the chunk becomes unclaimed and available for anyone to claim.
+     *
+     * @return failure message, or null on success
+     */
+    public String forceUnclaimChunk(ChunkKey targetChunk) {
+        TerritoryClaim claim = this.getClaimAt(targetChunk);
+        if (claim == null) return "This chunk is not claimed.";
+        this.unregisterClaim(targetChunk);
+        this.save();
+        return null;
+    }
+
+    /**
+     * Destroys an anchor and all claims attached to it. Used for anchor destruction
+     * during war.
+     *
+     * @return failure message, or null on success
+     */
+    public String destroyAnchor(UUID anchorId) {
+        TerritoryAnchor anchor = this.anchorsById.get(anchorId);
+        if (anchor == null) return "Anchor not found.";
+
+        List<TerritoryClaim> claims = new ArrayList<>(this.getClaimsForAnchor(anchorId));
+        for (TerritoryClaim claim : claims) {
+            this.unregisterClaim(claim.getChunkKey());
+        }
+
+        this.anchorsById.remove(anchorId);
+
+        List<TerritoryAnchor> allianceAnchors = this.anchorsByAllianceId.get(anchor.getAllianceId());
+        if (allianceAnchors != null) {
+            allianceAnchors.removeIf(a -> a.getAnchorId().equals(anchorId));
+            if (allianceAnchors.isEmpty()) this.anchorsByAllianceId.remove(anchor.getAllianceId());
+        }
+
+        this.save();
+        return null;
+    }
     
     public record ActionResult(
             boolean success,
