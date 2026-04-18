@@ -1,10 +1,15 @@
 package net.cnn_r.alliesandfoes.explorer;
 
+import net.cnn_r.alliesandfoes.alliance.Alliance;
+import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.network.ExplorerSkillSyncPayload;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -30,11 +35,15 @@ import java.util.WeakHashMap;
 public class ExplorerSkillService {
     private static final Map<MinecraftServer, ExplorerSkillService> INSTANCES = new WeakHashMap<>();
 
+    private static final int CHUNK_DISCOVER_REWARD = 2;
+
     private final MinecraftServer server;
     private final Map<UUID, Set<ChunkKey>> exploredByPlayer;
     private final Map<UUID, ChunkPos>     lastKnownChunkPos    = new HashMap<>();
     private final Map<UUID, Set<String>>  seenItemIds          = new HashMap<>();
     private final Map<UUID, Integer>      itemCheckCooldown    = new HashMap<>();
+    // Tracks who has already seen the "join an alliance" hint this session; not persisted.
+    private final Set<UUID>               noAllianceHintPlayers = new HashSet<>();
 
     private ExplorerSkillService(MinecraftServer server) {
         this.server = server;
@@ -96,6 +105,7 @@ public class ExplorerSkillService {
         seenItemIds.remove(uuid);
         itemCheckCooldown.remove(uuid);
         lastKnownChunkPos.remove(uuid);
+        noAllianceHintPlayers.remove(uuid);
     }
 
     private boolean isHoldingMonocle(ServerPlayer player) {
@@ -107,6 +117,18 @@ public class ExplorerSkillService {
         explored.add(key);
         this.save();
         ServerPlayNetworking.send(player, new ExplorerSkillSyncPayload(explored.size()));
+
+        Alliance alliance = AllianceManager.get(this.server).getAllianceFor(player.getUUID());
+        if (alliance != null) {
+            AllianceProgressionService.get(this.server).add(alliance.getId(), CHUNK_DISCOVER_REWARD);
+            player.sendSystemMessage(
+                    Component.literal("+" + CHUNK_DISCOVER_REWARD + " influence").withStyle(ChatFormatting.AQUA)
+            );
+        } else if (noAllianceHintPlayers.add(player.getUUID())) {
+            player.sendSystemMessage(
+                    Component.literal("Join an alliance to earn influence from your exploration.").withStyle(ChatFormatting.GRAY)
+            );
+        }
     }
 
     private void checkInventoryDiscoveries(ServerPlayer player) {

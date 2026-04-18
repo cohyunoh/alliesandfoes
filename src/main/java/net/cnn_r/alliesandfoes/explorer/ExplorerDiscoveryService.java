@@ -1,8 +1,13 @@
 package net.cnn_r.alliesandfoes.explorer;
 
+import net.cnn_r.alliesandfoes.alliance.Alliance;
+import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.map.intuition.IntuitionTarget;
 import net.cnn_r.alliesandfoes.network.ExplorerDiscoverySyncPayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -21,6 +26,9 @@ import java.util.WeakHashMap;
 public class ExplorerDiscoveryService {
 
     private static final Map<MinecraftServer, ExplorerDiscoveryService> INSTANCES = new WeakHashMap<>();
+
+    private static final int BIOME_DISCOVER_BONUS     = 5;
+    private static final int STRUCTURE_DISCOVER_BONUS = 10;
 
     private final MinecraftServer server;
 
@@ -45,6 +53,18 @@ public class ExplorerDiscoveryService {
         };
         if (changed) {
             syncPlayer(player);
+
+            int bonus = switch (type) {
+                case BIOME     -> BIOME_DISCOVER_BONUS;
+                case STRUCTURE -> STRUCTURE_DISCOVER_BONUS;
+            };
+            Alliance alliance = AllianceManager.get(server).getAllianceFor(uuid);
+            if (alliance != null) {
+                AllianceProgressionService.get(server).add(alliance.getId(), bonus);
+                player.sendSystemMessage(
+                        Component.literal("+" + bonus + " influence (discovery)").withStyle(ChatFormatting.GREEN)
+                );
+            }
         }
     }
 
