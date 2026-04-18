@@ -1,6 +1,6 @@
 package net.cnn_r.alliesandfoes.map;
 
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.RenderPipelines;
 
 public class MapRenderer {
@@ -35,7 +35,7 @@ public class MapRenderer {
         return Math.round(this.texture.getSize() * blockPixelSize * this.zoom);
     }
 
-    public void render(GuiGraphics graphics, int screenWidth, int screenHeight, int blockPixelSize) {
+    public void render(GuiGraphicsExtractor graphics, int screenWidth, int screenHeight, int blockPixelSize) {
         int textureSize = this.texture.getSize();
 
         int drawWidth = getDrawWidth(blockPixelSize);

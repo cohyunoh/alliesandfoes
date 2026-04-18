@@ -334,10 +334,8 @@ public class AllianceManager {
             this.refreshAllianceMembers(server, alliance);
 
             if (owner != null) {
-                owner.displayClientMessage(
-                        Component.literal(player.getGameProfile().name() + " joined alliance: " + alliance.getName()),
-                        false
-                );
+                owner.sendSystemMessage(
+                        Component.literal(player.getGameProfile().name() + " joined alliance: " + alliance.getName()));
             }
 
             return ActionResult.success("You joined alliance: " + alliance.getName());
@@ -346,10 +344,8 @@ public class AllianceManager {
         this.save();
 
         if (owner != null) {
-            owner.displayClientMessage(
-                    Component.literal(player.getGameProfile().name() + " declined your alliance invite."),
-                    false
-            );
+            owner.sendSystemMessage(
+                    Component.literal(player.getGameProfile().name() + " declined your alliance invite."));
         }
 
         return ActionResult.success("Alliance invite declined.");
@@ -388,10 +384,8 @@ public class AllianceManager {
             this.refreshAllianceMembers(server, alliance);
 
             if (requester != null) {
-                requester.displayClientMessage(
-                        Component.literal("Your request to join " + alliance.getName() + " was accepted."),
-                        false
-                );
+                requester.sendSystemMessage(
+                        Component.literal("Your request to join " + alliance.getName() + " was accepted."));
             }
 
             return ActionResult.success("Join request accepted.");
@@ -400,10 +394,8 @@ public class AllianceManager {
         this.save();
 
         if (requester != null) {
-            requester.displayClientMessage(
-                    Component.literal("Your request to join " + alliance.getName() + " was declined."),
-                    false
-            );
+            requester.sendSystemMessage(
+                    Component.literal("Your request to join " + alliance.getName() + " was declined."));
         }
 
         return ActionResult.success("Join request declined.");
@@ -549,10 +541,8 @@ public class AllianceManager {
 
         ServerPlayer owner = server.getPlayerList().getPlayer(alliance.getOwnerUuid());
         if (owner != null) {
-            owner.displayClientMessage(
-                    Component.literal(player.getGameProfile().name() + " left the alliance."),
-                    false
-            );
+            owner.sendSystemMessage(
+                    Component.literal(player.getGameProfile().name() + " left the alliance."));
         }
 
         return ActionResult.success("You left the alliance.");
@@ -583,10 +573,8 @@ public class AllianceManager {
         ServerPlayer target = server.getPlayerList().getPlayer(targetUuid);
         if (target != null) {
             this.refreshRemovedPlayer(server, target);
-            target.displayClientMessage(
-                    Component.literal("You were removed from alliance: " + alliance.getName()),
-                    false
-            );
+            target.sendSystemMessage(
+                    Component.literal("You were removed from alliance: " + alliance.getName()));
         }
 
         this.refreshAllianceMembers(server, alliance);
@@ -615,10 +603,8 @@ public class AllianceManager {
 
         ServerPlayer newOwner = server.getPlayerList().getPlayer(newOwnerUuid);
         if (newOwner != null) {
-            newOwner.displayClientMessage(
-                    Component.literal("You are now the owner of alliance: " + alliance.getName()),
-                    false
-            );
+            newOwner.sendSystemMessage(
+                    Component.literal("You are now the owner of alliance: " + alliance.getName()));
         }
 
         this.sendViewScreen(server, actor);
@@ -650,10 +636,8 @@ public class AllianceManager {
 
         ServerPlayer target = server.getPlayerList().getPlayer(targetUuid);
         if (target != null) {
-            target.displayClientMessage(
-                    Component.literal("Your alliance role is now: " + sanitizedRole),
-                    false
-            );
+            target.sendSystemMessage(
+                    Component.literal("Your alliance role is now: " + sanitizedRole));
         }
 
         this.sendViewScreen(server, actor);

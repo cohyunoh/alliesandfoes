@@ -9,7 +9,7 @@ import net.cnn_r.alliesandfoes.map.intuition.IntuitionTarget;
 import net.cnn_r.alliesandfoes.network.SetIntuitionTargetPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -173,14 +173,14 @@ public class JournalScreen extends Screen {
     // -------------------------------------------------------------------------
 
     @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
         g.fill(0, 0, this.width, this.height, 0x80000000);
 
         renderFrame(g, mouseX, mouseY);
         renderLeftTabs(g, mouseX, mouseY);
 
         // Widget buttons (Clear Target)
-        super.render(g, mouseX, mouseY, delta);
+        super.extractRenderState(g, mouseX, mouseY, delta);
 
         // Page content
         switch (activeTab) {
@@ -206,7 +206,7 @@ public class JournalScreen extends Screen {
     // Frame
     // -------------------------------------------------------------------------
 
-    private void renderFrame(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderFrame(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         int x = dialogX, y = dialogY, w = DIALOG_W, h = DIALOG_H;
 
         // Leather cover texture — 6 px margin on all sides over the dialog
@@ -220,7 +220,7 @@ public class JournalScreen extends Screen {
         // Title text — centered in strip
         String title = this.title.getString();
         int titleW = font.width(title);
-        g.drawString(font, title, x + (w - titleW) / 2, y + (TITLE_H - 8) / 2, C_TITLE_TEXT, false);
+        g.text(font, title, x + (w - titleW) / 2, y + (TITLE_H - 8) / 2, C_TITLE_TEXT, false);
 
         // 1-px separator between title/tab row and page
         g.fill(x, y + CONTENT_Y - 1, x + w, y + CONTENT_Y, C_DIVIDER);
@@ -278,7 +278,7 @@ public class JournalScreen extends Screen {
     // Left-side tabs
     // -------------------------------------------------------------------------
 
-    private void renderLeftTabs(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderLeftTabs(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         int tabX = dialogX - TAB_HANG;
 
         for (int i = 0; i < 3; i++) {
@@ -303,7 +303,7 @@ public class JournalScreen extends Screen {
             int iconY = ty + (TAB_H - TAB_ICON) / 2;
 
             ItemStack icon = getTabIcon(tab);
-            g.renderItem(icon, iconX, iconY);
+            g.fakeItem(icon, iconX, iconY, 0);
 
             // Dark overlay for locked tabs
             if (isTabLocked(tab)) {
@@ -338,7 +338,7 @@ public class JournalScreen extends Screen {
     // Badge page
     // -------------------------------------------------------------------------
 
-    private void renderBadgePage(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderBadgePage(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         int pageTop = dialogY + CONTENT_Y;
         int pageH   = DIALOG_H - CONTENT_Y - FOOTER_H;
         int cx      = dialogX + DIALOG_W / 2;
@@ -353,7 +353,7 @@ public class JournalScreen extends Screen {
                 new ItemStack(Items.IRON_PICKAXE), false);
     }
 
-    private void renderBadgeIcon(GuiGraphics g, int x, int y, ItemStack item, boolean unlocked) {
+    private void renderBadgeIcon(GuiGraphicsExtractor g, int x, int y, ItemStack item, boolean unlocked) {
         // Thin 1-px frame border
         g.fill(x - 1, y - 1, x + BADGE_SLOT_SIZE + 1, y + BADGE_SLOT_SIZE + 1, C_BADGE_FRAME);
         // Slot background — parchment if unlocked, very dark for silhouette if locked
@@ -362,7 +362,7 @@ public class JournalScreen extends Screen {
         // Item icon centered in slot (16×16)
         int iconX = x + (BADGE_SLOT_SIZE - TAB_ICON) / 2;
         int iconY = y + (BADGE_SLOT_SIZE - TAB_ICON) / 2;
-        g.renderItem(item, iconX, iconY);
+        g.fakeItem(item, iconX, iconY, 0);
 
         // Near-opaque dark overlay creates a silhouette for locked items
         if (!unlocked) {
@@ -374,20 +374,20 @@ public class JournalScreen extends Screen {
     // Locked role notice
     // -------------------------------------------------------------------------
 
-    private void renderLockedRoleNotice(GuiGraphics g, String itemName) {
+    private void renderLockedRoleNotice(GuiGraphicsExtractor g, String itemName) {
         int cx = dialogX + DIALOG_W / 2;
         int cy = dialogY + CONTENT_Y + (DIALOG_H - CONTENT_Y - FOOTER_H) / 2 - 4;
         String line1 = "Obtain the " + itemName;
         String line2 = "to unlock this section.";
-        g.drawString(font, line1, cx - font.width(line1) / 2, cy - 6,  C_TEXT_DIM, false);
-        g.drawString(font, line2, cx - font.width(line2) / 2, cy + 6, C_TEXT_DIM, false);
+        g.text(font, line1, cx - font.width(line1) / 2, cy - 6,  C_TEXT_DIM, false);
+        g.text(font, line2, cx - font.width(line2) / 2, cy + 6, C_TEXT_DIM, false);
     }
 
     // -------------------------------------------------------------------------
     // Explorer bestiary (page 1)
     // -------------------------------------------------------------------------
 
-    private void renderExplorerContentPage(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderExplorerContentPage(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         int pageTop = dialogY + CONTENT_Y;
 
         int headerY  = pageTop + COL_HEADER_DY;
@@ -408,8 +408,8 @@ public class JournalScreen extends Screen {
         String biomeHdr  = "Biomes ("      + discoveredBiomeCount     + "/" + allBiomes.size()     + ")";
         String structHdr = "Structures ("  + discoveredStructureCount + "/" + allStructures.size() + ")";
 
-        g.drawString(font, biomeHdr,  dialogX + PADDING,           headerY, C_HEADER_TXT, false);
-        g.drawString(font, structHdr, dialogX + COL_MID + PADDING, headerY, C_HEADER_TXT, false);
+        g.text(font, biomeHdr,  dialogX + PADDING,           headerY, C_HEADER_TXT, false);
+        g.text(font, structHdr, dialogX + COL_MID + PADDING, headerY, C_HEADER_TXT, false);
 
         // Thin underline below each column header
         int underY = headerY + 10;
@@ -430,7 +430,7 @@ public class JournalScreen extends Screen {
     }
 
     private void renderList(
-            GuiGraphics g,
+            GuiGraphicsExtractor g,
             List<ExplorerDiscoveryRules.DiscoveryEntry> entries,
             int scrollOffset,
             int visibleRows,
@@ -469,11 +469,11 @@ public class JournalScreen extends Screen {
             }
 
             if (discovered) {
-                g.drawString(font, entry.displayName(), x, rowY + 2,
+                g.text(font, entry.displayName(), x, rowY + 2,
                         selected ? C_SELECTED_TXT : C_TEXT, false);
             } else {
                 String hint = entry.unlockHint().isEmpty() ? "???" : "??? (" + entry.unlockHint() + ")";
-                g.drawString(font, hint, x, rowY + 2, C_TEXT_DIM, false);
+                g.text(font, hint, x, rowY + 2, C_TEXT_DIM, false);
             }
         }
     }
@@ -482,14 +482,14 @@ public class JournalScreen extends Screen {
     // Explorer skill tree stub (page 2)
     // -------------------------------------------------------------------------
 
-    private void renderExplorerSkillTreePage(GuiGraphics g) {
+    private void renderExplorerSkillTreePage(GuiGraphicsExtractor g) {
         int pageTop = dialogY + CONTENT_Y;
         int pageH   = DIALOG_H - CONTENT_Y - FOOTER_H;
         int cx      = dialogX + DIALOG_W / 2;
 
         // Title
         String title = "Explorer Skill Tree";
-        g.drawString(font, title, cx - font.width(title) / 2, pageTop + 10, C_HEADER_TXT, false);
+        g.text(font, title, cx - font.width(title) / 2, pageTop + 10, C_HEADER_TXT, false);
 
         // Progress bar — aligned with tier nodes using TREE_MARGIN
         int explored  = ExplorerSkillClientState.getExploredChunkCount();
@@ -523,7 +523,7 @@ public class JournalScreen extends Screen {
         String progressLabel = nextTier != null
                 ? explored + " / " + nextTier.getChunksRequired() + " chunks"
                 : "MAX — " + explored + " chunks explored";
-        g.drawString(font, progressLabel, cx - font.width(progressLabel) / 2, barY + barH + 4, C_TEXT_DIM, false);
+        g.text(font, progressLabel, cx - font.width(progressLabel) / 2, barY + barH + 4, C_TEXT_DIM, false);
 
         // Tier nodes
         String[] tierNames = { "WANDERER", "SCOUT", "RANGER", "TRAILBLAZER" };
@@ -557,18 +557,18 @@ public class JournalScreen extends Screen {
 
             // Tier label below node
             String label = tierNames[i];
-            g.drawString(font, label, nodeX - font.width(label) / 2, nodeY + nodeR + 4,
+            g.text(font, label, nodeX - font.width(label) / 2, nodeY + nodeR + 4,
                     nodeUnlocked ? C_TEXT : C_TEXT_DIM, false);
 
             // Chunk requirement below label
             String req = tiers[i].getChunksRequired() + "";
-            g.drawString(font, req, nodeX - font.width(req) / 2, nodeY + nodeR + 14,
+            g.text(font, req, nodeX - font.width(req) / 2, nodeY + nodeR + 14,
                     C_TEXT_DIM, false);
         }
 
         // Coming soon note
         String soon = "Skill choices coming soon\u2026";
-        g.drawString(font, soon,
+        g.text(font, soon,
                 cx - font.width(soon) / 2,
                 pageTop + pageH - 20,
                 C_TEXT_DIM, false);
@@ -587,22 +587,22 @@ public class JournalScreen extends Screen {
     // -------------------------------------------------------------------------
 
     /** Renders the "Skills »" label near the bottom-right fold (page 1 only). The fold graphic is part of the page texture. */
-    private void renderPageFlipForward(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderPageFlipForward(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         int py = dialogY + DIALOG_H - FOOTER_H - 16;
         String label = "Skills \u00bb";
         int labelColor = isHoveringFlipForward(mouseX, mouseY) ? C_HEADER_TXT : C_TEXT_DIM;
         // Position label just above and left of the fold corner
         int labelX = dialogX + DIALOG_W - font.width(label) - 24;
-        g.drawString(font, label, labelX, py + 4, labelColor, false);
+        g.text(font, label, labelX, py + 4, labelColor, false);
     }
 
     /** Renders the "« Back" label near the bottom-left fold (page 2 only). The fold graphic is part of the page texture. */
-    private void renderPageFlipBack(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderPageFlipBack(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         int py = dialogY + DIALOG_H - FOOTER_H - 16;
         String label = "\u00ab Back";
         int labelColor = isHoveringFlipBack(mouseX, mouseY) ? C_HEADER_TXT : C_TEXT_DIM;
         // Position label just above and right of the fold corner
-        g.drawString(font, label, dialogX + 24, py + 4, labelColor, false);
+        g.text(font, label, dialogX + 24, py + 4, labelColor, false);
     }
 
     private boolean isHoveringFlipForward(double mx, double my) {
@@ -621,7 +621,7 @@ public class JournalScreen extends Screen {
     // Footer
     // -------------------------------------------------------------------------
 
-    private void renderFooter(GuiGraphics g) {
+    private void renderFooter(GuiGraphicsExtractor g) {
         IntuitionTarget target = ExplorerDiscoveryClientState.getActiveTarget();
 
         // Only show target info when on explorer bestiary page
@@ -644,7 +644,7 @@ public class JournalScreen extends Screen {
 
         int footerTop = dialogY + DIALOG_H - FOOTER_H;
         if (!label.isEmpty()) {
-            g.drawString(font, label,
+            g.text(font, label,
                     dialogX + PADDING, footerTop + (FOOTER_H - 8) / 2, color, false);
         }
     }

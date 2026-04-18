@@ -4,6 +4,7 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
@@ -16,7 +17,7 @@ import java.util.Map;
 import java.util.UUID;
 
 public class AllianceSavedData extends SavedData {
-    private static final String DATA_NAME = "alliance_data";
+    private static final Identifier DATA_NAME = Identifier.parse("alliesandfoes:alliance_data");
 
     private static final Codec<UUID> UUID_CODEC = Codec.STRING.xmap(UUID::fromString, UUID::toString);
 

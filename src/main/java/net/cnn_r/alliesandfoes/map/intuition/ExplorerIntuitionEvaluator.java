@@ -168,8 +168,8 @@ public final class ExplorerIntuitionEvaluator {
                     continue;
                 }
 
-                ChunkPos samplePos = new ChunkPos(center.x + dx, center.z + dz);
-                ChunkKey sampleKey = new ChunkKey(dimensionId, samplePos.x, samplePos.z);
+                ChunkPos samplePos = new ChunkPos(center.x() + dx, center.z() + dz);
+                ChunkKey sampleKey = new ChunkKey(dimensionId, samplePos.x(), samplePos.z());
                 ChunkValueData valueData = chunkValueCache.get(sampleKey);
 
                 if (valueData == null) {

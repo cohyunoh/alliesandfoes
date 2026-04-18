@@ -4,10 +4,10 @@ import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceActionConfirmScreen.ConfirmAction;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -407,13 +407,13 @@ public class AllianceViewScreen extends Screen {
                 && mouseY <= getMemberListBottom(layout);
     }
 
-    private void renderPlayerFace(GuiGraphics context, UUID uuid, int x, int y) {
+    private void renderPlayerFace(GuiGraphicsExtractor context, UUID uuid, int x, int y) {
         PlayerInfo playerInfo = this.minecraft != null && this.minecraft.getConnection() != null
                 ? this.minecraft.getConnection().getPlayerInfo(uuid)
                 : null;
 
         if (playerInfo != null) {
-            PlayerFaceRenderer.draw(context, playerInfo.getSkin(), x, y, FACE_SIZE);
+            PlayerFaceExtractor.extractRenderState(context, playerInfo.getSkin().body().texturePath(), x, y, FACE_SIZE, false, false, 0);
         } else {
             context.fill(x, y, x + FACE_SIZE, y + FACE_SIZE, 0xFF555555);
             context.fill(x + 3, y + 3, x + FACE_SIZE - 3, y + FACE_SIZE - 3, 0xFF888888);
@@ -421,7 +421,7 @@ public class AllianceViewScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, this.width, this.height, 0xCC000000);
 
         Layout layout = calculateLayout();
@@ -442,7 +442,7 @@ public class AllianceViewScreen extends Screen {
                 0x11A07A44
         );
 
-        super.render(context, mouseX, mouseY, delta);
+        super.extractRenderState(context, mouseX, mouseY, delta);
 
         int titleColor = 0xFF3A2F1B;
         int bodyColor = 0xFF5A4A32;
@@ -454,7 +454,7 @@ public class AllianceViewScreen extends Screen {
         int titleX = this.width / 2 - titleWidth / 2;
         int titleY = layout.top() + 8;
 
-        context.drawString(this.font, titleText, titleX, titleY, titleColor, false);
+        context.text(this.font, titleText, titleX, titleY, titleColor, false);
 
         int underlineY = titleY + this.font.lineHeight + 3;
         context.fill(titleX - 4, underlineY, titleX + titleWidth + 4, underlineY + 1, 0x668A6A3A);
@@ -462,7 +462,7 @@ public class AllianceViewScreen extends Screen {
         if (!payload.inAlliance()) {
             String empty = "You are not currently in an alliance.";
             int emptyWidth = this.font.width(empty);
-            context.drawString(
+            context.text(
                     this.font,
                     empty,
                     this.width / 2 - emptyWidth / 2,
@@ -476,34 +476,34 @@ public class AllianceViewScreen extends Screen {
         int infoX = layout.contentLeft() + 10;
         int infoY = layout.bodyTop();
 
-        context.drawString(this.font, "Alliance", infoX, infoY, accentColor, false);
+        context.text(this.font, "Alliance", infoX, infoY, accentColor, false);
         infoY += 12;
-        context.drawString(this.font, payload.allianceName(), infoX, infoY, strongColor, false);
+        context.text(this.font, payload.allianceName(), infoX, infoY, strongColor, false);
 
         int ownerBlockX = layout.contentLeft() + Math.max(170, layout.contentWidth() / 2 + 10);
         int ownerBlockY = layout.bodyTop();
 
-        context.drawString(this.font, "Founder", ownerBlockX, ownerBlockY, accentColor, false);
+        context.text(this.font, "Founder", ownerBlockX, ownerBlockY, accentColor, false);
         ownerBlockY += 12;
-        context.drawString(this.font, payload.ownerName(), ownerBlockX, ownerBlockY, strongColor, false);
+        context.text(this.font, payload.ownerName(), ownerBlockX, ownerBlockY, strongColor, false);
 
         int metaY = layout.bodyTop() + 34;
         String membersText = "Members: " + payload.members().size();
         String invitesText = "Pending invites: " + payload.pendingInvites().size();
 
-        context.drawString(this.font, membersText, infoX, metaY, bodyColor, false);
-        context.drawString(this.font, invitesText, ownerBlockX, metaY, bodyColor, false);
+        context.text(this.font, membersText, infoX, metaY, bodyColor, false);
+        context.text(this.font, invitesText, ownerBlockX, metaY, bodyColor, false);
 
         int listTitleY = layout.bodyTop() + 50;
         int listHeaderBaselineY = listTitleY + 2;
 
-        context.drawString(this.font, "Member Roster", layout.contentLeft() + 4, listHeaderBaselineY, strongColor, false);
+        context.text(this.font, "Member Roster", layout.contentLeft() + 4, listHeaderBaselineY, strongColor, false);
 
         String scrollText = "Showing " + (this.scrollOffset + 1) + "-" +
                 Math.min(this.scrollOffset + getVisibleRowCount(layout), payload.members().size()) +
                 " of " + payload.members().size();
         int scrollWidth = this.font.width(scrollText);
-        context.drawString(this.font, scrollText, layout.contentRight() - scrollWidth - 4, listHeaderBaselineY, accentColor, false);
+        context.text(this.font, scrollText, layout.contentRight() - scrollWidth - 4, listHeaderBaselineY, accentColor, false);
 
         int listTop = getMemberListTop(layout);
         int listBottom = getMemberListBottom(layout);
@@ -539,7 +539,7 @@ public class AllianceViewScreen extends Screen {
         int footerTextY = rosterBottom + 10;
         int dividerY = footerTextY + this.font.lineHeight + 6;
 
-        context.drawString(this.font, footerText, layout.contentLeft() + 8, footerTextY, bodyColor, false);
+        context.text(this.font, footerText, layout.contentLeft() + 8, footerTextY, bodyColor, false);
 
         context.fill(
                 layout.contentLeft() + 8,
@@ -551,7 +551,7 @@ public class AllianceViewScreen extends Screen {
     }
 
     private void renderMemberRows(
-            GuiGraphics context,
+            GuiGraphicsExtractor context,
             int mouseX,
             int mouseY,
             Layout layout,
@@ -564,7 +564,7 @@ public class AllianceViewScreen extends Screen {
         if (members.isEmpty()) {
             String empty = "No members recorded.";
             int emptyWidth = this.font.width(empty);
-            context.drawString(
+            context.text(
                     this.font,
                     empty,
                     this.width / 2 - emptyWidth / 2,
@@ -609,13 +609,13 @@ public class AllianceViewScreen extends Screen {
             int nameY = rowY + 5;
             int roleY = rowY + 17;
 
-            context.drawString(this.font, member.name(), nameX, nameY, member.owner() ? strongColor : bodyColor, false);
-            context.drawString(this.font, member.role(), nameX, roleY, accentColor, false);
+            context.text(this.font, member.name(), nameX, nameY, member.owner() ? strongColor : bodyColor, false);
+            context.text(this.font, member.role(), nameX, roleY, accentColor, false);
 
             if (member.owner()) {
                 String ownerLabel = "Founder";
                 int ownerWidth = this.font.width(ownerLabel);
-                context.drawString(
+                context.text(
                         this.font,
                         ownerLabel,
                         rowRight - ownerWidth - 10,
@@ -645,9 +645,9 @@ public class AllianceViewScreen extends Screen {
                 context.fill(roleX, buttonY, roleX + 52, buttonY + 18, roleBg);
                 context.fill(kickX, buttonY, kickX + 43, buttonY + 18, kickBg);
 
-                context.drawString(this.font, "Promote", promoteX + 5, buttonY + 5, 0xFFFFFFFF, false);
-                context.drawString(this.font, "Role", roleX + 14, buttonY + 5, 0xFFFFFFFF, false);
-                context.drawString(this.font, "Kick", kickX + 10, buttonY + 5, 0xFFFFFFFF, false);
+                context.text(this.font, "Promote", promoteX + 5, buttonY + 5, 0xFFFFFFFF, false);
+                context.text(this.font, "Role", roleX + 14, buttonY + 5, 0xFFFFFFFF, false);
+                context.text(this.font, "Kick", kickX + 10, buttonY + 5, 0xFFFFFFFF, false);
             }
         }
     }

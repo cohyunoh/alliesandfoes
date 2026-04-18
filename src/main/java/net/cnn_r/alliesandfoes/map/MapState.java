@@ -129,7 +129,7 @@ public class MapState {
     public static void onChunkUnloaded(ChunkPos pos) {
         // Remove all dimension entries for this chunk position.
         // Since we don't know the dimension here, remove by matching x/z.
-        loadedChunks.removeIf(k -> k.getChunkX() == pos.x && k.getChunkZ() == pos.z);
+        loadedChunks.removeIf(k -> k.getChunkX() == pos.x() && k.getChunkZ() == pos.z());
     }
 
     public static boolean isCurrentlyLoaded(ChunkKey key) {
@@ -222,7 +222,7 @@ public class MapState {
         String dimId = level.dimension().identifier().toString();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                cave.remove(new ChunkKey(dimId, center.x + dx, center.z + dz));
+                cave.remove(new ChunkKey(dimId, center.x() + dx, center.z() + dz));
             }
         }
     }

@@ -84,7 +84,7 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
     }
 
     protected ChunkStructureData getStructureData(String dimensionId, ChunkPos pos) {
-        ChunkStructureData data = this.structureResolver.resolve(dimensionId, pos.x, pos.z);
+        ChunkStructureData data = this.structureResolver.resolve(dimensionId, pos.x(), pos.z());
         if (data == null) {
             return new ChunkStructureData(0, List.of());
         }
@@ -181,9 +181,9 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
     protected int countNearbyWaterChunks(ServerLevel level, ChunkPos pos) {
         int nearbyWaterChunks = 0;
 
-        for (int chunkX = pos.x - 1; chunkX <= pos.x + 1; chunkX++) {
-            for (int chunkZ = pos.z - 1; chunkZ <= pos.z + 1; chunkZ++) {
-                if (chunkX == pos.x && chunkZ == pos.z) {
+        for (int chunkX = pos.x() - 1; chunkX <= pos.x() + 1; chunkX++) {
+            for (int chunkZ = pos.z() - 1; chunkZ <= pos.z() + 1; chunkZ++) {
+                if (chunkX == pos.x() && chunkZ == pos.z()) {
                     continue;
                 }
 

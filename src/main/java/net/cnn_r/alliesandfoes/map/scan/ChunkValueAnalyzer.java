@@ -206,9 +206,9 @@ public class ChunkValueAnalyzer {
     private int countNearbyWaterChunks(ChunkPos pos) {
         int nearbyWaterChunks = 0;
 
-        for (int chunkX = pos.x - 1; chunkX <= pos.x + 1; chunkX++) {
-            for (int chunkZ = pos.z - 1; chunkZ <= pos.z + 1; chunkZ++) {
-                if (chunkX == pos.x && chunkZ == pos.z) {
+        for (int chunkX = pos.x() - 1; chunkX <= pos.x() + 1; chunkX++) {
+            for (int chunkZ = pos.z() - 1; chunkZ <= pos.z() + 1; chunkZ++) {
+                if (chunkX == pos.x() && chunkZ == pos.z()) {
                     continue;
                 }
 

@@ -1,7 +1,7 @@
 package net.cnn_r.alliesandfoes.map.intuition;
 
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 /**
  * Client-side renderer for subtle explorer intuition cues.
@@ -29,7 +29,7 @@ public final class MapIntuitionRenderer {
      * - a tiny understated label
      */
     public static void render(
-            GuiGraphics context,
+            GuiGraphicsExtractor context,
             Font font,
             int centerX,
             int centerY,
@@ -55,14 +55,14 @@ public final class MapIntuitionRenderer {
         drawDirectionLabel(context, font, centerX, centerY, direction, strength);
     }
 
-    private static void drawCenterRing(GuiGraphics context, int centerX, int centerY, float strength) {
+    private static void drawCenterRing(GuiGraphicsExtractor context, int centerX, int centerY, float strength) {
         int color = colorWithAlpha(0xBBDDFF, getRingAlpha(strength));
         int radius = 8;
 
-        context.hLine(centerX - radius, centerX + radius, centerY - radius, color);
-        context.hLine(centerX - radius, centerX + radius, centerY + radius, color);
-        context.vLine(centerX - radius, centerY - radius, centerY + radius, color);
-        context.vLine(centerX + radius, centerY - radius, centerY + radius, color);
+        context.fill(centerX - radius, centerY - radius, centerX + radius + 1, centerY - radius + 1, color);
+        context.fill(centerX - radius, centerY + radius, centerX + radius + 1, centerY + radius + 1, color);
+        context.fill(centerX - radius, centerY - radius + 1, centerX - radius + 1, centerY + radius, color);
+        context.fill(centerX + radius, centerY - radius + 1, centerX + radius + 1, centerY + radius, color);
     }
 
     /**
@@ -71,7 +71,7 @@ public final class MapIntuitionRenderer {
      * This is intentionally less "pinpoint" than a dot or icon.
      */
     private static void drawDirectionalStreak(
-            GuiGraphics context,
+            GuiGraphicsExtractor context,
             int centerX,
             int centerY,
             int dirX,
@@ -112,7 +112,7 @@ public final class MapIntuitionRenderer {
     }
 
     private static void drawDirectionLabel(
-            GuiGraphics context,
+            GuiGraphicsExtractor context,
             Font font,
             int centerX,
             int centerY,
@@ -130,7 +130,7 @@ public final class MapIntuitionRenderer {
                 ? colorWithAlpha(0xDDEBFF, 230)
                 : colorWithAlpha(0xDDEBFF, 170);
 
-        context.drawString(
+        context.text(
                 font,
                 label,
                 centerX - (labelWidth / 2),

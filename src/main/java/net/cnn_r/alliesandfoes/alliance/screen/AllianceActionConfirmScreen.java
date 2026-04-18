@@ -3,7 +3,7 @@ package net.cnn_r.alliesandfoes.alliance.screen;
 import net.cnn_r.alliesandfoes.network.KickAllianceMemberPayload;
 import net.cnn_r.alliesandfoes.network.TransferAllianceOwnershipPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
@@ -93,7 +93,7 @@ public class AllianceActionConfirmScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, this.width, this.height, 0xCC000000);
 
         Layout layout = calculateLayout();
@@ -103,7 +103,7 @@ public class AllianceActionConfirmScreen extends Screen {
         context.fill(layout.left(), layout.top(), layout.right(), layout.bottom(), 0xFFF3E7C9);
         context.fill(layout.left() + 4, layout.top() + 4, layout.right() - 4, layout.bottom() - 4, 0xFFF8EFD8);
 
-        super.render(context, mouseX, mouseY, delta);
+        super.extractRenderState(context, mouseX, mouseY, delta);
 
         int titleColor = 0xFF3A2F1B;
         int bodyColor = 0xFF5A4A32;
@@ -115,7 +115,7 @@ public class AllianceActionConfirmScreen extends Screen {
         int titleX = this.width / 2 - titleWidth / 2;
         int titleY = layout.top() + 8;
 
-        context.drawString(this.font, titleText, titleX, titleY, titleColor, false);
+        context.text(this.font, titleText, titleX, titleY, titleColor, false);
 
         int underlineY = titleY + this.font.lineHeight + 3;
         context.fill(titleX - 4, underlineY, titleX + titleWidth + 4, underlineY + 1, 0x668A6A3A);
@@ -123,7 +123,7 @@ public class AllianceActionConfirmScreen extends Screen {
         int textY = layout.bodyTop();
 
         for (FormattedLine line : this.action.buildLines(this.targetName, this.allianceName)) {
-            context.drawString(
+            context.text(
                     this.font,
                     line.text(),
                     layout.contentLeft(),
@@ -146,7 +146,7 @@ public class AllianceActionConfirmScreen extends Screen {
         if (this.action == ConfirmAction.PROMOTE) {
             String warning = "You will no longer be the founder.";
             int warningWidth = this.font.width(warning);
-            context.drawString(
+            context.text(
                     this.font,
                     warning,
                     this.width / 2 - warningWidth / 2,

@@ -5,6 +5,7 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
@@ -20,7 +21,7 @@ import java.util.UUID;
  * Persistent saved data for per-player Explorer skill (explored chunk sets).
  */
 public class ExplorerSkillSavedData extends SavedData {
-    private static final String DATA_NAME = "explorer_skill_data";
+    private static final Identifier DATA_NAME = Identifier.parse("alliesandfoes:explorer_skill_data");
 
     private static final Codec<UUID> UUID_CODEC =
             Codec.STRING.xmap(UUID::fromString, UUID::toString);

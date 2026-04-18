@@ -28,8 +28,8 @@ public final class StructureChunkValueCalculator {
         var structureRegistry = level.registryAccess().lookupOrThrow(Registries.STRUCTURE);
         var structureManager = level.structureManager();
 
-        for (int chunkX = centerPos.x - STRUCTURE_SCAN_RADIUS; chunkX <= centerPos.x + STRUCTURE_SCAN_RADIUS; chunkX++) {
-            for (int chunkZ = centerPos.z - STRUCTURE_SCAN_RADIUS; chunkZ <= centerPos.z + STRUCTURE_SCAN_RADIUS; chunkZ++) {
+        for (int chunkX = centerPos.x() - STRUCTURE_SCAN_RADIUS; chunkX <= centerPos.x() + STRUCTURE_SCAN_RADIUS; chunkX++) {
+            for (int chunkZ = centerPos.z() - STRUCTURE_SCAN_RADIUS; chunkZ <= centerPos.z() + STRUCTURE_SCAN_RADIUS; chunkZ++) {
                 ChunkPos searchPos = new ChunkPos(chunkX, chunkZ);
 
                 List<StructureStart> starts = structureManager.startsForStructure(searchPos, structure -> true);
@@ -52,8 +52,8 @@ public final class StructureChunkValueCalculator {
                     }
 
                     int chunkDistance = Math.max(
-                            Math.abs(chunkX - centerPos.x),
-                            Math.abs(chunkZ - centerPos.z)
+                            Math.abs(chunkX - centerPos.x()),
+                            Math.abs(chunkZ - centerPos.z())
                     );
 
                     double multiplier = StructureValueRules.getDistanceMultiplier(chunkDistance);

@@ -15,7 +15,7 @@ import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.network.*;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.api.ClientModInitializer;
@@ -96,8 +96,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 if (context.client().level != null) {
                     var scanner = MapState.getScanner();
                     if (scanner != null) {
-                        for (int chunkX = pos.x - STRUCTURE_REFRESH_RADIUS; chunkX <= pos.x + STRUCTURE_REFRESH_RADIUS; chunkX++) {
-                            for (int chunkZ = pos.z - STRUCTURE_REFRESH_RADIUS; chunkZ <= pos.z + STRUCTURE_REFRESH_RADIUS; chunkZ++) {
+                        for (int chunkX = pos.x() - STRUCTURE_REFRESH_RADIUS; chunkX <= pos.x() + STRUCTURE_REFRESH_RADIUS; chunkX++) {
+                            for (int chunkZ = pos.z() - STRUCTURE_REFRESH_RADIUS; chunkZ <= pos.z() + STRUCTURE_REFRESH_RADIUS; chunkZ++) {
                                 ChunkKey nearbyKey = new ChunkKey(payload.dimensionId(), chunkX, chunkZ);
 
                                 if (!MapState.isCurrentlyLoaded(nearbyKey) || scanner.isQueued(new ChunkPos(chunkX, chunkZ))) {
@@ -121,10 +121,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "");
 
                     if (context.client().player != null) {
-                        context.client().player.displayClientMessage(
-                                Component.literal("You are already in alliance: " + payload.currentAllianceName()),
-                                false
-                        );
+                        context.client().player.sendSystemMessage(
+                                Component.literal("You are already in alliance: " + payload.currentAllianceName()));
                     }
                     return;
                 }
@@ -142,10 +140,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "");
 
                     if (context.client().player != null) {
-                        context.client().player.displayClientMessage(
-                                Component.literal("You are already in alliance: " + payload.currentAllianceName()),
-                                false
-                        );
+                        context.client().player.sendSystemMessage(
+                                Component.literal("You are already in alliance: " + payload.currentAllianceName()));
                     }
                     return;
                 }
@@ -165,10 +161,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 Component body = Component.literal(payload.requesterName() + " wants to join " + payload.allianceName());
 
                 if (context.client().player != null) {
-                    context.client().player.displayClientMessage(
-                            Component.literal(payload.requesterName() + " wants to join " + payload.allianceName() + "."),
-                            false
-                    );
+                    context.client().player.sendSystemMessage(
+                            Component.literal(payload.requesterName() + " wants to join " + payload.allianceName() + "."));
                 }
 
                 SystemToast.add(
@@ -193,7 +187,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(AllianceCreateResultPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 if (context.client().player != null) {
-                    context.client().player.displayClientMessage(Component.literal(payload.message()), false);
+                    context.client().player.sendSystemMessage(Component.literal(payload.message()));
                 }
 
                 if (!payload.success() && "Transfer ownership before leaving your alliance.".equals(payload.message())) {
@@ -219,10 +213,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
             context.client().execute(() -> {
                 if (!payload.allowed()) {
                     if (context.client().player != null) {
-                        context.client().player.displayClientMessage(
-                                Component.literal("Only the founder can manage alliance invites."),
-                                false
-                        );
+                        context.client().player.sendSystemMessage(
+                                Component.literal("Only the founder can manage alliance invites."));
                     }
                     return;
                 }
@@ -336,8 +328,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
-        HudRenderCallback.EVENT.register((drawContext, tickCounter) ->
-                HudMinimapRenderer.render(drawContext, tickCounter));
+        HudElementRegistry.addLast(net.minecraft.resources.Identifier.parse("alliesandfoes:minimap"),
+                (drawContext, tickCounter) -> HudMinimapRenderer.render(drawContext, tickCounter));
 
         // Update the Y level and ceiling state used for chunk scanning each tick.
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -527,8 +519,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
 
         for (int dx = -NEARBY_RESCAN_RADIUS; dx <= NEARBY_RESCAN_RADIUS; dx++) {
             for (int dz = -NEARBY_RESCAN_RADIUS; dz <= NEARBY_RESCAN_RADIUS; dz++) {
-                int cx = playerChunk.x + dx;
-                int cz = playerChunk.z + dz;
+                int cx = playerChunk.x() + dx;
+                int cz = playerChunk.z() + dz;
                 if (!level.hasChunk(cx, cz)) continue;
                 surfaceCache.remove(new ChunkKey(dimId, cx, cz));
                 scanner.requestScan(level.getChunk(cx, cz));
@@ -550,8 +542,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
 
         for (int dx = -CAVE_SCAN_RADIUS; dx <= CAVE_SCAN_RADIUS; dx++) {
             for (int dz = -CAVE_SCAN_RADIUS; dz <= CAVE_SCAN_RADIUS; dz++) {
-                int cx = playerChunk.x + dx;
-                int cz = playerChunk.z + dz;
+                int cx = playerChunk.x() + dx;
+                int cz = playerChunk.z() + dz;
                 ChunkPos chunkPos = new ChunkPos(cx, cz);
                 ChunkKey key = ChunkKey.of(level, chunkPos);
                 if (!caveCache.hasChunk(key) && !scanner.isCaveQueued(chunkPos) && level.hasChunk(cx, cz)) {

@@ -3,7 +3,7 @@ package net.cnn_r.alliesandfoes.map.util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.MapColor;
@@ -40,8 +40,10 @@ public class BlockColorResolver {
         }
 
         // Then try Minecraft's block color registry
-        color = Minecraft.getInstance().getBlockColors().getColor(state, level, pos, 0);
-        if (color != -1) {
+        net.minecraft.client.color.block.BlockTintSource tintSource =
+                Minecraft.getInstance().getBlockColors().getTintSource(state, 0);
+        if (tintSource != null) {
+            color = tintSource.colorInWorld(state, level, pos);
             return 0xFF000000 | color;
         }
 

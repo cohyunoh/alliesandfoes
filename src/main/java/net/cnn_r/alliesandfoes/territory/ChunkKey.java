@@ -29,19 +29,19 @@ public final class ChunkKey {
     }
 
     public static ChunkKey of(ServerLevel level, ChunkPos chunkPos) {
-        return new ChunkKey(level.dimension().identifier().toString(), chunkPos.x, chunkPos.z);
+        return new ChunkKey(level.dimension().identifier().toString(), chunkPos.x(), chunkPos.z());
     }
 
     public static ChunkKey of(Level level, ChunkPos chunkPos) {
-        return new ChunkKey(level.dimension().identifier().toString(), chunkPos.x, chunkPos.z);
+        return new ChunkKey(level.dimension().identifier().toString(), chunkPos.x(), chunkPos.z());
     }
 
     public static ChunkKey of(ResourceKey<Level> dimension, ChunkPos chunkPos) {
-        return new ChunkKey(dimension.identifier().toString(), chunkPos.x, chunkPos.z);
+        return new ChunkKey(dimension.identifier().toString(), chunkPos.x(), chunkPos.z());
     }
 
     public static ChunkKey of(String dimensionId, ChunkPos chunkPos) {
-        return new ChunkKey(dimensionId, chunkPos.x, chunkPos.z);
+        return new ChunkKey(dimensionId, chunkPos.x(), chunkPos.z());
     }
 
     public String getDimensionId() {

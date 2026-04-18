@@ -3,9 +3,9 @@ package net.cnn_r.alliesandfoes.alliance.screen;
 import net.cnn_r.alliesandfoes.network.InviteAllianceManagementScreenPayload;
 import net.cnn_r.alliesandfoes.network.SendAllianceInvitesPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -377,13 +377,22 @@ public class AllianceInviteManagementScreen extends Screen {
         return false;
     }
 
-    private void renderPlayerFace(GuiGraphics context, UUID uuid, int x, int y) {
+    private void renderPlayerFace(GuiGraphicsExtractor context, UUID uuid, int x, int y) {
         PlayerInfo playerInfo = this.minecraft != null && this.minecraft.getConnection() != null
                 ? this.minecraft.getConnection().getPlayerInfo(uuid)
                 : null;
 
         if (playerInfo != null) {
-            PlayerFaceRenderer.draw(context, playerInfo.getSkin(), x, y, FACE_SIZE);
+            net.minecraft.resources.Identifier skinTexture = net.minecraft.client.resources.DefaultPlayerSkin.get(uuid).body().texturePath();
+            if (this.minecraft != null && this.minecraft.level != null) {
+                for (net.minecraft.world.entity.player.Player p : this.minecraft.level.players()) {
+                    if (p.getUUID().equals(uuid) && p instanceof net.minecraft.client.player.AbstractClientPlayer acp) {
+                        skinTexture = acp.getSkin().body().texturePath();
+                        break;
+                    }
+                }
+            }
+            PlayerFaceExtractor.extractRenderState(context, skinTexture, x, y, FACE_SIZE, false, false, 0);
         } else {
             context.fill(x, y, x + FACE_SIZE, y + FACE_SIZE, 0xFF555555);
             context.fill(x + 3, y + 3, x + FACE_SIZE - 3, y + FACE_SIZE - 3, 0xFF888888);
@@ -391,7 +400,7 @@ public class AllianceInviteManagementScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, this.width, this.height, OVERLAY_COLOR);
 
         Layout layout = calculateLayout();
@@ -405,21 +414,21 @@ public class AllianceInviteManagementScreen extends Screen {
         renderCardBackground(context, layout);
         renderSections(context, layout);
 
-        super.render(context, mouseX, mouseY, delta);
+        super.extractRenderState(context, mouseX, mouseY, delta);
 
         String titleText = this.title.getString();
         int titleWidth = this.font.width(titleText);
         int titleX = this.width / 2 - titleWidth / 2;
 
-        context.drawString(this.font, titleText, titleX, layout.titleY(), titleColor, false);
+        context.text(this.font, titleText, titleX, layout.titleY(), titleColor, false);
         context.fill(titleX - 4, layout.titleUnderlineY(), titleX + titleWidth + 4, layout.titleUnderlineY() + 1, RULE_COLOR);
 
-        context.drawString(this.font, "Alliance", layout.contentLeft() + 10, layout.allianceLabelY(), accentColor, false);
+        context.text(this.font, "Alliance", layout.contentLeft() + 10, layout.allianceLabelY(), accentColor, false);
 
         String visibleAllianceName = this.font.plainSubstrByWidth(this.allianceName, layout.contentWidth() - 20);
-        context.drawString(this.font, visibleAllianceName, layout.contentLeft() + 10, layout.allianceNameY(), strongColor, false);
+        context.text(this.font, visibleAllianceName, layout.contentLeft() + 10, layout.allianceNameY(), strongColor, false);
 
-        context.drawString(
+        context.text(
                 this.font,
                 "Review the roster below and mark players to invite.",
                 layout.contentLeft() + 10,
@@ -428,11 +437,11 @@ public class AllianceInviteManagementScreen extends Screen {
                 false
         );
 
-        context.drawString(this.font, "Eligible Players", layout.contentLeft() + 10, layout.rosterHeaderY(), strongColor, false);
+        context.text(this.font, "Eligible Players", layout.contentLeft() + 10, layout.rosterHeaderY(), strongColor, false);
 
         String availableText = "Available: " + this.candidates.size();
         int availableTextWidth = this.font.width(availableText);
-        context.drawString(
+        context.text(
                 this.font,
                 availableText,
                 layout.contentRight() - availableTextWidth - 10,
@@ -443,10 +452,10 @@ public class AllianceInviteManagementScreen extends Screen {
 
         renderPlayerRows(context, mouseX, mouseY, layout, bodyColor, strongColor, accentColor);
 
-        context.drawString(this.font, "Showing " + getShowingRangeText(layout), layout.contentLeft() + 8, layout.showingTextY(), accentColor, false);
-        context.drawString(this.font, "Selected: " + this.selectedPlayers.size(), layout.contentLeft() + 8, layout.selectedTextY(), strongColor, false);
+        context.text(this.font, "Showing " + getShowingRangeText(layout), layout.contentLeft() + 8, layout.showingTextY(), accentColor, false);
+        context.text(this.font, "Selected: " + this.selectedPlayers.size(), layout.contentLeft() + 8, layout.selectedTextY(), strongColor, false);
 
-        context.drawWordWrap(
+        context.textWithWordWrap(
                 this.font,
                 Component.literal(FOOTER_NOTE),
                 layout.contentLeft() + 8,
@@ -470,7 +479,7 @@ public class AllianceInviteManagementScreen extends Screen {
     }
 
     private void renderPlayerRows(
-            GuiGraphics context,
+            GuiGraphicsExtractor context,
             int mouseX,
             int mouseY,
             Layout layout,
@@ -483,11 +492,11 @@ public class AllianceInviteManagementScreen extends Screen {
             int emptyWidth = this.font.width(empty);
             int emptyX = this.width / 2 - emptyWidth / 2;
             int emptyY = layout.listInnerTop() + 12;
-            context.drawString(this.font, empty, emptyX, emptyY, bodyColor, false);
+            context.text(this.font, empty, emptyX, emptyY, bodyColor, false);
 
             String hint = "Players already allied or already invited are filtered out.";
             int hintWidth = this.font.width(hint);
-            context.drawString(
+            context.text(
                     this.font,
                     hint,
                     this.width / 2 - hintWidth / 2,
@@ -568,12 +577,12 @@ public class AllianceInviteManagementScreen extends Screen {
             int maxNameWidth = Math.max(0, markerX - textX - 10);
 
             String visibleName = this.font.plainSubstrByWidth(candidate.name(), maxNameWidth);
-            context.drawString(this.font, visibleName, textX, textY, selected ? strongColor : bodyColor, false);
+            context.text(this.font, visibleName, textX, textY, selected ? strongColor : bodyColor, false);
 
             if (hovered && !selected) {
                 String prompt = "Select";
                 int promptWidth = this.font.width(prompt);
-                context.drawString(
+                context.text(
                         this.font,
                         prompt,
                         markerX - promptWidth - 6,
@@ -584,7 +593,7 @@ public class AllianceInviteManagementScreen extends Screen {
             } else if (selected) {
                 String selectedText = "Selected";
                 int selectedWidth = this.font.width(selectedText);
-                context.drawString(
+                context.text(
                         this.font,
                         selectedText,
                         markerX - selectedWidth - 6,
@@ -598,21 +607,21 @@ public class AllianceInviteManagementScreen extends Screen {
         context.disableScissor();
     }
 
-    private void renderCardBackground(GuiGraphics context, Layout layout) {
+    private void renderCardBackground(GuiGraphicsExtractor context, Layout layout) {
         context.fill(layout.left() - SHADOW_PAD, layout.top() - SHADOW_PAD, layout.right() + SHADOW_PAD, layout.bottom() + SHADOW_PAD, SHADOW_COLOR);
         context.fill(layout.left() - 1, layout.top() - 1, layout.right() + 1, layout.bottom() + 1, BORDER_COLOR);
         context.fill(layout.left(), layout.top(), layout.right(), layout.bottom(), PARCHMENT_BASE_COLOR);
         context.fill(layout.left() + 4, layout.top() + 4, layout.right() - 4, layout.bottom() - 4, PARCHMENT_INNER_COLOR);
     }
 
-    private void renderSections(GuiGraphics context, Layout layout) {
+    private void renderSections(GuiGraphicsExtractor context, Layout layout) {
         context.fill(layout.contentLeft(), layout.topSectionTop(), layout.contentRight(), layout.topSectionBottom(), TOP_SECTION_COLOR);
 
-        context.drawString(this.font, "Invite Ledger", layout.contentLeft() + 8, layout.listHeaderY(), 0xFF241A10, false);
+        context.text(this.font, "Invite Ledger", layout.contentLeft() + 8, layout.listHeaderY(), 0xFF241A10, false);
 
         String listCountText = "Showing " + getShowingRangeText(layout);
         int countWidth = this.font.width(listCountText);
-        context.drawString(this.font, listCountText, layout.contentRight() - countWidth - 8, layout.listHeaderY(), 0xFF6E5630, false);
+        context.text(this.font, listCountText, layout.contentRight() - countWidth - 8, layout.listHeaderY(), 0xFF6E5630, false);
 
         context.fill(layout.contentLeft() + 8, layout.listFrameTop() - 2, layout.contentRight() - 8, layout.listFrameBottom(), LIST_SECTION_COLOR);
         context.fill(layout.contentLeft() + 8, layout.listFrameTop() - 2, layout.contentRight() - 8, layout.listFrameTop() - 1, RULE_COLOR);

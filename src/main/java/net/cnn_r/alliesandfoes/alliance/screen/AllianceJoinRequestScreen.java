@@ -4,9 +4,9 @@ import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
 import net.cnn_r.alliesandfoes.network.RespondAllianceJoinRequestPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
@@ -219,7 +219,7 @@ public class AllianceJoinRequestScreen extends Screen {
         );
     }
 
-    private void renderRequesterFace(GuiGraphics context, AllianceJoinRequestPayload request, int x, int y) {
+    private void renderRequesterFace(GuiGraphicsExtractor context, AllianceJoinRequestPayload request, int x, int y) {
         if (this.minecraft == null || this.minecraft.getConnection() == null) {
             renderFallbackFace(context, x, y);
             return;
@@ -227,19 +227,19 @@ public class AllianceJoinRequestScreen extends Screen {
 
         PlayerInfo playerInfo = this.minecraft.getConnection().getPlayerInfo(request.requesterUuid());
         if (playerInfo != null) {
-            PlayerFaceRenderer.draw(context, playerInfo.getSkin(), x, y, FACE_SIZE);
+            PlayerFaceExtractor.extractRenderState(context, playerInfo.getSkin().body().texturePath(), x, y, FACE_SIZE, false, false, 0);
         } else {
             renderFallbackFace(context, x, y);
         }
     }
 
-    private void renderFallbackFace(GuiGraphics context, int x, int y) {
+    private void renderFallbackFace(GuiGraphicsExtractor context, int x, int y) {
         context.fill(x, y, x + FACE_SIZE, y + FACE_SIZE, 0xFF555555);
         context.fill(x + 4, y + 4, x + FACE_SIZE - 4, y + FACE_SIZE - 4, 0xFF888888);
     }
 
     @Override
-    public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, this.width, this.height, 0xCC000000);
 
         Layout layout = calculateLayout();
@@ -258,7 +258,7 @@ public class AllianceJoinRequestScreen extends Screen {
                 0x113E6FA6
         );
 
-        super.render(context, mouseX, mouseY, delta);
+        super.extractRenderState(context, mouseX, mouseY, delta);
 
         int titleColor = 0xFF3A2F1B;
         int bodyColor = 0xFF5A4A32;
@@ -270,7 +270,7 @@ public class AllianceJoinRequestScreen extends Screen {
         int titleX = this.width / 2 - titleWidth / 2;
         int titleY = layout.top() + 8;
 
-        context.drawString(this.font, titleText, titleX, titleY, titleColor, false);
+        context.text(this.font, titleText, titleX, titleY, titleColor, false);
 
         int underlineY = titleY + this.font.lineHeight + 3;
         context.fill(titleX - 4, underlineY, titleX + titleWidth + 4, underlineY + 1, 0x668A6A3A);
@@ -279,7 +279,7 @@ public class AllianceJoinRequestScreen extends Screen {
             String emptyText = "No pending join requests.";
             int emptyWidth = this.font.width(emptyText);
 
-            context.drawString(
+            context.text(
                     this.font,
                     emptyText,
                     this.width / 2 - emptyWidth / 2,
@@ -292,7 +292,7 @@ public class AllianceJoinRequestScreen extends Screen {
 
         String counterText = (this.currentIndex + 1) + " / " + AllianceClientState.getPendingJoinRequestCount();
         int counterWidth = this.font.width(counterText);
-        context.drawString(
+        context.text(
                 this.font,
                 counterText,
                 this.width / 2 - counterWidth / 2,
@@ -437,7 +437,7 @@ public class AllianceJoinRequestScreen extends Screen {
     }
 
     private int drawAnimatedWrappedLine(
-            GuiGraphics context,
+            GuiGraphicsExtractor context,
             String fullText,
             int startCharIndex,
             int x,
@@ -454,7 +454,7 @@ public class AllianceJoinRequestScreen extends Screen {
 
         int currentY = y;
         for (var line : lines) {
-            context.drawString(this.font, line, x, currentY, color, false);
+            context.text(this.font, line, x, currentY, color, false);
             currentY += this.font.lineHeight + 2;
         }
 
@@ -462,7 +462,7 @@ public class AllianceJoinRequestScreen extends Screen {
     }
 
     private int drawAnimatedCenteredWrappedLine(
-            GuiGraphics context,
+            GuiGraphicsExtractor context,
             String fullText,
             int startCharIndex,
             int centerX,
@@ -480,7 +480,7 @@ public class AllianceJoinRequestScreen extends Screen {
         int currentY = y;
         for (var line : lines) {
             int lineWidth = this.font.width(line);
-            context.drawString(this.font, line, centerX - lineWidth / 2, currentY, color, false);
+            context.text(this.font, line, centerX - lineWidth / 2, currentY, color, false);
             currentY += this.font.lineHeight + 2;
         }
 

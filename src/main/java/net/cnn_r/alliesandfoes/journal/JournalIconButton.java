@@ -2,7 +2,7 @@ package net.cnn_r.alliesandfoes.journal;
 
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
@@ -33,7 +33,7 @@ public class JournalIconButton extends AbstractWidget {
     }
 
     @Override
-    protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+    protected void extractWidgetRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         boolean hovered = isHoveredOrFocused();
         int x = getX();
         int y = getY();
@@ -58,11 +58,11 @@ public class JournalIconButton extends AbstractWidget {
         }
 
         // Item icon centered (16×16 icon in 20×20 button → 2px offset each side)
-        graphics.renderItem(ICON, x + 2, y + 2);
+        graphics.fakeItem(ICON, x + 2, y + 2, 0);
     }
 
     /** Draws the classic Minecraft raised-button border (1px outer dark, 1px inner light/dark). */
-    private void drawRaisedBorder(GuiGraphics g, int x, int y, int w, int h) {
+    private void drawRaisedBorder(GuiGraphicsExtractor g, int x, int y, int w, int h) {
         // Outer dark ring
         g.fill(x - 1, y - 1, x + w + 1, y,         COLOR_EDGE_DARKER);
         g.fill(x - 1, y + h, x + w + 1, y + h + 1, COLOR_EDGE_DARKER);
@@ -76,7 +76,7 @@ public class JournalIconButton extends AbstractWidget {
         g.fill(x + w - 1, y, x + w, y + h,    COLOR_EDGE_DARK);
     }
 
-    private void drawBorder(GuiGraphics graphics, int color, int thickness) {
+    private void drawBorder(GuiGraphicsExtractor graphics, int color, int thickness) {
         int x = getX();
         int y = getY();
         int x1 = x + width + thickness;

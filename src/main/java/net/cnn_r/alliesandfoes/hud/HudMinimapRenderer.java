@@ -19,7 +19,7 @@ import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -136,7 +136,7 @@ public final class HudMinimapRenderer {
     /**
      * Entry point called from {@code HudRenderCallback.EVENT}.
      */
-    public static void render(GuiGraphics context, DeltaTracker tickCounter) {
+    public static void render(GuiGraphicsExtractor context, DeltaTracker tickCounter) {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
 
@@ -178,8 +178,8 @@ public final class HudMinimapRenderer {
         long now = System.currentTimeMillis();
 
         boolean chunkMoved = lastEvalChunk == null
-                || Math.abs(current.x - lastEvalChunk.x) >= INTUITION_EVAL_CHUNK_DISTANCE
-                || Math.abs(current.z - lastEvalChunk.z) >= INTUITION_EVAL_CHUNK_DISTANCE;
+                || Math.abs(current.x() - lastEvalChunk.x()) >= INTUITION_EVAL_CHUNK_DISTANCE
+                || Math.abs(current.z() - lastEvalChunk.z()) >= INTUITION_EVAL_CHUNK_DISTANCE;
 
         boolean timedOut = (now - lastEvalMs) >= INTUITION_EVAL_INTERVAL_MS;
 
@@ -214,12 +214,12 @@ public final class HudMinimapRenderer {
     // Rendering
     // -------------------------------------------------------------------------
 
-    private static void renderBackground(GuiGraphics context, int x, int y, boolean caveMode) {
+    private static void renderBackground(GuiGraphicsExtractor context, int x, int y, boolean caveMode) {
         int size = totalSize(caveMode);
         context.fill(x, y, x + size, y + size, 0xA0000000);
     }
 
-    private static void renderChunkColors(GuiGraphics context, LocalPlayer player, int originX, int originY) {
+    private static void renderChunkColors(GuiGraphicsExtractor context, LocalPlayer player, int originX, int originY) {
         ChunkCache surfaceCache = MapState.getChunkCache();
         ChunkPos playerChunk = player.chunkPosition();
         String dimensionId = player.level().dimension().identifier().toString();
@@ -278,7 +278,7 @@ public final class HudMinimapRenderer {
 
         for (int dz = -chunkRadius; dz <= chunkRadius; dz++) {
             for (int dx = -chunkRadius; dx <= chunkRadius; dx++) {
-                ChunkKey key = new ChunkKey(dimensionId, playerChunk.x + dx, playerChunk.z + dz);
+                ChunkKey key = new ChunkKey(dimensionId, playerChunk.x() + dx, playerChunk.z() + dz);
                 int imageX = (dx + chunkRadius) * pxPerChunk;
                 int imageY = (dz + chunkRadius) * pxPerChunk;
 
@@ -312,7 +312,7 @@ public final class HudMinimapRenderer {
 
 
 
-    private static void renderTerritoryOverlay(GuiGraphics context, LocalPlayer player, int originX, int originY) {
+    private static void renderTerritoryOverlay(GuiGraphicsExtractor context, LocalPlayer player, int originX, int originY) {
         boolean caveMode = MapState.getPlayerHasCeiling();
         int chunkRadius = caveMode ? CHUNK_RADIUS_CAVE : CHUNK_RADIUS_SURFACE;
         int pxPerChunk  = caveMode ? PIXELS_PER_CHUNK_CAVE : PIXELS_PER_CHUNK_SURFACE;
@@ -323,8 +323,8 @@ public final class HudMinimapRenderer {
 
         for (int dz = -chunkRadius; dz <= chunkRadius; dz++) {
             for (int dx = -chunkRadius; dx <= chunkRadius; dx++) {
-                ChunkPos pos = new ChunkPos(playerChunk.x + dx, playerChunk.z + dz);
-                ChunkKey key = new ChunkKey(dimensionId, pos.x, pos.z);
+                ChunkPos pos = new ChunkPos(playerChunk.x() + dx, playerChunk.z() + dz);
+                ChunkKey key = new ChunkKey(dimensionId, pos.x(), pos.z());
                 TerritoryChunkDataPayload data = cache.get(key);
 
                 if (data == null || !data.claimed()) {
@@ -349,7 +349,7 @@ public final class HudMinimapRenderer {
         }
     }
 
-    private static void renderPlayers(GuiGraphics context, LocalPlayer self, int originX, int originY) {
+    private static void renderPlayers(GuiGraphicsExtractor context, LocalPlayer self, int originX, int originY) {
         boolean caveMode = MapState.getPlayerHasCeiling();
         int chunkRadius = caveMode ? CHUNK_RADIUS_CAVE : CHUNK_RADIUS_SURFACE;
         int pxPerChunk  = caveMode ? PIXELS_PER_CHUNK_CAVE : PIXELS_PER_CHUNK_SURFACE;
@@ -382,8 +382,8 @@ public final class HudMinimapRenderer {
             int markerChunkX = (int) Math.floor(marker.x) >> 4;
             int markerChunkZ = (int) Math.floor(marker.z) >> 4;
 
-            int dcx = markerChunkX - selfChunk.x;
-            int dcz = markerChunkZ - selfChunk.z;
+            int dcx = markerChunkX - selfChunk.x();
+            int dcz = markerChunkZ - selfChunk.z();
 
             if (Math.abs(dcx) > chunkRadius || Math.abs(dcz) > chunkRadius) {
                 continue;
@@ -404,7 +404,7 @@ public final class HudMinimapRenderer {
         }
     }
 
-    private static void renderCone(GuiGraphics context, int cx, int cy, float yaw, int length, int color) {
+    private static void renderCone(GuiGraphicsExtractor context, int cx, int cy, float yaw, int length, int color) {
         double yawRad = Math.toRadians(yaw);
         double facingDX = -Math.sin(yawRad);
         double facingDY =  Math.cos(yawRad);
@@ -421,7 +421,7 @@ public final class HudMinimapRenderer {
         }
     }
 
-    private static void renderMiniHead(GuiGraphics context, Identifier skin, int cx, int cy) {
+    private static void renderMiniHead(GuiGraphicsExtractor context, Identifier skin, int cx, int cy) {
         int x = cx - HEAD_SIZE / 2;
         int y = cy - HEAD_SIZE / 2;
         context.blit(RenderPipelines.GUI_TEXTURED, skin,
@@ -442,7 +442,7 @@ public final class HudMinimapRenderer {
         return DefaultPlayerSkin.get(uuid).body().texturePath();
     }
 
-    private static void renderIntuitionStreak(GuiGraphics context, int originX, int originY) {
+    private static void renderIntuitionStreak(GuiGraphicsExtractor context, int originX, int originY) {
         if (cachedResult == null || !cachedResult.hasDirection()) {
             return;
         }
@@ -480,7 +480,7 @@ public final class HudMinimapRenderer {
         }
     }
 
-    private static void renderIntuitionMessage(GuiGraphics context, Minecraft mc) {
+    private static void renderIntuitionMessage(GuiGraphicsExtractor context, Minecraft mc) {
         if (activeMessage == null) {
             return;
         }
@@ -507,7 +507,7 @@ public final class HudMinimapRenderer {
         int bgAlpha = Math.max(0, Math.round(alpha * 140));
         context.fill(x - 6, y - 4, x + textWidth + 6, y + 12, (bgAlpha << 24));
 
-        context.drawString(font, activeMessage, x, y, colorWithAlpha(0xEAF3FF, textAlpha));
+        context.text(font, activeMessage, x, y, colorWithAlpha(0xEAF3FF, textAlpha));
     }
 
     private static int colorWithAlpha(int rgb, int alpha) {

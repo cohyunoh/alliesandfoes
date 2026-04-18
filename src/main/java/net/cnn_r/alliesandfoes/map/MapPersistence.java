@@ -90,8 +90,8 @@ public class MapPersistence {
             CompoundTag valueTag = new CompoundTag();
 
             valueTag.putString("dimension", data.getKey().getDimensionId());
-            valueTag.putInt("x", data.getPos().x);
-            valueTag.putInt("z", data.getPos().z);
+            valueTag.putInt("x", data.getPos().x());
+            valueTag.putInt("z", data.getPos().z());
             valueTag.putInt("total_value", data.getTotalValue());
 
             valueTag.putInt("ore_value", breakdown.getOreValue());

@@ -23,7 +23,7 @@ import java.util.UUID;
  */
 public class ExplorerDiscoverySavedData extends SavedData {
 
-    private static final String DATA_NAME = "explorer_discovery_data";
+    private static final Identifier DATA_NAME = Identifier.parse("alliesandfoes:explorer_discovery_data");
 
     private static final Codec<UUID> UUID_CODEC =
             Codec.STRING.xmap(UUID::fromString, UUID::toString);

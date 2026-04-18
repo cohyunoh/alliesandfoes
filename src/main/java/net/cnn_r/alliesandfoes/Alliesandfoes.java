@@ -37,37 +37,37 @@ public class Alliesandfoes implements ModInitializer {
 		ModItems.register();
 		TerritoryCommands.register();
 		AllianceProgressionCommands.register();
-		PayloadTypeRegistry.playS2C().register(PlayerPositionsPayload.TYPE, PlayerPositionsPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(ChunkStructurePayload.TYPE, ChunkStructurePayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(AllianceCreationScreenPayload.TYPE, AllianceCreationScreenPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(JoinAllianceScreenPayload.TYPE, JoinAllianceScreenPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(AllianceStatePayload.TYPE, AllianceStatePayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(AllianceCreateResultPayload.TYPE, AllianceCreateResultPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(AllianceViewPayload.TYPE, AllianceViewPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(AllianceInvitePayload.TYPE, AllianceInvitePayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(AllianceJoinRequestPayload.TYPE, AllianceJoinRequestPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(InviteAllianceManagementScreenPayload.TYPE, InviteAllianceManagementScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(PlayerPositionsPayload.TYPE, PlayerPositionsPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(ChunkStructurePayload.TYPE, ChunkStructurePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceCreationScreenPayload.TYPE, AllianceCreationScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(JoinAllianceScreenPayload.TYPE, JoinAllianceScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceStatePayload.TYPE, AllianceStatePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceCreateResultPayload.TYPE, AllianceCreateResultPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceViewPayload.TYPE, AllianceViewPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceInvitePayload.TYPE, AllianceInvitePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceJoinRequestPayload.TYPE, AllianceJoinRequestPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(InviteAllianceManagementScreenPayload.TYPE, InviteAllianceManagementScreenPayload.STREAM_CODEC);
 
-		PayloadTypeRegistry.playC2S().register(RequestAllianceCreationScreenPayload.TYPE, RequestAllianceCreationScreenPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(RequestJoinAllianceScreenPayload.TYPE, RequestJoinAllianceScreenPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(CreateAlliancePayload.TYPE, CreateAlliancePayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(RequestJoinAlliancePayload.TYPE, RequestJoinAlliancePayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(RequestAllianceViewPayload.TYPE, RequestAllianceViewPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(RespondAllianceInvitePayload.TYPE, RespondAllianceInvitePayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(LeaveAlliancePayload.TYPE, LeaveAlliancePayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(KickAllianceMemberPayload.TYPE, KickAllianceMemberPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(TransferAllianceOwnershipPayload.TYPE, TransferAllianceOwnershipPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(SetAllianceMemberRolePayload.TYPE, SetAllianceMemberRolePayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(RespondAllianceJoinRequestPayload.TYPE, RespondAllianceJoinRequestPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(RequestInviteAllianceManagementScreenPayload.TYPE, RequestInviteAllianceManagementScreenPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(SendAllianceInvitesPayload.TYPE, SendAllianceInvitesPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(ExplorerSkillSyncPayload.TYPE, ExplorerSkillSyncPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(TerritoryChunkBatchPayload.TYPE, TerritoryChunkBatchPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(TerritoryPreviewBatchPayload.TYPE, TerritoryPreviewBatchPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(RequestTerritoryPreviewPayload.TYPE, RequestTerritoryPreviewPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(RequestTerritoryActionPayload.TYPE, RequestTerritoryActionPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playS2C().register(ExplorerDiscoverySyncPayload.TYPE, ExplorerDiscoverySyncPayload.STREAM_CODEC);
-		PayloadTypeRegistry.playC2S().register(SetIntuitionTargetPayload.TYPE, SetIntuitionTargetPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestAllianceCreationScreenPayload.TYPE, RequestAllianceCreationScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestJoinAllianceScreenPayload.TYPE, RequestJoinAllianceScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(CreateAlliancePayload.TYPE, CreateAlliancePayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestJoinAlliancePayload.TYPE, RequestJoinAlliancePayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestAllianceViewPayload.TYPE, RequestAllianceViewPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RespondAllianceInvitePayload.TYPE, RespondAllianceInvitePayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(LeaveAlliancePayload.TYPE, LeaveAlliancePayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(KickAllianceMemberPayload.TYPE, KickAllianceMemberPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(TransferAllianceOwnershipPayload.TYPE, TransferAllianceOwnershipPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(SetAllianceMemberRolePayload.TYPE, SetAllianceMemberRolePayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RespondAllianceJoinRequestPayload.TYPE, RespondAllianceJoinRequestPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestInviteAllianceManagementScreenPayload.TYPE, RequestInviteAllianceManagementScreenPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(SendAllianceInvitesPayload.TYPE, SendAllianceInvitesPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(ExplorerSkillSyncPayload.TYPE, ExplorerSkillSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(TerritoryChunkBatchPayload.TYPE, TerritoryChunkBatchPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(TerritoryPreviewBatchPayload.TYPE, TerritoryPreviewBatchPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestTerritoryPreviewPayload.TYPE, RequestTerritoryPreviewPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestTerritoryActionPayload.TYPE, RequestTerritoryActionPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(ExplorerDiscoverySyncPayload.TYPE, ExplorerDiscoverySyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(SetIntuitionTargetPayload.TYPE, SetIntuitionTargetPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -93,10 +93,8 @@ public class Alliesandfoes implements ModInitializer {
 					return;
 				}
 
-				context.player().displayClientMessage(
-						Component.literal("Created alliance: " + result.alliance().getName()),
-						false
-				);
+				context.player().sendSystemMessage(
+						Component.literal("Created alliance: " + result.alliance().getName()));
 			});
 		});
 
@@ -248,10 +246,8 @@ public class Alliesandfoes implements ModInitializer {
 				};
 
 				// Send the result message back to the acting player immediately.
-				context.player().displayClientMessage(
-						Component.literal(result.message()),
-						false
-				);
+				context.player().sendSystemMessage(
+						Component.literal(result.message()));
 
 				// Sync the changed chunk to all players.
 				TerritoryQueryService queryService = new TerritoryQueryService(territoryManager);
@@ -321,7 +317,7 @@ public class Alliesandfoes implements ModInitializer {
 			}
 		});
 
-		ServerChunkEvents.CHUNK_LOAD.register((world, chunk) -> {
+		ServerChunkEvents.CHUNK_LOAD.register((world, chunk, wasAlreadyLoaded) -> {
 			if (!(world instanceof ServerLevel level)) {
 				return;
 			}
@@ -331,8 +327,8 @@ public class Alliesandfoes implements ModInitializer {
 
 			ChunkStructurePayload payload = new ChunkStructurePayload(
 					level.dimension().identifier().toString(),
-					pos.x,
-					pos.z,
+					pos.x(),
+					pos.z(),
 					structureData.getStructureValue(),
 					structureData.getStructureNames()
 			);
@@ -343,8 +339,8 @@ public class Alliesandfoes implements ModInitializer {
 				/*
 				 * Only sync to nearby players so this stays bounded.
 				 */
-				int dx = Math.abs(playerPos.x - pos.x);
-				int dz = Math.abs(playerPos.z - pos.z);
+				int dx = Math.abs(playerPos.x() - pos.x());
+				int dz = Math.abs(playerPos.z() - pos.z());
 
 				if (Math.max(dx, dz) <= 8) {
 					ServerPlayNetworking.send(player, payload);
@@ -379,9 +375,9 @@ public class Alliesandfoes implements ModInitializer {
 						TerritoryMapSyncService.buildChunkBatch(queryService, allChunkKeys));
 			}
 
-			for (int chunkX = center.x - 8; chunkX <= center.x + 8; chunkX++) {
+			for (int chunkX = center.x() - 8; chunkX <= center.x() + 8; chunkX++) {
 
-				for (int chunkZ = center.z - 8; chunkZ <= center.z + 8; chunkZ++) {
+				for (int chunkZ = center.z() - 8; chunkZ <= center.z() + 8; chunkZ++) {
 
 					ChunkPos pos = new ChunkPos(chunkX, chunkZ);
 
@@ -395,8 +391,8 @@ public class Alliesandfoes implements ModInitializer {
 
 					ChunkStructurePayload payload = new ChunkStructurePayload(
 							level.dimension().identifier().toString(),
-							pos.x,
-							pos.z,
+							pos.x(),
+							pos.z(),
 							structureData.getStructureValue(),
 							structureData.getStructureNames()
 					);

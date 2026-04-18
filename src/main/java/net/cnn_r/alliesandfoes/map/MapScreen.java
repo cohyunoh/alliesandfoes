@@ -23,7 +23,7 @@ import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryPreviewSyncCache;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
@@ -161,8 +161,8 @@ public class MapScreen extends Screen {
         this.textureDirty = true;
 
         if (this.minecraft.player != null) {
-            this.cameraBlockX = this.minecraft.player.getX();
-            this.cameraBlockZ = this.minecraft.player.getZ();
+            this.cameraBlockX = (double)this.minecraft.player.getX();
+            this.cameraBlockZ = (double)this.minecraft.player.getZ();
             this.syncZoomToLoadedRadius(this.minecraft.player);
         }
 
@@ -289,21 +289,21 @@ public class MapScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, this.width, this.height, 0xCC000000);
 
         Player player = this.minecraft.player;
         ClientLevel level = this.minecraft.level;
 
         if (player == null || level == null) {
-            super.render(context, mouseX, mouseY, delta);
+            super.extractRenderState(context, mouseX, mouseY, delta);
             renderTopButtonGlows(context, delta);
             return;
         }
 
         if (this.followPlayer) {
-            this.cameraBlockX = player.getX();
-            this.cameraBlockZ = player.getZ();
+            this.cameraBlockX = (double)player.getX();
+            this.cameraBlockZ = (double)player.getZ();
             this.syncZoomToLoadedRadius(player);
         }
 
@@ -335,7 +335,7 @@ public class MapScreen extends Screen {
         this.renderChunkOverlays(context);
         this.renderVisiblePlayers(context, level);
 
-        super.render(context, mouseX, mouseY, delta);
+        super.extractRenderState(context, mouseX, mouseY, delta);
         renderTopButtonGlows(context, delta);
 
         this.renderTerritoryModeGlow(context);
@@ -350,12 +350,12 @@ public class MapScreen extends Screen {
         this.renderHoveredChunkTooltip(context, mouseX, mouseY);
     }
 
-    private void renderTopButtonGlows(GuiGraphics context, float delta) {
+    private void renderTopButtonGlows(GuiGraphicsExtractor context, float delta) {
         renderInviteButtonGlow(context, delta);
         renderRequestsButtonGlow(context, delta);
     }
 
-    private void renderInviteButtonGlow(GuiGraphics context, float delta) {
+    private void renderInviteButtonGlow(GuiGraphicsExtractor context, float delta) {
         if (this.inviteButton == null || !this.inviteButton.visible || !AllianceClientState.shouldHighlightInviteButton()) {
             return;
         }
@@ -363,7 +363,7 @@ public class MapScreen extends Screen {
         renderButtonGlow(context, this.inviteButton, delta);
     }
 
-    private void renderRequestsButtonGlow(GuiGraphics context, float delta) {
+    private void renderRequestsButtonGlow(GuiGraphicsExtractor context, float delta) {
         if (this.requestsButton == null || !this.requestsButton.visible || !AllianceClientState.shouldHighlightJoinRequestButton()) {
             return;
         }
@@ -371,7 +371,7 @@ public class MapScreen extends Screen {
         renderButtonGlow(context, this.requestsButton, delta);
     }
 
-    private void renderScreenMessage(GuiGraphics context) {
+    private void renderScreenMessage(GuiGraphicsExtractor context) {
         if (this.screenMessage == null) {
             return;
         }
@@ -393,7 +393,7 @@ public class MapScreen extends Screen {
                 0xA0000000
         );
 
-        context.drawString(
+        context.text(
                 this.font,
                 this.screenMessage,
                 x,
@@ -408,7 +408,7 @@ public class MapScreen extends Screen {
      * The cue is slightly lifted upward so it reads as map guidance and is less
      * likely to visually collide with lower-center overlays or labels.
      */
-    private void renderExplorerIntuitionCue(GuiGraphics context) {
+    private void renderExplorerIntuitionCue(GuiGraphicsExtractor context) {
         if (!this.canRenderExplorerIntuition() || this.cachedIntuitionResult == null) {
             return;
         }
@@ -429,7 +429,7 @@ public class MapScreen extends Screen {
         );
     }
 
-    private void renderButtonGlow(GuiGraphics context, Button button, float delta) {
+    private void renderButtonGlow(GuiGraphicsExtractor context, Button button, float delta) {
         long tick = this.minecraft != null && this.minecraft.level != null
                 ? this.minecraft.level.getGameTime()
                 : 0L;
@@ -629,8 +629,8 @@ public class MapScreen extends Screen {
                 this.clearTerritoryPreviewState();
 
                 if (this.minecraft.player != null) {
-                    this.cameraBlockX = this.minecraft.player.getX();
-                    this.cameraBlockZ = this.minecraft.player.getZ();
+                    this.cameraBlockX = (double)this.minecraft.player.getX();
+                    this.cameraBlockZ = (double)this.minecraft.player.getZ();
                     this.followPlayer = true;
                 }
 
@@ -845,7 +845,7 @@ public class MapScreen extends Screen {
         return (argb & 0xFF000000) | (r << 16) | (g << 8) | b;
     }
 
-    private void renderChunkOverlays(GuiGraphics context) {
+    private void renderChunkOverlays(GuiGraphicsExtractor context) {
         int centerWorldX = (int) Math.floor(this.cameraBlockX);
         int centerWorldZ = (int) Math.floor(this.cameraBlockZ);
 
@@ -893,7 +893,7 @@ public class MapScreen extends Screen {
         context.disableScissor();
     }
 
-    private void renderChunkOverlay(GuiGraphics context, ChunkPos pos, ChunkKey key, boolean hovered) {
+    private void renderChunkOverlay(GuiGraphicsExtractor context, ChunkPos pos, ChunkKey key, boolean hovered) {
         double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
         int textureCenter = this.mapTexture.getSize() / 2;
 
@@ -984,13 +984,13 @@ public class MapScreen extends Screen {
             context.fill(x1, y1, x2, y2, fillColor);
         }
 
-        context.hLine(x1, x2 - 1, y1, borderColor);
-        context.hLine(x1, x2 - 1, y2 - 1, borderColor);
-        context.vLine(x1, y1, y2 - 1, borderColor);
-        context.vLine(x2 - 1, y1, y2 - 1, borderColor);
+        context.fill(x1, y1, x2, y1 + 1, borderColor);
+        context.fill(x1, y2 - 1, x2, y2, borderColor);
+        context.fill(x1, y1 + 1, x1 + 1, y2 - 1, borderColor);
+        context.fill(x2 - 1, y1 + 1, x2, y2 - 1, borderColor);
     }
 
-    private void renderPlayerHead(GuiGraphics context, Identifier skin, String name, int screenX, int screenY, int headSize) {
+    private void renderPlayerHead(GuiGraphicsExtractor context, Identifier skin, String name, int screenX, int screenY, int headSize) {
         context.blit(
                 RenderPipelines.GUI_TEXTURED,
                 skin,
@@ -1036,7 +1036,7 @@ public class MapScreen extends Screen {
                     bgColor
             );
 
-            context.drawString(
+            context.text(
                     this.font,
                     name,
                     textX,
@@ -1046,7 +1046,7 @@ public class MapScreen extends Screen {
         }
     }
 
-    private void renderVisiblePlayers(GuiGraphics context, ClientLevel level) {
+    private void renderVisiblePlayers(GuiGraphicsExtractor context, ClientLevel level) {
         int centerChunkX = ((int) Math.floor(this.cameraBlockX)) >> 4;
         int centerChunkZ = ((int) Math.floor(this.cameraBlockZ)) >> 4;
 
@@ -1103,7 +1103,7 @@ public class MapScreen extends Screen {
 
     private static final double CONE_HALF_FOV_COS = Math.cos(Math.toRadians(35.0));
 
-    private static void renderPlayerCone(GuiGraphics context, int cx, int cy, float yaw, int headSize) {
+    private static void renderPlayerCone(GuiGraphicsExtractor context, int cx, int cy, float yaw, int headSize) {
         int coneLen = headSize + 10;
         double yawRad = Math.toRadians(yaw);
         double facingDX = -Math.sin(yawRad);
@@ -1121,7 +1121,7 @@ public class MapScreen extends Screen {
         }
     }
 
-    private void renderStructureHeatmapOverlay(GuiGraphics context, ChunkPos pos, ChunkKey key) {
+    private void renderStructureHeatmapOverlay(GuiGraphicsExtractor context, ChunkPos pos, ChunkKey key) {
         if (!this.showStructureIntel || !AllianceMapIntelPolicy.canViewAdminStructureIntel()) {
             return;
         }
@@ -1171,12 +1171,12 @@ public class MapScreen extends Screen {
         }
     }
 
-    private void renderHoveredChunkTooltip(GuiGraphics context, int mouseX, int mouseY) {
+    private void renderHoveredChunkTooltip(GuiGraphicsExtractor context, int mouseX, int mouseY) {
         if (this.hoveredChunk == null) {
             return;
         }
 
-        ChunkKey hoveredKey = new ChunkKey(this.dimensionId, this.hoveredChunk.x, this.hoveredChunk.z);
+        ChunkKey hoveredKey = new ChunkKey(this.dimensionId, this.hoveredChunk.x(), this.hoveredChunk.z());
         if (!this.cache.hasChunk(hoveredKey)) {
             return;
         }
@@ -1185,7 +1185,7 @@ public class MapScreen extends Screen {
 
         List<FormattedCharSequence> lines = new ArrayList<>();
 
-        lines.add(Component.literal("Chunk [" + this.hoveredChunk.x + ", " + this.hoveredChunk.z + "]").getVisualOrderText());
+        lines.add(Component.literal("Chunk [" + this.hoveredChunk.x() + ", " + this.hoveredChunk.z() + "]").getVisualOrderText());
 
         TerritoryChunkDataPayload territoryData = AllianceMapIntelPolicy.canViewTerritoryIntel()
                 ? this.getTerritoryData(this.hoveredChunk)
@@ -1364,7 +1364,7 @@ public class MapScreen extends Screen {
     private void syncZoomToLoadedRadius(Player player) {
         ChunkPos center = player.chunkPosition();
         ChunkKey centerKey = new ChunkKey(this.dimensionId != null ? this.dimensionId : "minecraft:overworld",
-                center.x, center.z);
+                center.x(), center.z());
         int loadedRadius = Math.max(2, MapState.getLoadedRadiusAround(centerKey));
         int blocksAcross = (loadedRadius * 2 + 1) * 16;
 
@@ -1623,8 +1623,8 @@ public class MapScreen extends Screen {
                 actionType,
                 this.minecraft.level.dimension().identifier().toString(),
                 this.selectedAnchorId,
-                this.hoveredChunk.x,
-                this.hoveredChunk.z
+                this.hoveredChunk.x(),
+                this.hoveredChunk.z()
         );
 
         // Clear current preview so the old result does not linger after click.
@@ -1674,7 +1674,7 @@ public class MapScreen extends Screen {
 
         // Do not preview chunks that do not have map data yet.
         // This avoids ugly black preview holes on uncached terrain.
-        if (!this.cache.hasChunk(new ChunkKey(this.dimensionId, this.hoveredChunk.x, this.hoveredChunk.z))) {
+        if (!this.cache.hasChunk(new ChunkKey(this.dimensionId, this.hoveredChunk.x(), this.hoveredChunk.z()))) {
             return;
         }
 
@@ -1705,8 +1705,8 @@ public class MapScreen extends Screen {
                 this.minecraft.level.dimension().identifier().toString(),
                 this.selectedAnchorId,
                 List.of(new RequestTerritoryPreviewPayload.ChunkCoord(
-                        this.hoveredChunk.x,
-                        this.hoveredChunk.z
+                        this.hoveredChunk.x(),
+                        this.hoveredChunk.z()
                 ))
         );
 
@@ -1721,7 +1721,7 @@ public class MapScreen extends Screen {
      * surfaces the most important chunk-value gameplay information without
      * requiring the player to rely only on the hover tooltip.
      */
-    private void renderTerritoryPreviewStatus(GuiGraphics context) {
+    private void renderTerritoryPreviewStatus(GuiGraphicsExtractor context) {
         if (this.territoryPreviewMode == TerritoryPreviewMode.NONE) {
             return;
         }
@@ -1746,8 +1746,8 @@ public class MapScreen extends Screen {
         if (this.hoveredChunk != null && this.minecraft != null && this.minecraft.level != null) {
             ChunkKey chunkKey = new ChunkKey(
                     this.minecraft.level.dimension().toString(),
-                    this.hoveredChunk.x,
-                    this.hoveredChunk.z
+                    this.hoveredChunk.x(),
+                    this.hoveredChunk.z()
             );
 
             previewData = this.territoryPreviewSyncCache.get(chunkKey);
@@ -1812,7 +1812,7 @@ public class MapScreen extends Screen {
                 color = 0xFFFFAA55;
             }
 
-            context.drawString(
+            context.text(
                     this.font,
                     lines.get(i),
                     x + 6,
@@ -1829,7 +1829,7 @@ public class MapScreen extends Screen {
      * This is intentionally light so it reinforces mode state without becoming
      * visually noisy or obscuring the map.
      */
-    private void renderTerritoryModeGlow(GuiGraphics context) {
+    private void renderTerritoryModeGlow(GuiGraphicsExtractor context) {
         if (this.territoryPreviewMode == TerritoryPreviewMode.NONE) {
             return;
         }
@@ -1908,7 +1908,7 @@ public class MapScreen extends Screen {
      * - what left/right click do
      * - how to exit the mode
      */
-    private void renderMapControls(GuiGraphics context) {
+    private void renderMapControls(GuiGraphicsExtractor context) {
         List<String> lines = new ArrayList<>();
 
         TerritoryPreviewMode mode = this.territoryPreviewMode;
@@ -1987,7 +1987,7 @@ public class MapScreen extends Screen {
                 };
             }
 
-            context.drawString(
+            context.text(
                     this.font,
                     lines.get(i),
                     x + 6,
@@ -2021,8 +2021,8 @@ public class MapScreen extends Screen {
         }
 
         if (!force && this.lastIntuitionEvalChunk != null) {
-            int dx = Math.abs(currentCenterChunk.x - this.lastIntuitionEvalChunk.x);
-            int dz = Math.abs(currentCenterChunk.z - this.lastIntuitionEvalChunk.z);
+            int dx = Math.abs(currentCenterChunk.x() - this.lastIntuitionEvalChunk.x());
+            int dz = Math.abs(currentCenterChunk.z() - this.lastIntuitionEvalChunk.z());
 
             if (dx < INTUITION_REFRESH_DISTANCE_CHUNKS
                     && dz < INTUITION_REFRESH_DISTANCE_CHUNKS) {
@@ -2086,7 +2086,7 @@ public class MapScreen extends Screen {
      * Weak or unclear intuition should remain mostly ambient so the system feels
      * like guidance rather than a diagnostic overlay.
      */
-    private void renderExplorerIntuitionStatus(GuiGraphics context) {
+    private void renderExplorerIntuitionStatus(GuiGraphicsExtractor context) {
         if (!this.canRenderExplorerIntuition() || this.cachedIntuitionResult == null) {
             return;
         }
@@ -2121,7 +2121,7 @@ public class MapScreen extends Screen {
 
         for (int i = 0; i < lines.size(); i++) {
             int color = i == 0 ? 0xFFBBDDFF : 0xFFEAF3FF;
-            context.drawString(
+            context.text(
                     this.font,
                     lines.get(i),
                     x + 6,
@@ -2138,7 +2138,7 @@ public class MapScreen extends Screen {
      * evaluator can be tested without making normal gameplay intuition reveal
      * too much information.
      */
-    private void renderExplorerIntuitionDebugPanel(GuiGraphics context) {
+    private void renderExplorerIntuitionDebugPanel(GuiGraphicsExtractor context) {
         if (!this.showStructureIntel || !AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
             return;
         }
@@ -2166,7 +2166,7 @@ public class MapScreen extends Screen {
 
             ChunkPos centerChunk = this.getCameraCenterChunk();
             if (centerChunk != null) {
-                lines.add("Center Chunk: " + centerChunk.x + ", " + centerChunk.z);
+                lines.add("Center Chunk: " + centerChunk.x() + ", " + centerChunk.z());
             }
         }
 
@@ -2186,7 +2186,7 @@ public class MapScreen extends Screen {
 
         for (int i = 0; i < lines.size(); i++) {
             int color = i == 0 ? 0xFFFFD27A : 0xFFFFFFFF;
-            context.drawString(
+            context.text(
                     this.font,
                     lines.get(i),
                     x + 6,
@@ -2203,7 +2203,7 @@ public class MapScreen extends Screen {
      * only when debug intel is enabled and surfaces the current factor values
      * for the hovered chunk, or the camera-center chunk if nothing is hovered.
      */
-    private void renderChunkValueDebugPanel(GuiGraphics context) {
+    private void renderChunkValueDebugPanel(GuiGraphicsExtractor context) {
         if (!this.showStructureIntel || !AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
             return;
         }
@@ -2213,13 +2213,13 @@ public class MapScreen extends Screen {
             return;
         }
 
-        ChunkKey debugKey = new ChunkKey(this.dimensionId, debugChunk.x, debugChunk.z);
+        ChunkKey debugKey = new ChunkKey(this.dimensionId, debugChunk.x(), debugChunk.z());
         ChunkValueData valueData = this.chunkValueCache.get(debugKey);
 
         List<String> lines = new ArrayList<>();
         lines.add("Chunk Value Debug");
 
-        lines.add("Chunk: [" + debugChunk.x + ", " + debugChunk.z + "]");
+        lines.add("Chunk: [" + debugChunk.x() + ", " + debugChunk.z() + "]");
 
         if (valueData == null) {
             lines.add("State: No cached value data");
@@ -2280,7 +2280,7 @@ public class MapScreen extends Screen {
      * Renders a simple text debug panel with a title-colored first line.
      */
     private void renderDebugTextPanel(
-            GuiGraphics context,
+            GuiGraphicsExtractor context,
             List<String> lines,
             int x,
             int y,
@@ -2300,7 +2300,7 @@ public class MapScreen extends Screen {
 
         for (int i = 0; i < lines.size(); i++) {
             int color = i == 0 ? titleColor : 0xFFFFFFFF;
-            context.drawString(
+            context.text(
                     this.font,
                     lines.get(i),
                     x + 6,

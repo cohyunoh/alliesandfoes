@@ -4,7 +4,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import net.cnn_r.alliesandfoes.journal.JournalScreen;
 import net.cnn_r.alliesandfoes.map.MapScreen;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
@@ -29,8 +29,8 @@ public class KeyBindings {
                 new KeyMapping.Category(Identifier.parse("alliesandfoes:category.alliesandfoes"))
         );
 
-        KeyBindingHelper.registerKeyBinding(OPEN_MAP);
-        KeyBindingHelper.registerKeyBinding(OPEN_JOURNAL);
+        KeyMappingHelper.registerKeyMapping(OPEN_MAP);
+        KeyMappingHelper.registerKeyMapping(OPEN_JOURNAL);
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (OPEN_MAP.consumeClick()) {

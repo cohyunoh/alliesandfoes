@@ -48,7 +48,11 @@
       "Bash(./gradlew compileJava)",
       "Bash(python -c ':*)",
       "Bash(find:*)",
-      "WebFetch(domain:minecraft.wiki)"
+      "WebFetch(domain:minecraft.wiki)",
+      "Bash(python -c ' *)",
+      "Bash(python *)",
+      "Bash(grep -v \"^Binary\\\\|//\")",
+      "Bash(xargs grep *)"
     ]
   }
 }
