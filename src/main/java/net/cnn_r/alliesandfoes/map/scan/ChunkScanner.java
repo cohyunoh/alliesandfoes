@@ -228,8 +228,8 @@ public class ChunkScanner {
                 }
 
                 if (playerHasCeiling) {
-                    shade = clamp(shade, -4, 4);
-                    color = applyShading(color, shade * 25);
+                    shade = clamp(shade, -6, 6);
+                    color = applyShading(color, shade * 40);
                 } else {
                     shade = clamp(shade, -3, 3);
                     color = applyShading(color, shade * 15);

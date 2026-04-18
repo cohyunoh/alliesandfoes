@@ -366,6 +366,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     nearbyRescanTicker = 0;
                     maybeRescanNearbyChunks(client, player);
                 }
+
+                MapState.flushBlockDirtyChunks();
             }
         });
 

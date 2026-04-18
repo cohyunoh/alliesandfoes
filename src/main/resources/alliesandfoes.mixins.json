@@ -6,7 +6,8 @@
       "InventoryScreenMixin"
 	],
 	"client": [
-		"client.MonocleArmPoseMixin"
+		"client.MonocleArmPoseMixin",
+		"client.ClientLevelBlockChangeMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

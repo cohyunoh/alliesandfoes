@@ -10,6 +10,7 @@ import net.cnn_r.alliesandfoes.map.cache.TerritoryPreviewSyncCache;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 
@@ -24,6 +25,9 @@ public class MapState {
     private static ChunkScanner scanner;
     private static PlayerMarkerCache playerMarkerCache;
     private static final Set<ChunkKey> loadedChunks = ConcurrentHashMap.newKeySet();
+
+    private static final ConcurrentHashMap<ChunkKey, Long> pendingBlockDirty = new ConcurrentHashMap<>();
+    private static final int BLOCK_DIRTY_DELAY_TICKS = 3;
     private static TerritoryChunkSyncCache territoryChunkSyncCache;
     private static TerritoryPreviewSyncCache territoryPreviewSyncCache;
 
@@ -259,6 +263,39 @@ public class MapState {
     // Dirty flag for render optimization
     // -------------------------------------------------------------------------
 
+    /** Called from the ClientLevel mixin on every client-side block change. */
+    public static void onBlockChanged(BlockPos pos) {
+        ClientLevel level = Minecraft.getInstance().level;
+        if (level == null) return;
+        String dimId = level.dimension().identifier().toString();
+        ChunkKey key = new ChunkKey(dimId, pos.getX() >> 4, pos.getZ() >> 4);
+        pendingBlockDirty.put(key, level.getGameTime() + BLOCK_DIRTY_DELAY_TICKS);
+    }
+
+    /** Called once per client tick to dispatch expired dirty-chunk entries. */
+    public static void flushBlockDirtyChunks() {
+        ClientLevel level = Minecraft.getInstance().level;
+        if (level == null) return;
+        ChunkScanner s = getScanner();
+        if (s == null) return;
+
+        long now = level.getGameTime();
+        pendingBlockDirty.entrySet().removeIf(entry -> {
+            if (entry.getValue() > now) return false;
+            ChunkKey key = entry.getKey();
+            getChunkCache().remove(key);
+            getCaveChunkCache().remove(key);
+            if (level.hasChunk(key.getChunkX(), key.getChunkZ())) {
+                LevelChunk chunk = level.getChunk(key.getChunkX(), key.getChunkZ());
+                s.requestScan(chunk);
+                if (getPlayerHasCeiling()) {
+                    s.requestCaveScan(chunk);
+                }
+            }
+            return true;
+        });
+    }
+
     /** Called by the scanner thread after each chunk scan completes. */
     public static void markMapDirty() {
         mapDirty = true;
@@ -303,6 +340,7 @@ public class MapState {
             territoryPreviewSyncCache.clear();
         }
         loadedChunks.clear();
+        pendingBlockDirty.clear();
         mapDirty = false;
     }
 }

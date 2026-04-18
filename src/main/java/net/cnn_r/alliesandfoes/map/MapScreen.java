@@ -43,7 +43,7 @@ import java.util.List;
 import java.util.UUID;
 
 public class MapScreen extends Screen {
-    private static final int BLOCK_PIXEL_SIZE = 2;
+    private static final int BLOCK_PIXEL_SIZE = 1;
     private static final int TEXTURE_SIZE = 512;
     private static final float VALUE_BORDER_ZOOM_THRESHOLD = 0.9f;
     private static final int MIN_CHUNK_BORDER_SCREEN_SIZE = 6;
@@ -55,6 +55,7 @@ public class MapScreen extends Screen {
     private static final int STRUCTURE_HEATMAP_MEDIUM = 0x4433AAFF;
     private static final int STRUCTURE_HEATMAP_WEAK = 0x332266CC;
     private static final float STRUCTURE_HEATMAP_ZOOM_THRESHOLD = 0.85f;
+    private static final float CAVE_DEFAULT_ZOOM = 4.0f;
 
     private static final int TOP_BUTTON_X = 20;
     private static final int TOP_BUTTON_Y = 20;
@@ -964,6 +965,9 @@ public class MapScreen extends Screen {
                     ? getOverallValueColor(valueData.getTotalValue())
                     : getOverallValueBorderColorSoft(valueData.getTotalValue());
         } else {
+            if (MapState.getPlayerHasCeiling() && !hovered) {
+                return;
+            }
             borderColor = hovered ? HOVERED_CHUNK_BORDER_COLOR : CHUNK_BORDER_COLOR;
         }
 
@@ -1371,6 +1375,10 @@ public class MapScreen extends Screen {
         float zoomX = (float) this.width / (blocksAcross * BLOCK_PIXEL_SIZE);
         float zoomY = (float) this.height / (blocksAcross * BLOCK_PIXEL_SIZE);
         float zoom = Math.max(0.5f, Math.min(6.0f, Math.min(zoomX, zoomY)));
+
+        if (MapState.getPlayerHasCeiling()) {
+            zoom = Math.max(zoom, CAVE_DEFAULT_ZOOM);
+        }
 
         this.renderer.setZoom(zoom);
     }

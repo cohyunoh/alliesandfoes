@@ -6,7 +6,6 @@ import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
-import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
@@ -37,80 +36,72 @@ import java.util.UUID;
  * Renders the Explorer HUD minimap and ambient intuition text when the
  * local player is holding the Monocle item.
  *
- * This renderer is called from {@code HudRenderCallback} every frame.
- * Intuition re-evaluation is rate-limited to avoid per-frame work.
+ * The minimap is player-centered and rotates with player yaw so "up" always
+ * means the direction the player is looking. Texture is rebuilt whenever the
+ * player moves ≥ 0.5 blocks, turns ≥ 1°, map dirty, or 200 ms elapsed.
  */
 public final class HudMinimapRenderer {
 
-    // Minimap dimensions — surface mode
-    private static final int CHUNK_RADIUS_SURFACE = 4;
-    private static final int PIXELS_PER_CHUNK_SURFACE = 6;
-    // Minimap dimensions — cave mode (full 1:1 resolution)
-    private static final int CHUNK_RADIUS_CAVE = 2;
-    private static final int PIXELS_PER_CHUNK_CAVE = 16;
-    // Shared: fixed widget border and screen padding
-    private static final int BORDER = 2;
-    // Widget size depends on mode: surface stays compact, cave grows for 1:1 resolution
-    // Cave: (CHUNK_RADIUS_CAVE*2+1) * PIXELS_PER_CHUNK_CAVE + BORDER*2 = 5*16+4 = 84
-    private static final int TOTAL_SIZE_SURFACE = 58;
-    private static final int TOTAL_SIZE_CAVE = 84;
+    // Surface mode: 96×96 px, 1 px per block, 48-block view radius → 100px widget
+    private static final int   TEX_SIZE_SURFACE     = 96;
+    private static final float WORLD_RADIUS_SURFACE = 48.0f;
+
+    // Cave mode: 72×72 px, 3 px per block, 12-block view radius → 76px widget
+    private static final int   TEX_SIZE_CAVE        = 72;
+    private static final float WORLD_RADIUS_CAVE    = 12.0f;
+
+    private static final int BORDER  = 2;
     private static final int PADDING = 10;
 
-    private static int totalSize(boolean caveMode) {
-        return caveMode ? TOTAL_SIZE_CAVE : TOTAL_SIZE_SURFACE;
-    }
+    private static int texSize(boolean cave)   { return cave ? TEX_SIZE_CAVE : TEX_SIZE_SURFACE; }
+    private static float radius(boolean cave)  { return cave ? WORLD_RADIUS_CAVE : WORLD_RADIUS_SURFACE; }
+    private static float scale(boolean cave)   { return radius(cave) * 2f / texSize(cave); }
+    private static int widgetSize(boolean cave){ return texSize(cave) + 2 * BORDER; }
 
     // Player head size on minimap (pixels)
     private static final int HEAD_SIZE = 8;
 
-    // Cone of sight: half-FOV of 35° → total 70°
+    // Cone of sight: half-FOV of 35°
     private static final double CONE_HALF_FOV_COS = Math.cos(Math.toRadians(35.0));
-    private static final int CONE_LENGTH = 10;
+    private static final int    CONE_LENGTH        = 10;
 
-    // Territory colors (same as MapScreen)
-    private static final int CLAIMED_FILL = 0x442266FF;
-    private static final int CLAIMED_BORDER = 0xAA66AAFF;
-    private static final int ANCHOR_FILL = 0x6644DDFF;
-    private static final int ANCHOR_BORDER = 0xFF99EEFF;
+    // Territory fill colors (same as MapScreen)
+    private static final int CLAIMED_FILL      = 0x442266FF;
+    private static final int ANCHOR_FILL       = 0x6644DDFF;
     private static final int ENEMY_CLAIMED_FILL = 0x44993333;
     private static final int ENEMY_ANCHOR_FILL  = 0x66BB2222;
 
-    // Intuition re-evaluation interval
-    private static final long INTUITION_EVAL_INTERVAL_MS = 3000L;
-    private static final int INTUITION_EVAL_CHUNK_DISTANCE = 2;
+    // Intuition
+    private static final long INTUITION_EVAL_INTERVAL_MS    = 3000L;
+    private static final int  INTUITION_EVAL_CHUNK_DISTANCE = 2;
+    private static final long MESSAGE_DISPLAY_MS            = 2200L;
+    private static final long MINIMAP_REFRESH_INTERVAL_MS   = 200L;
 
-    // Message display duration
-    private static final long MESSAGE_DISPLAY_MS = 2200L;
-
-    // Mutable state — safe because HudRenderCallback runs on the render thread
     private static IntuitionResult cachedResult = null;
-    private static ChunkPos lastEvalChunk = null;
-    private static long lastEvalMs = 0L;
+    private static ChunkPos        lastEvalChunk = null;
+    private static long            lastEvalMs    = 0L;
 
-    // Minimap texture rebuild: minimum interval between time-based refreshes
-    private static final long MINIMAP_REFRESH_INTERVAL_MS = 200L;
+    // Texture cache
+    private static NativeImage     minimapImage     = null;
+    private static DynamicTexture  minimapTexture   = null;
+    private static Identifier      minimapTextureId = null;
 
-    // Cached minimap texture — rebuilt on chunk crossing, mode switch, dirty flag, or time interval
-    private static NativeImage minimapImage = null;
-    private static DynamicTexture minimapTexture = null;
-    private static Identifier minimapTextureId = null;
-    private static ChunkPos lastMinimapCenter = null;
+    // Rebuild triggers
+    private static float  lastMinimapPlayerX = Float.NaN;
+    private static float  lastMinimapPlayerZ = Float.NaN;
+    private static float  lastMinimapYaw     = Float.NaN;
     private static String lastMinimapDimension = null;
-    private static boolean lastCaveMode = false;
-    private static long lastMinimapRebuildMs = 0L;
+    private static boolean lastCaveMode       = false;
+    private static long   lastMinimapRebuildMs = 0L;
 
     private static final MapIntuitionMessageController messageController =
             new MapIntuitionMessageController();
-    private static Component activeMessage = null;
-    private static long messageExpiryMs = 0L;
+    private static Component activeMessage  = null;
+    private static long      messageExpiryMs = 0L;
 
-    private HudMinimapRenderer() {
-    }
+    private HudMinimapRenderer() {}
 
-    /**
-     * Clears all cached render state. Call on world disconnect so stale data
-     * from a previous world never bleeds into a new one.
-     */
+    /** Clears all cached render state on world disconnect. */
     public static void reset() {
         cachedResult = null;
         lastEvalChunk = null;
@@ -118,7 +109,9 @@ public final class HudMinimapRenderer {
         activeMessage = null;
         messageExpiryMs = 0L;
         messageController.reset();
-        lastMinimapCenter = null;
+        lastMinimapPlayerX = Float.NaN;
+        lastMinimapPlayerZ = Float.NaN;
+        lastMinimapYaw = Float.NaN;
         lastMinimapDimension = null;
         lastCaveMode = false;
         lastMinimapRebuildMs = 0L;
@@ -133,34 +126,40 @@ public final class HudMinimapRenderer {
         minimapTextureId = null;
     }
 
-    /**
-     * Entry point called from {@code HudRenderCallback.EVENT}.
-     */
+    /** Entry point called from HudRenderCallback every frame. */
     public static void render(GuiGraphicsExtractor context, DeltaTracker tickCounter) {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
-
-        if (player == null || mc.level == null) {
-            return;
-        }
-
-        if (!isHoldingMonocle(player)) {
-            return;
-        }
+        if (player == null || mc.level == null) return;
+        if (!isHoldingMonocle(player)) return;
 
         maybeRefreshIntuition(player);
         maybeEmitIntuitionMessage();
 
-        boolean caveMode = MapState.getPlayerHasCeiling();
+        boolean caveMode  = MapState.getPlayerHasCeiling();
+        float   playerX   = (float) player.getX();
+        float   playerZ   = (float) player.getZ();
+        float   playerYaw = player.getYRot();
+        String  dimId     = player.level().dimension().identifier().toString();
+
         int screenWidth = mc.getWindow().getGuiScaledWidth();
-        int mapLeft = screenWidth - totalSize(caveMode) - PADDING;
-        int mapTop = PADDING;
+        int ws          = widgetSize(caveMode);
+        int mapLeft     = screenWidth - ws - PADDING;
+        int mapTop      = PADDING;
+        int texOriginX  = mapLeft + BORDER;
+        int texOriginY  = mapTop  + BORDER;
+        int ts          = texSize(caveMode);
 
         renderBackground(context, mapLeft, mapTop, caveMode);
-        renderChunkColors(context, player, mapLeft + BORDER, mapTop + BORDER);
-        renderTerritoryOverlay(context, player, mapLeft + BORDER, mapTop + BORDER);
-        renderPlayers(context, player, mapLeft + BORDER, mapTop + BORDER);
-        renderIntuitionStreak(context, mapLeft + BORDER, mapTop + BORDER);
+        maybeRebuildTexture(player, playerX, playerZ, playerYaw, dimId, caveMode);
+
+        if (minimapTextureId != null) {
+            context.blit(RenderPipelines.GUI_TEXTURED, minimapTextureId,
+                    texOriginX, texOriginY, 0, 0, ts, ts, ts, ts);
+        }
+
+        renderPlayers(context, player, playerX, playerZ, playerYaw, caveMode, texOriginX, texOriginY);
+        renderIntuitionStreak(context, texOriginX, texOriginY, caveMode);
         renderIntuitionMessage(context, mc);
     }
 
@@ -170,39 +169,27 @@ public final class HudMinimapRenderer {
     }
 
     // -------------------------------------------------------------------------
-    // Intuition evaluation
+    // Intuition
     // -------------------------------------------------------------------------
 
     private static void maybeRefreshIntuition(LocalPlayer player) {
         ChunkPos current = player.chunkPosition();
         long now = System.currentTimeMillis();
-
         boolean chunkMoved = lastEvalChunk == null
                 || Math.abs(current.x() - lastEvalChunk.x()) >= INTUITION_EVAL_CHUNK_DISTANCE
                 || Math.abs(current.z() - lastEvalChunk.z()) >= INTUITION_EVAL_CHUNK_DISTANCE;
-
-        boolean timedOut = (now - lastEvalMs) >= INTUITION_EVAL_INTERVAL_MS;
-
-        if (!chunkMoved && !timedOut) {
-            return;
-        }
-
+        if (!chunkMoved && (now - lastEvalMs) < INTUITION_EVAL_INTERVAL_MS) return;
         String dimensionId = player.level().dimension().identifier().toString();
         cachedResult = ExplorerIntuitionEvaluator.evaluate(
-                current,
-                dimensionId,
+                current, dimensionId,
                 MapState.getChunkValueCache(),
-                MapState.getChunkStructureSyncCache()
-        );
+                MapState.getChunkStructureSyncCache());
         lastEvalChunk = current;
         lastEvalMs = now;
     }
 
     private static void maybeEmitIntuitionMessage() {
-        if (cachedResult == null) {
-            return;
-        }
-
+        if (cachedResult == null) return;
         Component message = messageController.evaluateMessage(cachedResult, System.currentTimeMillis());
         if (message != null) {
             activeMessage = message;
@@ -211,203 +198,192 @@ public final class HudMinimapRenderer {
     }
 
     // -------------------------------------------------------------------------
-    // Rendering
+    // Background
     // -------------------------------------------------------------------------
 
-    private static void renderBackground(GuiGraphicsExtractor context, int x, int y, boolean caveMode) {
-        int size = totalSize(caveMode);
-        context.fill(x, y, x + size, y + size, 0xA0000000);
+    private static void renderBackground(GuiGraphicsExtractor context, int x, int y, boolean cave) {
+        int ws = widgetSize(cave);
+        context.fill(x, y, x + ws, y + ws, 0xA0000000);
     }
 
-    private static void renderChunkColors(GuiGraphicsExtractor context, LocalPlayer player, int originX, int originY) {
-        ChunkCache surfaceCache = MapState.getChunkCache();
-        ChunkPos playerChunk = player.chunkPosition();
-        String dimensionId = player.level().dimension().identifier().toString();
-        boolean caveMode = MapState.getPlayerHasCeiling();
+    // -------------------------------------------------------------------------
+    // Texture rebuild
+    // -------------------------------------------------------------------------
 
-        boolean chunkMoved = !playerChunk.equals(lastMinimapCenter);
-        boolean dimensionChanged = !dimensionId.equals(lastMinimapDimension);
-        boolean caveModeChanged = caveMode != lastCaveMode;
-        boolean dirty = MapState.pollMapDirty();
+    private static void maybeRebuildTexture(LocalPlayer player,
+                                            float playerX, float playerZ, float playerYaw,
+                                            String dimId, boolean caveMode) {
+        boolean dimensionChanged = !dimId.equals(lastMinimapDimension);
+        boolean caveModeChanged  = caveMode != lastCaveMode;
+        boolean moved = Float.isNaN(lastMinimapPlayerX)
+                || Math.abs(playerX - lastMinimapPlayerX) >= 0.5f
+                || Math.abs(playerZ - lastMinimapPlayerZ) >= 0.5f;
+        boolean turned = Float.isNaN(lastMinimapYaw)
+                || Math.abs(normalizeYawDelta(playerYaw - lastMinimapYaw)) >= 1.0f;
+        boolean dirty   = MapState.pollMapDirty();
         long now = System.currentTimeMillis();
-        boolean timedRefresh = (now - lastMinimapRebuildMs) >= MINIMAP_REFRESH_INTERVAL_MS;
+        boolean elapsed = (now - lastMinimapRebuildMs) >= MINIMAP_REFRESH_INTERVAL_MS;
 
-        if (minimapTexture == null || chunkMoved || dimensionChanged || caveModeChanged || dirty || timedRefresh) {
-            // Cave mode change: close old texture so it's recreated at the new size.
-            if (caveModeChanged && minimapTexture != null) {
-                minimapTexture.close();
-                minimapTexture = null;
-                if (minimapImage != null) { minimapImage.close(); minimapImage = null; }
-                minimapTextureId = null;
-            }
-            rebuildMinimapTexture(surfaceCache, playerChunk, dimensionId, caveMode);
-            lastMinimapCenter = playerChunk;
-            lastMinimapDimension = dimensionId;
-            lastCaveMode = caveMode;
+        if (caveModeChanged && minimapTexture != null) {
+            minimapTexture.close(); minimapTexture = null;
+            if (minimapImage != null) { minimapImage.close(); minimapImage = null; }
+            minimapTextureId = null;
+        }
+
+        if (minimapTexture == null || moved || turned || dirty || elapsed || dimensionChanged || caveModeChanged) {
+            rebuildMinimapTexture(playerX, playerZ, playerYaw, dimId, caveMode);
+            lastMinimapPlayerX   = playerX;
+            lastMinimapPlayerZ   = playerZ;
+            lastMinimapYaw       = playerYaw;
+            lastMinimapDimension = dimId;
+            lastCaveMode         = caveMode;
             lastMinimapRebuildMs = now;
         }
-
-        if (minimapTextureId != null) {
-            int chunkRadius = caveMode ? CHUNK_RADIUS_CAVE : CHUNK_RADIUS_SURFACE;
-            int pxPerChunk  = caveMode ? PIXELS_PER_CHUNK_CAVE : PIXELS_PER_CHUNK_SURFACE;
-            int mapSize = (chunkRadius * 2 + 1) * pxPerChunk;
-            // Centre the map within the widget's inner area.
-            int offset = (totalSize(caveMode) - 2 * BORDER - mapSize) / 2;
-            context.blit(RenderPipelines.GUI_TEXTURED, minimapTextureId,
-                    originX + offset, originY + offset, 0, 0, mapSize, mapSize, mapSize, mapSize);
-        }
     }
 
-    private static void rebuildMinimapTexture(ChunkCache surfaceCache, ChunkPos playerChunk,
+    private static float normalizeYawDelta(float delta) {
+        while (delta >  180f) delta -= 360f;
+        while (delta < -180f) delta += 360f;
+        return delta;
+    }
+
+    private static void rebuildMinimapTexture(float playerX, float playerZ, float playerYaw,
                                               String dimensionId, boolean caveMode) {
-        int chunkRadius = caveMode ? CHUNK_RADIUS_CAVE : CHUNK_RADIUS_SURFACE;
-        int pxPerChunk  = caveMode ? PIXELS_PER_CHUNK_CAVE : PIXELS_PER_CHUNK_SURFACE;
-        int mapSize = (chunkRadius * 2 + 1) * pxPerChunk;
+        int   ts     = texSize(caveMode);
+        float rad    = radius(caveMode);
+        float sc     = scale(caveMode);
+        float halfTs = ts / 2.0f;
 
-        ChunkCache caveCache = caveMode ? MapState.getCaveChunkCache() : null;
+        ChunkCache surfaceCache = MapState.getChunkCache();
+        ChunkCache caveCache    = caveMode ? MapState.getCaveChunkCache() : null;
+        TerritoryChunkSyncCache terCache = MapState.getTerritoryChunkSyncCache();
 
-        if (minimapImage == null || minimapImage.getWidth() != mapSize) {
+        double sinYaw = Math.sin(Math.toRadians(playerYaw));
+        double cosYaw = Math.cos(Math.toRadians(playerYaw));
+
+        if (minimapImage == null || minimapImage.getWidth() != ts) {
             if (minimapImage != null) minimapImage.close();
-            minimapImage = new NativeImage(mapSize, mapSize, false);
+            minimapImage = new NativeImage(ts, ts, false);
         }
         if (minimapTexture == null) {
-            minimapTexture = new DynamicTexture(() -> "minimap_texture", minimapImage);
+            minimapTexture   = new DynamicTexture(() -> "minimap_texture", minimapImage);
             minimapTextureId = Identifier.fromNamespaceAndPath("alliesandfoes", "minimap_texture");
             Minecraft.getInstance().getTextureManager().register(minimapTextureId, minimapTexture);
         }
 
-        for (int dz = -chunkRadius; dz <= chunkRadius; dz++) {
-            for (int dx = -chunkRadius; dx <= chunkRadius; dx++) {
-                ChunkKey key = new ChunkKey(dimensionId, playerChunk.x() + dx, playerChunk.z() + dz);
-                int imageX = (dx + chunkRadius) * pxPerChunk;
-                int imageY = (dz + chunkRadius) * pxPerChunk;
+        for (int v = 0; v < ts; v++) {
+            for (int u = 0; u < ts; u++) {
+                float du = (u - halfTs) * sc;
+                float dv = (v - halfTs) * sc;
 
-                int[] surfaceColors = surfaceCache.get(key);
-                int[] caveColors = (caveCache != null) ? caveCache.get(key) : null;
-
-                for (int pz = 0; pz < pxPerChunk; pz++) {
-                    for (int px = 0; px < pxPerChunk; px++) {
-                        int blockX = px * 16 / pxPerChunk;
-                        int blockZ = pz * 16 / pxPerChunk;
-                        int blockIdx = blockX + blockZ * 16;
-
-                        int argb;
-                        if (caveColors != null) {
-                            // Explored cave floor — full brightness.
-                            argb = caveColors[blockIdx] | 0xFF000000;
-                        } else if (surfaceColors != null) {
-                            // Surface map always shows — dimmed when in cave mode.
-                            int base = surfaceColors[blockIdx] | 0xFF000000;
-                            argb = caveMode ? darken(base, 0.4f) : base;
-                        } else {
-                            argb = 0xFF000000;
-                        }
-                        minimapImage.setPixel(imageX + px, imageY + pz, argb);
-                    }
+                // Circular mask — transparent outside
+                if (du * du + dv * dv > rad * rad) {
+                    minimapImage.setPixel(u, v, 0x00000000);
+                    continue;
                 }
+
+                // Screen → world (rotation by playerYaw)
+                double worldDX = du * cosYaw + dv * sinYaw;
+                double worldDZ = du * sinYaw - dv * cosYaw;
+                int worldX  = (int) Math.floor(playerX + worldDX);
+                int worldZ  = (int) Math.floor(playerZ + worldDZ);
+                int chunkX  = worldX >> 4;
+                int chunkZ  = worldZ >> 4;
+                int localX  = worldX & 15;
+                int localZ  = worldZ & 15;
+                int idx     = localX + localZ * 16;
+
+                ChunkKey key      = new ChunkKey(dimensionId, chunkX, chunkZ);
+                int[]    cave3d   = (caveCache != null) ? caveCache.get(key) : null;
+                int[]    surface3d = surfaceCache.get(key);
+
+                int argb;
+                if (cave3d != null && cave3d[idx] != 0) {
+                    argb = cave3d[idx] | 0xFF000000;
+                } else if (surface3d != null) {
+                    int base = surface3d[idx] | 0xFF000000;
+                    argb = caveMode ? darken(base, 0.4f) : base;
+                } else {
+                    argb = 0xFF101010;
+                }
+
+                // Bake territory tint
+                TerritoryChunkDataPayload ter = terCache.get(key);
+                if (ter != null && ter.claimed()) {
+                    boolean mine = AllianceClientState.isInAlliance()
+                            && AllianceClientState.getAllianceName().equals(ter.allianceName());
+                    int fill = ter.anchorChunk()
+                            ? (mine ? ANCHOR_FILL : ENEMY_ANCHOR_FILL)
+                            : (mine ? CLAIMED_FILL : ENEMY_CLAIMED_FILL);
+                    argb = blendOver(argb, fill);
+                }
+
+                minimapImage.setPixel(u, v, argb);
             }
         }
         minimapTexture.upload();
     }
 
+    // -------------------------------------------------------------------------
+    // Player markers
+    // -------------------------------------------------------------------------
 
+    private static void renderPlayers(GuiGraphicsExtractor context, LocalPlayer self,
+                                      float playerX, float playerZ, float playerYaw,
+                                      boolean caveMode, int texOriginX, int texOriginY) {
+        int   ts  = texSize(caveMode);
+        float sc  = scale(caveMode);
+        float rad = radius(caveMode);
+        int   cx  = texOriginX + ts / 2;
+        int   cy  = texOriginY + ts / 2;
 
-    private static void renderTerritoryOverlay(GuiGraphicsExtractor context, LocalPlayer player, int originX, int originY) {
-        boolean caveMode = MapState.getPlayerHasCeiling();
-        int chunkRadius = caveMode ? CHUNK_RADIUS_CAVE : CHUNK_RADIUS_SURFACE;
-        int pxPerChunk  = caveMode ? PIXELS_PER_CHUNK_CAVE : PIXELS_PER_CHUNK_SURFACE;
+        double sinYaw = Math.sin(Math.toRadians(playerYaw));
+        double cosYaw = Math.cos(Math.toRadians(playerYaw));
 
-        TerritoryChunkSyncCache cache = MapState.getTerritoryChunkSyncCache();
-        ChunkPos playerChunk = player.chunkPosition();
-        String dimensionId = player.level().dimension().identifier().toString();
-
-        for (int dz = -chunkRadius; dz <= chunkRadius; dz++) {
-            for (int dx = -chunkRadius; dx <= chunkRadius; dx++) {
-                ChunkPos pos = new ChunkPos(playerChunk.x() + dx, playerChunk.z() + dz);
-                ChunkKey key = new ChunkKey(dimensionId, pos.x(), pos.z());
-                TerritoryChunkDataPayload data = cache.get(key);
-
-                if (data == null || !data.claimed()) {
-                    continue;
-                }
-
-                int screenX = originX + (dx + chunkRadius) * pxPerChunk;
-                int screenY = originY + (dz + chunkRadius) * pxPerChunk;
-
-                boolean isAnchor = data.anchorChunk();
-                boolean myAlliance = AllianceClientState.isInAlliance()
-                        && AllianceClientState.getAllianceName().equals(data.allianceName());
-                int fillColor = isAnchor
-                        ? (myAlliance ? ANCHOR_FILL : ENEMY_ANCHOR_FILL)
-                        : (myAlliance ? CLAIMED_FILL : ENEMY_CLAIMED_FILL);
-                context.fill(
-                        screenX, screenY,
-                        screenX + pxPerChunk, screenY + pxPerChunk,
-                        fillColor
-                );
-            }
-        }
-    }
-
-    private static void renderPlayers(GuiGraphicsExtractor context, LocalPlayer self, int originX, int originY) {
-        boolean caveMode = MapState.getPlayerHasCeiling();
-        int chunkRadius = caveMode ? CHUNK_RADIUS_CAVE : CHUNK_RADIUS_SURFACE;
-        int pxPerChunk  = caveMode ? PIXELS_PER_CHUNK_CAVE : PIXELS_PER_CHUNK_SURFACE;
-
-        ChunkPos selfChunk = self.chunkPosition();
-
-        // Self — centered within their subchunk pixel position
-        int selfBlockOffsetX = Math.floorMod((int) Math.floor(self.getX()), 16);
-        int selfBlockOffsetZ = Math.floorMod((int) Math.floor(self.getZ()), 16);
-
-        int selfCX = originX + chunkRadius * pxPerChunk
-                + selfBlockOffsetX * pxPerChunk / 16
-                + pxPerChunk / 2;
-        int selfCY = originY + chunkRadius * pxPerChunk
-                + selfBlockOffsetZ * pxPerChunk / 16
-                + pxPerChunk / 2;
-
-        renderCone(context, selfCX, selfCY, self.getYRot(), CONE_LENGTH, 0x55FFFFFF);
-        renderMiniHead(context, getSkin(self.getUUID()), selfCX, selfCY);
+        // Self — always centered, cone always points up (relative yaw = 0)
+        renderCone(context, cx, cy, 0.0f, CONE_LENGTH, 0x55FFFFFF);
+        renderMiniHead(context, getSkin(self.getUUID()), cx, cy);
 
         // Other players
         PlayerMarkerCache markerCache = MapState.getPlayerMarkerCache();
         Collection<PlayerMarker> markers = markerCache.values();
-
         for (PlayerMarker marker : markers) {
-            if (marker.uuid.equals(self.getUUID())) {
-                continue;
-            }
+            if (marker.uuid.equals(self.getUUID())) continue;
 
-            int markerChunkX = (int) Math.floor(marker.x) >> 4;
-            int markerChunkZ = (int) Math.floor(marker.z) >> 4;
+            double odx = marker.x - playerX;
+            double odz = marker.z - playerZ;
 
-            int dcx = markerChunkX - selfChunk.x();
-            int dcz = markerChunkZ - selfChunk.z();
+            // World → screen (same matrix as texture sampling — self-inverse)
+            double screenDX = odx * cosYaw + odz * sinYaw;
+            double screenDZ = odx * sinYaw - odz * cosYaw;
 
-            if (Math.abs(dcx) > chunkRadius || Math.abs(dcz) > chunkRadius) {
-                continue;
-            }
+            float mdu = (float)(screenDX / sc);
+            float mdv = (float)(screenDZ / sc);
 
-            int blockOffsetX = Math.floorMod((int) Math.floor(marker.x), 16);
-            int blockOffsetZ = Math.floorMod((int) Math.floor(marker.z), 16);
+            // Skip if outside circle
+            if (mdu * mdu + mdv * mdv > (ts / 2f) * (ts / 2f)) continue;
 
-            int markerCX = originX + (dcx + chunkRadius) * pxPerChunk
-                    + blockOffsetX * pxPerChunk / 16
-                    + pxPerChunk / 2;
-            int markerCY = originY + (dcz + chunkRadius) * pxPerChunk
-                    + blockOffsetZ * pxPerChunk / 16
-                    + pxPerChunk / 2;
+            int markerCX = cx + Math.round(mdu);
+            int markerCY = cy + Math.round(mdv);
 
-            renderCone(context, markerCX, markerCY, marker.yaw, CONE_LENGTH, 0x55FF4444);
+            float relYaw = marker.yaw - playerYaw;
+            renderCone(context, markerCX, markerCY, relYaw, CONE_LENGTH, 0x55FF4444);
             renderMiniHead(context, getSkin(marker.uuid), markerCX, markerCY);
         }
     }
 
+    /**
+     * Renders a FOV cone from (cx,cy).
+     * yaw = 0 → points straight up on screen (matches player-centered minimap).
+     */
     private static void renderCone(GuiGraphicsExtractor context, int cx, int cy, float yaw, int length, int color) {
-        double yawRad = Math.toRadians(yaw);
-        double facingDX = -Math.sin(yawRad);
-        double facingDY =  Math.cos(yawRad);
+        // yaw=0 should point up (negative v). Convert from "Minecraft yaw" to screen angle:
+        // screen up = (0,-1). When yaw=0 the facing in the non-rotated world is South (+Z = down),
+        // but on this minimap "up" IS the player's forward direction.
+        // We treat yaw as a screen-space angle: 0 = up, 90 = right.
+        double yawRad   = Math.toRadians(yaw);
+        double facingDX =  Math.sin(yawRad);   // screen X
+        double facingDY = -Math.cos(yawRad);   // screen Y (negative = up)
 
         for (int dy = -length; dy <= length; dy++) {
             for (int dx = -length; dx <= length; dx++) {
@@ -442,72 +418,76 @@ public final class HudMinimapRenderer {
         return DefaultPlayerSkin.get(uuid).body().texturePath();
     }
 
-    private static void renderIntuitionStreak(GuiGraphicsExtractor context, int originX, int originY) {
-        if (cachedResult == null || !cachedResult.hasDirection()) {
-            return;
-        }
+    // -------------------------------------------------------------------------
+    // Intuition streak
+    // -------------------------------------------------------------------------
 
+    private static void renderIntuitionStreak(GuiGraphicsExtractor context,
+                                              int texOriginX, int texOriginY, boolean caveMode) {
+        if (cachedResult == null || !cachedResult.hasDirection()) return;
         IntuitionDirection direction = cachedResult.getDirection();
         float strength = cachedResult.getStrength();
+        if (strength < 0.10f) return;
 
-        if (strength < 0.10f) {
-            return;
-        }
-
-        boolean _cm = MapState.getPlayerHasCeiling();
-        int _r = _cm ? CHUNK_RADIUS_CAVE : CHUNK_RADIUS_SURFACE;
-        int _px = _cm ? PIXELS_PER_CHUNK_CAVE : PIXELS_PER_CHUNK_SURFACE;
-        int _mapSize = (_r * 2 + 1) * _px;
-        int centerX = originX + _mapSize / 2;
-        int centerY = originY + _mapSize / 2;
+        int ts      = texSize(caveMode);
+        int centerX = texOriginX + ts / 2;
+        int centerY = texOriginY + ts / 2;
 
         int dirX = direction.getStepX();
         int dirY = direction.getStepZ();
         int streakLength = 10 + Math.round(strength * 6.0f);
 
         int baseAlpha = strength >= 0.42f ? 160 : strength >= 0.20f ? 110 : 70;
-
-        // Gold streak when a search target is active, light blue otherwise
         int streakColor = ExplorerDiscoveryClientState.hasTarget() ? 0xFFD700 : 0xBBDDFF;
 
         int steps = 4;
         for (int step = 1; step <= steps; step++) {
-            float t = (float) step / steps;
-            int px = centerX + Math.round(dirX * streakLength * t);
-            int py = centerY + Math.round(dirY * streakLength * t);
+            float t  = (float) step / steps;
+            int px   = centerX + Math.round(dirX * streakLength * t);
+            int py   = centerY + Math.round(dirY * streakLength * t);
             int alpha = Math.max(20, Math.round(baseAlpha * (1.0f - t * 0.5f)));
             context.fill(px - 1, py - 1, px + 1, py + 1, colorWithAlpha(streakColor, alpha));
         }
     }
 
-    private static void renderIntuitionMessage(GuiGraphicsExtractor context, Minecraft mc) {
-        if (activeMessage == null) {
-            return;
-        }
+    // -------------------------------------------------------------------------
+    // Intuition message
+    // -------------------------------------------------------------------------
 
+    private static void renderIntuitionMessage(GuiGraphicsExtractor context, Minecraft mc) {
+        if (activeMessage == null) return;
         long now = System.currentTimeMillis();
-        if (now > messageExpiryMs) {
-            activeMessage = null;
-            return;
-        }
+        if (now > messageExpiryMs) { activeMessage = null; return; }
 
         Font font = mc.font;
-        int screenWidth = mc.getWindow().getGuiScaledWidth();
+        int screenWidth  = mc.getWindow().getGuiScaledWidth();
         int screenHeight = mc.getWindow().getGuiScaledHeight();
 
-        // Fade out in the last 500ms
         long remaining = messageExpiryMs - now;
-        float alpha = remaining < 500L ? (float) remaining / 500f : 1.0f;
-        int textAlpha = Math.max(0, Math.round(alpha * 220));
+        float alpha    = remaining < 500L ? (float) remaining / 500f : 1.0f;
+        int textAlpha  = Math.max(0, Math.round(alpha * 220));
+        int bgAlpha    = Math.max(0, Math.round(alpha * 140));
 
         int textWidth = font.width(activeMessage);
         int x = (screenWidth - textWidth) / 2;
         int y = screenHeight - 80;
 
-        int bgAlpha = Math.max(0, Math.round(alpha * 140));
         context.fill(x - 6, y - 4, x + textWidth + 6, y + 12, (bgAlpha << 24));
-
         context.text(font, activeMessage, x, y, colorWithAlpha(0xEAF3FF, textAlpha));
+    }
+
+    // -------------------------------------------------------------------------
+    // Color utilities
+    // -------------------------------------------------------------------------
+
+    private static int blendOver(int base, int overlay) {
+        float a  = ((overlay >> 24) & 0xFF) / 255f;
+        int br   = (base >> 16) & 0xFF, bg = (base >> 8) & 0xFF, bb = base & 0xFF;
+        int or_  = (overlay >> 16) & 0xFF, og = (overlay >> 8) & 0xFF, ob = overlay & 0xFF;
+        int r    = Math.min(255, (int)(br + (or_ - br) * a));
+        int g    = Math.min(255, (int)(bg + (og - bg) * a));
+        int b    = Math.min(255, (int)(bb + (ob - bb) * a));
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     private static int colorWithAlpha(int rgb, int alpha) {
