@@ -529,6 +529,27 @@ public class TerritoryManager {
     }
 
     /**
+     * Transfers a claimed chunk to the given alliance by reusing the existing anchorId.
+     * The anchor record stays intact; only the alliance owner changes.
+     */
+    public void forceTransferClaim(ChunkKey chunk, UUID toAllianceId) {
+        TerritoryClaim existing = this.claimsByChunk.get(chunk);
+        if (existing == null) return;
+
+        this.unregisterClaim(chunk);
+        this.registerClaim(new TerritoryClaim(
+                chunk,
+                existing.getAnchorId(),
+                toAllianceId,
+                existing.getClaimedBy(),
+                existing.getClaimedAt(),
+                existing.getChunkValue(),
+                existing.isAnchorChunk()
+        ));
+        this.save();
+    }
+
+    /**
      * Destroys an anchor and all claims attached to it. Used for anchor destruction
      * during war.
      *

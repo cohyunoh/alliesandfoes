@@ -1,6 +1,11 @@
 package net.cnn_r.alliesandfoes.alliance.progression;
 
+import net.cnn_r.alliesandfoes.alliance.Alliance;
+import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.network.AllianceInfluenceSyncPayload;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.Map;
 import java.util.UUID;
@@ -86,6 +91,7 @@ public class AllianceProgressionService {
         int current = this.getBalance(allianceId);
         this.balances.put(allianceId, current + amount);
         this.save();
+        this.broadcastBalanceToAlliance(allianceId);
     }
 
     /**
@@ -110,7 +116,23 @@ public class AllianceProgressionService {
 
         this.balances.put(allianceId, current - amount);
         this.save();
+        this.broadcastBalanceToAlliance(allianceId);
         return true;
+    }
+
+    public void syncToPlayer(ServerPlayer player, UUID allianceId) {
+        ServerPlayNetworking.send(player, new AllianceInfluenceSyncPayload(getBalance(allianceId)));
+    }
+
+    private void broadcastBalanceToAlliance(UUID allianceId) {
+        int balance = getBalance(allianceId);
+        Alliance alliance = AllianceManager.get(server).getAllianceById(allianceId);
+        if (alliance == null) return;
+        AllianceInfluenceSyncPayload payload = new AllianceInfluenceSyncPayload(balance);
+        for (UUID memberId : alliance.getMemberUuids()) {
+            ServerPlayer p = server.getPlayerList().getPlayer(memberId);
+            if (p != null) ServerPlayNetworking.send(p, payload);
+        }
     }
 
     /**

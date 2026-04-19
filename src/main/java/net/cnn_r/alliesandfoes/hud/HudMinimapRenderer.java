@@ -131,6 +131,9 @@ public final class HudMinimapRenderer {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
         if (player == null || mc.level == null) return;
+
+        renderWarInviteNotification(context, mc);
+
         if (!isHoldingMonocle(player)) return;
 
         maybeRefreshIntuition(player);
@@ -474,6 +477,30 @@ public final class HudMinimapRenderer {
 
         context.fill(x - 6, y - 4, x + textWidth + 6, y + 12, (bgAlpha << 24));
         context.text(font, activeMessage, x, y, colorWithAlpha(0xEAF3FF, textAlpha));
+    }
+
+    // -------------------------------------------------------------------------
+    // War invite notification
+    // -------------------------------------------------------------------------
+
+    private static void renderWarInviteNotification(GuiGraphicsExtractor context, Minecraft mc) {
+        if (mc.screen != null) return;
+        if (!AllianceClientState.isOwner() || !AllianceClientState.hasPendingWarInvites()) return;
+
+        float pulse = (float)(0.5 + 0.5 * Math.sin(System.currentTimeMillis() / 350.0));
+        int textAlpha = (int)(180 + 75 * pulse);
+        int bgAlpha = (int)(50 + 60 * pulse);
+
+        Font font = mc.font;
+        String msg = "\u2694 War Invite! — Press [M]";
+        int textWidth = font.width(msg);
+        int sw = mc.getWindow().getGuiScaledWidth();
+        int sh = mc.getWindow().getGuiScaledHeight();
+        int x = (sw - textWidth) / 2;
+        int y = sh - 55;
+
+        context.fill(x - 5, y - 3, x + textWidth + 5, y + 10, (bgAlpha << 24) | 0x440000);
+        context.text(font, Component.literal(msg), x, y, colorWithAlpha(0xFF5533, textAlpha));
     }
 
     // -------------------------------------------------------------------------

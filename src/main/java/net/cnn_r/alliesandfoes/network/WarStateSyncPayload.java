@@ -24,6 +24,8 @@ public record WarStateSyncPayload(List<WarEntry> wars) implements CustomPacketPa
 
     public record WarEntry(
             UUID warId,
+            UUID attackerAllianceId,
+            UUID defenderAllianceId,
             String attackerName,
             String defenderName,
             String status,
@@ -38,6 +40,8 @@ public record WarStateSyncPayload(List<WarEntry> wars) implements CustomPacketPa
         buf.writeVarInt(p.wars().size());
         for (WarEntry e : p.wars()) {
             buf.writeUUID(e.warId());
+            buf.writeUUID(e.attackerAllianceId());
+            buf.writeUUID(e.defenderAllianceId());
             buf.writeUtf(e.attackerName());
             buf.writeUtf(e.defenderName());
             buf.writeUtf(e.status());
@@ -58,6 +62,8 @@ public record WarStateSyncPayload(List<WarEntry> wars) implements CustomPacketPa
         List<WarEntry> wars = new ArrayList<>(warCount);
         for (int w = 0; w < warCount; w++) {
             UUID warId = buf.readUUID();
+            UUID attackerAllianceId = buf.readUUID();
+            UUID defenderAllianceId = buf.readUUID();
             String attackerName = buf.readUtf();
             String defenderName = buf.readUtf();
             String status = buf.readUtf();
@@ -71,7 +77,8 @@ public record WarStateSyncPayload(List<WarEntry> wars) implements CustomPacketPa
                 xs[i] = buf.readInt();
                 zs[i] = buf.readInt();
             }
-            wars.add(new WarEntry(warId, attackerName, defenderName, status,
+            wars.add(new WarEntry(warId, attackerAllianceId, defenderAllianceId,
+                    attackerName, defenderName, status,
                     attackerKills, defenderKills, dimensionId, xs, zs));
         }
         return new WarStateSyncPayload(wars);

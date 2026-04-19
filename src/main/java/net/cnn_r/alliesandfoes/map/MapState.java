@@ -15,7 +15,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MapState {
@@ -50,6 +53,13 @@ public class MapState {
 
     /** Set to true by the scanner thread after a chunk finishes scanning. */
     private static volatile boolean mapDirty = false;
+
+    private static volatile String pendingMapMessage = null;
+    private static volatile int allianceInfluenceBalance = 0;
+
+    private static volatile UUID rollbackWarId = null;
+    private static final Set<ChunkKey> rollbackEligibleChunks = ConcurrentHashMap.newKeySet();
+    private static volatile int rollbackCostPerChunk = 10;
 
     public static ChunkCache getChunkCache() {
         if (chunkCache == null) {
@@ -321,6 +331,40 @@ public class MapState {
     }
 
     // -------------------------------------------------------------------------
+    // Map screen message queue (shown as popup when MapScreen is open)
+    // -------------------------------------------------------------------------
+
+    public static void setPendingMapMessage(String msg) { pendingMapMessage = msg; }
+
+    public static String consumePendingMapMessage() {
+        String m = pendingMapMessage;
+        pendingMapMessage = null;
+        return m;
+    }
+
+    // -------------------------------------------------------------------------
+    // Alliance influence balance (synced from server)
+    // -------------------------------------------------------------------------
+
+    public static int getAllianceInfluenceBalance() { return allianceInfluenceBalance; }
+    public static void setAllianceInfluenceBalance(int balance) { allianceInfluenceBalance = balance; }
+
+    // -------------------------------------------------------------------------
+    // Rollback eligible chunks (synced from server after war ends)
+    // -------------------------------------------------------------------------
+
+    public static void setRollbackEligible(UUID warId, List<ChunkKey> chunks, int cost) {
+        rollbackWarId = warId;
+        rollbackEligibleChunks.clear();
+        rollbackEligibleChunks.addAll(chunks);
+        rollbackCostPerChunk = cost;
+    }
+
+    public static Set<ChunkKey> getRollbackEligibleChunks() { return rollbackEligibleChunks; }
+    public static UUID getRollbackWarId()                   { return rollbackWarId; }
+    public static int getRollbackCostPerChunk()             { return rollbackCostPerChunk; }
+
+    // -------------------------------------------------------------------------
 
     public static void clearAll() {
         if (scanner != null) {
@@ -355,5 +399,8 @@ public class MapState {
         loadedChunks.clear();
         pendingBlockDirty.clear();
         mapDirty = false;
+        rollbackWarId = null;
+        rollbackEligibleChunks.clear();
+        rollbackCostPerChunk = 10;
     }
 }

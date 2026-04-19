@@ -63,7 +63,7 @@ public class AllianceManager {
         Alliance alliance = this.getAllianceFor(player.getUUID());
 
         if (alliance == null) {
-            ServerPlayNetworking.send(player, new AllianceStatePayload(false, "", ""));
+            ServerPlayNetworking.send(player, new AllianceStatePayload(false, "", "", null));
             return;
         }
 
@@ -72,7 +72,8 @@ public class AllianceManager {
         ServerPlayNetworking.send(player, new AllianceStatePayload(
                 true,
                 alliance.getName(),
-                memberRole == null ? "" : memberRole
+                memberRole == null ? "" : memberRole,
+                alliance.getOwnerUuid()
         ));
     }
 

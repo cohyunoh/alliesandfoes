@@ -5,10 +5,13 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
+import java.util.UUID;
+
 public record AllianceStatePayload(
         boolean inAlliance,
         String allianceName,
-        String memberRole
+        String memberRole,
+        UUID ownerUuid
 ) implements CustomPacketPayload {
 
     public static final Type<AllianceStatePayload> TYPE =
@@ -26,13 +29,20 @@ public record AllianceStatePayload(
         buf.writeBoolean(payload.inAlliance());
         buf.writeUtf(payload.allianceName());
         buf.writeUtf(payload.memberRole());
+        buf.writeBoolean(payload.ownerUuid() != null);
+        if (payload.ownerUuid() != null) {
+            buf.writeUUID(payload.ownerUuid());
+        }
     }
 
     private static AllianceStatePayload read(FriendlyByteBuf buf) {
-        return new AllianceStatePayload(
-                buf.readBoolean(),
-                buf.readUtf(),
-                buf.readUtf()
-        );
+        boolean inAlliance = buf.readBoolean();
+        String allianceName = buf.readUtf();
+        String memberRole = buf.readUtf();
+        UUID ownerUuid = null;
+        if (buf.readBoolean()) {
+            ownerUuid = buf.readUUID();
+        }
+        return new AllianceStatePayload(inAlliance, allianceName, memberRole, ownerUuid);
     }
 }

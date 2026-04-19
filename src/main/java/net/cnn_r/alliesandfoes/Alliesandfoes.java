@@ -3,7 +3,12 @@ package net.cnn_r.alliesandfoes;
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
+import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWar;
+import net.cnn_r.alliesandfoes.network.TerritoryChunkBatchPayload;
+import net.cnn_r.alliesandfoes.territory.TerritoryClaim;
+import net.cnn_r.alliesandfoes.territory.TerritoryMapSyncService;
+import net.cnn_r.alliesandfoes.territory.TerritoryQueryService;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarCommands;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
 import net.cnn_r.alliesandfoes.alliance.war.WarSnapshotService;
@@ -51,6 +56,7 @@ import net.minecraft.world.level.storage.loot.providers.number.ConstantValue;
 import net.cnn_r.alliesandfoes.territory.ChestLootScorer;
 
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.TamableAnimal;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -105,6 +111,12 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(SetIntuitionTargetPayload.TYPE, SetIntuitionTargetPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(DeclareWarRequestPayload.TYPE, DeclareWarRequestPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(WarStateSyncPayload.TYPE, WarStateSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(WarInvitePayload.TYPE, WarInvitePayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RespondWarInvitePayload.TYPE, RespondWarInvitePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(MapScreenMessagePayload.TYPE, MapScreenMessagePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceInfluenceSyncPayload.TYPE, AllianceInfluenceSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(RollbackEligibleSyncPayload.TYPE, RollbackEligibleSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestRollbackChunkPayload.TYPE, RequestRollbackChunkPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -282,8 +294,8 @@ public class Alliesandfoes implements ModInitializer {
 					);
 				};
 
-				context.player().sendSystemMessage(
-						Component.literal(result.message()));
+				ServerPlayNetworking.send(context.player(),
+						new MapScreenMessagePayload(result.message()));
 
 				TerritoryQueryService queryService = new TerritoryQueryService(territoryManager);
 				TerritoryChunkBatchPayload territoryPayload = TerritoryMapSyncService.buildChunkBatch(
@@ -321,9 +333,80 @@ public class Alliesandfoes implements ModInitializer {
 				String error = AllianceWarService.get(context.server())
 						.declareWar(player, payload.targetAllianceId(), chunks);
 				if (error != null) {
+					ServerPlayNetworking.send(player, new MapScreenMessagePayload(error));
+				}
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RespondWarInvitePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				ServerPlayer player = context.player();
+				String error = payload.accept()
+						? AllianceWarService.get(context.server()).acceptWarById(player, payload.warId())
+						: AllianceWarService.get(context.server()).declineWarById(player, payload.warId());
+				if (error != null) {
 					player.sendSystemMessage(Component.literal(error).withStyle(ChatFormatting.RED));
 				}
 			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestRollbackChunkPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				ServerPlayer player = context.player();
+				MinecraftServer server = context.server();
+				Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+				if (alliance == null || !alliance.getOwnerUuid().equals(player.getUUID())) return;
+
+				AllianceWar war = AllianceWarService.get(server).getWarById(payload.warId());
+				if (war == null || war.status() != net.cnn_r.alliesandfoes.alliance.war.WarStatus.ENDED) return;
+				if (!war.defenderId().equals(alliance.getId())) return;
+
+				ChunkKey chunk = new ChunkKey(payload.dimensionId(), payload.chunkX(), payload.chunkZ());
+				TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
+				if (claim == null || !claim.getAllianceId().equals(alliance.getId())) {
+					ServerPlayNetworking.send(player, new MapScreenMessagePayload("Chunk no longer owned by your alliance."));
+					return;
+				}
+
+				int cost = AllianceWarService.ROLLBACK_COST_PER_CHUNK;
+				AllianceProgressionService prog = AllianceProgressionService.get(server);
+				if (!prog.canAfford(alliance.getId(), cost)) {
+					ServerPlayNetworking.send(player, new MapScreenMessagePayload(
+							"Need " + cost + " influence. Have: " + prog.getBalance(alliance.getId()) + "."));
+					return;
+				}
+				prog.trySpend(alliance.getId(), cost);
+				WarSnapshotService.get(server).rollbackChunk(payload.warId(), chunk, server);
+				AllianceWarService.get(server).broadcastRollbackEligible(payload.warId());
+
+				TerritoryQueryService qs = new TerritoryQueryService(TerritoryManager.get(server));
+				TerritoryChunkBatchPayload batch = TerritoryMapSyncService.buildChunkBatch(qs, List.of(chunk));
+				for (ServerPlayer p : server.getPlayerList().getPlayers()) ServerPlayNetworking.send(p, batch);
+			});
+		});
+
+		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+			if (!(entity instanceof TamableAnimal tamable) || !tamable.isTame()) return;
+			var ownerRef = tamable.getOwnerReference();
+			if (ownerRef == null) return;
+			UUID ownerUuid = ownerRef.getUUID();
+			MinecraftServer server = entity.level() instanceof ServerLevel sl ? sl.getServer() : null;
+			if (server == null) return;
+
+			String dimId = entity.level().dimension().identifier().toString();
+			ChunkKey deathChunk = new ChunkKey(dimId,
+					entity.blockPosition().getX() >> 4, entity.blockPosition().getZ() >> 4);
+
+			AllianceWarService.get(server).getActiveWars().stream()
+					.filter(w -> w.contestedChunks().contains(deathChunk))
+					.findFirst()
+					.ifPresent(war -> {
+						net.cnn_r.alliesandfoes.alliance.Alliance def =
+								AllianceManager.get(server).getAllianceById(war.defenderId());
+						if (def != null && def.getMemberUuids().contains(ownerUuid)) {
+							WarSnapshotService.get(server).recordPetDeath(war.id(), tamable);
+						}
+					});
 		});
 
 
@@ -468,6 +551,16 @@ public class Alliesandfoes implements ModInitializer {
 
 			// Add player to any ongoing war boss bars for their alliance
 			AllianceWarService.get(server).onPlayerJoin(player);
+
+			// Sync alliance influence balance + rollback eligibility
+			Alliance joinAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+			if (joinAlliance != null) {
+				AllianceProgressionService.get(server).syncToPlayer(player, joinAlliance.getId());
+				// Broadcast any rollback-eligible chunks for ended wars this player defended
+				AllianceWarService.get(server).getEndedWarsFor(joinAlliance.getId()).stream()
+						.filter(w -> w.defenderId().equals(joinAlliance.getId()))
+						.forEach(w -> AllianceWarService.get(server).broadcastRollbackEligible(w.id()));
+			}
 
 			TerritoryManager tm = TerritoryManager.get(server);
 			Collection<TerritoryClaim> allClaims = tm.getAllClaims();

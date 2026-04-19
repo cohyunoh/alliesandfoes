@@ -1,6 +1,8 @@
 package net.cnn_r.alliesandfoes.map;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
+import net.minecraft.client.Minecraft;
+import net.minecraft.server.permissions.Permissions;
 
 /**
  * Centralized client-side map intel policy.
@@ -62,14 +64,11 @@ public final class AllianceMapIntelPolicy {
     }
 
     /**
-     * Admin debug toggle permission.
+     * Admin debug toggle permission — restricted to Minecraft server operators only.
      */
     public static boolean canToggleAdminDebugIntel() {
-        if (!AllianceClientState.isInAlliance()) {
-            return false;
-        }
-
-        return isFounder() || isAdmin();
+        Minecraft mc = Minecraft.getInstance();
+        return mc.player != null && mc.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
     }
 
     public static boolean isAdmin() {

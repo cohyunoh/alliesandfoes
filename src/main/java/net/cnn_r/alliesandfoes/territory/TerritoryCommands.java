@@ -123,7 +123,9 @@ public final class TerritoryCommands {
                 List.of(targetChunk)
         );
 
-        ServerPlayNetworking.send(player, payload);
+        for (ServerPlayer receiver : server.getPlayerList().getPlayers()) {
+            ServerPlayNetworking.send(receiver, payload);
+        }
 
         source.sendSuccess(
                 () -> Component.literal(
@@ -234,8 +236,6 @@ public final class TerritoryCommands {
         return 1;
     }
 
-    private static final int ROLLBACK_COST_PER_CHUNK = 10;
-
     private static int rollback(CommandSourceStack source) {
         ServerPlayer player;
         try { player = source.getPlayerOrException(); }
@@ -258,11 +258,16 @@ public final class TerritoryCommands {
             return 0;
         }
 
-        // Use the first available ended war with snapshot data
+        // Use the first available ended war with snapshot data (owned chunks only)
         WarSnapshotService snapshots = WarSnapshotService.get(server);
+        TerritoryManager tm = TerritoryManager.get(server);
         AllianceWar targetWar = null;
         for (AllianceWar w : endedWars) {
-            if (snapshots.countAffectedChunks(w.id()) > 0) { targetWar = w; break; }
+            long owned = snapshots.getAffectedChunks(w.id()).stream()
+                    .filter(c -> { TerritoryClaim cl = tm.getClaimAt(c);
+                                   return cl != null && cl.getAllianceId().equals(playerAlliance.getId()); })
+                    .count();
+            if (owned > 0) { targetWar = w; break; }
         }
 
         if (targetWar == null) {
@@ -270,21 +275,24 @@ public final class TerritoryCommands {
             return 0;
         }
 
-        int chunkCount = snapshots.countAffectedChunks(targetWar.id());
-        int cost = chunkCount * ROLLBACK_COST_PER_CHUNK;
+        final AllianceWar finalWarRef = targetWar;
+        int chunkCount = (int) snapshots.getAffectedChunks(finalWarRef.id()).stream()
+                .filter(c -> { TerritoryClaim cl = tm.getClaimAt(c);
+                               return cl != null && cl.getAllianceId().equals(playerAlliance.getId()); })
+                .count();
+        int cost = chunkCount * AllianceWarService.ROLLBACK_COST_PER_CHUNK;
 
         AllianceProgressionService progression = AllianceProgressionService.get(server);
         if (!progression.canAfford(playerAlliance.getId(), cost)) {
             int balance = progression.getBalance(playerAlliance.getId());
             source.sendFailure(Component.literal(
-                    "Rollback costs " + cost + " influence (" + chunkCount + " chunks × " + ROLLBACK_COST_PER_CHUNK
+                    "Rollback costs " + cost + " influence (" + chunkCount + " chunks × " + AllianceWarService.ROLLBACK_COST_PER_CHUNK
                             + "). You have " + balance + "."));
             return 0;
         }
 
         progression.trySpend(playerAlliance.getId(), cost);
-        final AllianceWar finalWar = targetWar;
-        int restored = snapshots.rollback(finalWar.id(), server);
+        int restored = snapshots.rollback(finalWarRef.id(), server);
 
         source.sendSuccess(() -> Component.literal(
                 "Rolled back " + restored + " chunk(s) from the war. Cost: " + cost + " influence."), false);

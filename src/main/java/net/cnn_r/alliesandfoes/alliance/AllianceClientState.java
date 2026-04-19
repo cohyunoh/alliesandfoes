@@ -23,6 +23,8 @@ public class AllianceClientState {
     private static boolean inviteNotificationUnread = false;
     private static boolean joinRequestNotificationUnread = false;
 
+    private static final List<UUID> pendingWarInviteIds = new ArrayList<>();
+
     public static void setAllianceState(boolean inAlliance, String allianceName, String memberRole) {
         AllianceClientState.inAlliance = inAlliance;
         AllianceClientState.allianceName = allianceName == null ? "" : allianceName;
@@ -178,5 +180,27 @@ public class AllianceClientState {
 
     public static void acknowledgeJoinRequestNotification() {
         joinRequestNotificationUnread = false;
+    }
+
+    public static void addPendingWarInvite(UUID warId) {
+        if (!pendingWarInviteIds.contains(warId)) {
+            pendingWarInviteIds.add(warId);
+        }
+    }
+
+    public static void removePendingWarInvite(UUID warId) {
+        pendingWarInviteIds.remove(warId);
+    }
+
+    public static boolean hasPendingWarInvites() {
+        return !pendingWarInviteIds.isEmpty();
+    }
+
+    public static List<UUID> getPendingWarInviteIds() {
+        return new ArrayList<>(pendingWarInviteIds);
+    }
+
+    public static void clearPendingWarInvites() {
+        pendingWarInviteIds.clear();
     }
 }

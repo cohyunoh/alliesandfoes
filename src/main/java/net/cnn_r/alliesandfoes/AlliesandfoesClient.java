@@ -181,6 +181,14 @@ public class AlliesandfoesClient implements ClientModInitializer {
                         payload.allianceName(),
                         payload.memberRole()
                 );
+                if (payload.ownerUuid() != null && context.client().player != null) {
+                    AllianceClientState.setAllianceDetails(
+                            payload.inAlliance(),
+                            payload.allianceName(),
+                            payload.ownerUuid(),
+                            context.client().player.getUUID()
+                    );
+                }
             });
         });
 
@@ -411,12 +419,42 @@ public class AlliesandfoesClient implements ClientModInitializer {
             context.client().execute(() -> MapState.getWarSyncCache().update(payload.wars()));
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(WarInvitePayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                AllianceClientState.addPendingWarInvite(payload.warId());
+                SystemToast.add(
+                        context.client().getToastManager(),
+                        SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                        Component.literal("⚔ War Declaration"),
+                        Component.literal(payload.attackerAllianceName()
+                                + " declared war! Open the map to respond. ("
+                                + payload.contestedChunkCount() + " chunks at stake)")
+                );
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(MapScreenMessagePayload.TYPE, (payload, context) ->
+            context.client().execute(() -> MapState.setPendingMapMessage(payload.message())));
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceInfluenceSyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> MapState.setAllianceInfluenceBalance(payload.balance())));
+
+        ClientPlayNetworking.registerGlobalReceiver(RollbackEligibleSyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> {
+                List<ChunkKey> chunks = new ArrayList<>();
+                for (int i = 0; i < payload.dimensionIds().size(); i++)
+                    chunks.add(new ChunkKey(payload.dimensionIds().get(i),
+                                            payload.chunkXs().get(i), payload.chunkZs().get(i)));
+                MapState.setRollbackEligible(payload.warId(), chunks, payload.costPerChunk());
+            }));
+
         KeyBindings.register();
 
         // Clear all client-side caches when leaving a world so stale data
         // from a previous world never bleeds into the next one.
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             MapState.clearAll();
+            AllianceClientState.clearPendingWarInvites();
             ExplorerSkillClientState.reset();
             ExplorerDiscoveryClientState.reset();
             HudMinimapRenderer.reset();

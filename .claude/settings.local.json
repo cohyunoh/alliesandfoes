@@ -59,7 +59,21 @@
       "Bash(xargs -I{} sh -c 'jar tf \"{}\" 2>/dev/null | grep -l \"ServerPlayer\" && echo \"{}:\"')",
       "Bash(jar xf *)",
       "Bash(javap -p net/minecraft/server/level/ServerPlayer.class)",
-      "Bash(./gradlew compileJava -Xdiags:verbose)"
+      "Bash(./gradlew compileJava -Xdiags:verbose)",
+      "Bash(javap -classpath \".gradle/loom-cache/remapped_mods/net.minecraft-yarn_minecraft_1.21.10_1.21.10+build.4-v2.jar\" net.minecraft.client.network.ClientPlayerEntity)",
+      "Bash(javap -classpath .gradle/loom-cache/remapped_mods/net.minecraft-intermediary.jar)",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" \"net.minecraft.client.player.LocalPlayer\")",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" \"net.minecraft.server.permissions.PermissionSet\")",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" \"net.minecraft.server.permissions.Permission\")",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" \"net.minecraft.server.permissions.Permissions\")",
+      "Bash(javap -cp \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged/1.21.10-loom.mappings.1_21_10.layered+hash.103119350-v2/minecraft-merged-1.21.10-loom.mappings.1_21_10.layered+hash.103119350-v2.jar\" \"net.minecraft.world.entity.Entity\")",
+      "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged/1.21.11-net.fabricmc.yarn.1_21_11.1.21.11+build.4-v2/minecraft-merged-1.21.11-net.fabricmc.yarn.1_21_11.1.21.11+build.4-v2.jar\" \"net.minecraft.entity.Entity\")",
+      "Bash(grep \"Entity.class$\")",
+      "Bash(grep \"^net/minecraft/world/entity/Entity.class$\")",
+      "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.1.2/minecraft-merged-deobf-26.1.2.jar\" \"net.minecraft.world.entity.Entity\")",
+      "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.1.2/minecraft-merged-deobf-26.1.2.jar\" \"net.minecraft.world.entity.EntityType\")",
+      "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.1.2/minecraft-merged-deobf-26.1.2.jar\" \"net.minecraft.world.level.storage.TagValueOutput\")",
+      "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.1.2/minecraft-merged-deobf-26.1.2.jar\" \"net.minecraft.util.ProblemReporter\")"
     ]
   }
 }

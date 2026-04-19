@@ -8,7 +8,9 @@ import net.cnn_r.alliesandfoes.territory.TerritoryClaim;
 import net.cnn_r.alliesandfoes.territory.TerritoryManager;
 import net.cnn_r.alliesandfoes.territory.TerritoryMapSyncService;
 import net.cnn_r.alliesandfoes.territory.TerritoryQueryService;
+import net.cnn_r.alliesandfoes.network.RollbackEligibleSyncPayload;
 import net.cnn_r.alliesandfoes.network.TerritoryChunkBatchPayload;
+import net.cnn_r.alliesandfoes.network.WarInvitePayload;
 import net.cnn_r.alliesandfoes.network.WarStateSyncPayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.ChatFormatting;
@@ -51,6 +53,7 @@ public class AllianceWarService {
     public static final int CHUNK_CONTEST_COST        = 10;
     public static final int ANCHOR_CONTEST_COST       = 50;
     public static final int ANCHOR_EXTRA_COST_PER_CLAIM = 5;
+    public static final int ROLLBACK_COST_PER_CHUNK   = 10;
 
     private final MinecraftServer server;
     private final List<AllianceWar> wars = new ArrayList<>();
@@ -139,7 +142,7 @@ public class AllianceWarService {
     private void broadcastWarState() {
         List<WarStateSyncPayload.WarEntry> entries = new ArrayList<>();
         for (AllianceWar war : this.wars) {
-            if (war.status() != WarStatus.PREPARATION && war.status() != WarStatus.ACTIVE) continue;
+            if (war.status() == WarStatus.ENDED) continue;
             Alliance attacker = AllianceManager.get(server).getAllianceById(war.attackerId());
             Alliance defender = AllianceManager.get(server).getAllianceById(war.defenderId());
             String attackerName = attacker != null ? attacker.getName() : war.attackerId().toString();
@@ -156,7 +159,8 @@ public class AllianceWarService {
                 zs[i] = chunks.get(i).getChunkZ();
             }
             entries.add(new WarStateSyncPayload.WarEntry(
-                    war.id(), attackerName, defenderName, war.status().name(),
+                    war.id(), war.attackerId(), war.defenderId(),
+                    attackerName, defenderName, war.status().name(),
                     war.getKills(war.attackerId()), war.getKills(war.defenderId()),
                     dimId, xs, zs
             ));
@@ -229,6 +233,47 @@ public class AllianceWarService {
         return result;
     }
 
+    public List<AllianceWar> getActiveWars() {
+        return wars.stream().filter(w -> w.status() == WarStatus.ACTIVE).toList();
+    }
+
+    public AllianceWar getWarById(UUID id) {
+        return wars.stream().filter(w -> w.id().equals(id)).findFirst().orElse(null);
+    }
+
+    /**
+     * Computes which contested chunks still belong to the defending alliance and
+     * have block-change snapshot data, then broadcasts them to all online defender members.
+     */
+    public void broadcastRollbackEligible(UUID warId) {
+        AllianceWar war = getWarById(warId);
+        if (war == null) return;
+
+        WarSnapshotService snapshots = WarSnapshotService.get(server);
+        TerritoryManager tm = TerritoryManager.get(server);
+        List<ChunkKey> eligible = snapshots.getAffectedChunks(warId).stream()
+                .filter(c -> {
+                    TerritoryClaim cl = tm.getClaimAt(c);
+                    return cl != null && cl.getAllianceId().equals(war.defenderId());
+                }).toList();
+
+        if (eligible.isEmpty()) return;
+
+        RollbackEligibleSyncPayload payload = new RollbackEligibleSyncPayload(
+                warId,
+                eligible.stream().map(ChunkKey::getDimensionId).toList(),
+                eligible.stream().map(ChunkKey::getChunkX).toList(),
+                eligible.stream().map(ChunkKey::getChunkZ).toList(),
+                ROLLBACK_COST_PER_CHUNK);
+
+        Alliance defender = AllianceManager.get(server).getAllianceById(war.defenderId());
+        if (defender == null) return;
+        for (UUID memberId : defender.getMemberUuids()) {
+            ServerPlayer p = server.getPlayerList().getPlayer(memberId);
+            if (p != null) ServerPlayNetworking.send(p, payload);
+        }
+    }
+
     // =========================================================================
     // Actions — return null on success, error string on failure
     // =========================================================================
@@ -296,15 +341,15 @@ public class AllianceWarService {
         this.wars.add(war);
         this.save();
 
-        notifyAlliance(actorAlliance, Component.literal(
-                "[WAR] Your alliance declared war on " + targetAlliance.getName()
-                        + ". Cost: " + cost + " influence. " + contestedSet.size() + " chunks contested.")
-                .withStyle(ChatFormatting.RED));
-        notifyAlliance(targetAlliance, Component.literal(
-                "[WAR] " + actorAlliance.getName() + " declared war on your alliance! "
-                        + contestedSet.size() + " chunks at stake. "
-                        + "Use /alliance war accept or /alliance war reject.")
-                .withStyle(ChatFormatting.RED));
+        // Notify defending Founder via toast if they are online
+        UUID defenderOwner = targetAlliance.getOwnerUuid();
+        ServerPlayer defenderPlayer = server.getPlayerList().getPlayer(defenderOwner);
+        if (defenderPlayer != null) {
+            ServerPlayNetworking.send(defenderPlayer, new WarInvitePayload(
+                    war.id(), actorAlliance.getName(), contestedSet.size()
+            ));
+        }
+
         return null;
     }
 
@@ -341,6 +386,36 @@ public class AllianceWarService {
                 "[WAR] " + actorAlliance.getName() + " accepted your declaration! War begins in 10 minutes.")
                 .withStyle(ChatFormatting.YELLOW));
         return null;
+    }
+
+    /** Accept a pending war by war ID (used by the map screen invite flow). */
+    public String acceptWarById(ServerPlayer actor, UUID warId) {
+        Alliance actorAlliance = AllianceManager.get(server).getAllianceFor(actor.getUUID());
+        if (actorAlliance == null) return "You must be in an alliance.";
+        if (!actorAlliance.getOwnerUuid().equals(actor.getUUID())) return "Only the Founder can accept war.";
+
+        AllianceWar pending = wars.stream()
+                .filter(w -> w.id().equals(warId) && w.status() == WarStatus.PENDING
+                        && w.defenderId().equals(actorAlliance.getId()))
+                .findFirst().orElse(null);
+        if (pending == null) return "No pending war declaration found.";
+
+        return acceptWar(actor, pending.attackerId());
+    }
+
+    /** Decline a pending war by war ID (used by the map screen invite flow). */
+    public String declineWarById(ServerPlayer actor, UUID warId) {
+        Alliance actorAlliance = AllianceManager.get(server).getAllianceFor(actor.getUUID());
+        if (actorAlliance == null) return "You must be in an alliance.";
+        if (!actorAlliance.getOwnerUuid().equals(actor.getUUID())) return "Only the Founder can decline war.";
+
+        AllianceWar pending = wars.stream()
+                .filter(w -> w.id().equals(warId) && w.status() == WarStatus.PENDING
+                        && w.defenderId().equals(actorAlliance.getId()))
+                .findFirst().orElse(null);
+        if (pending == null) return "No pending war declaration found.";
+
+        return rejectWar(actor, pending.attackerId());
     }
 
     public String rejectWar(ServerPlayer actor, UUID attackerAllianceId) {
@@ -498,7 +573,7 @@ public class AllianceWarService {
     // Boss bar management
     // =========================================================================
 
-    /** Called when a player joins to ensure they're shown any ongoing war boss bars. */
+    /** Called when a player joins to ensure they're shown any ongoing war boss bars and pending war invites. */
     public void onPlayerJoin(ServerPlayer player) {
         Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
         if (alliance == null) return;
@@ -507,6 +582,15 @@ public class AllianceWarService {
                     && war.involves(alliance.getId())) {
                 getOrCreateBossBar(war).addPlayer(player);
             }
+        }
+        // Re-send pending war invites to the defending Founder in case they were offline when war was declared
+        for (AllianceWar war : this.wars) {
+            if (war.status() != WarStatus.PENDING) continue;
+            if (!war.defenderId().equals(alliance.getId())) continue;
+            if (!alliance.getOwnerUuid().equals(player.getUUID())) continue;
+            Alliance attackerAlliance = AllianceManager.get(server).getAllianceById(war.attackerId());
+            String attackerName = attackerAlliance != null ? attackerAlliance.getName() : "Unknown";
+            ServerPlayNetworking.send(player, new WarInvitePayload(war.id(), attackerName, war.contestedChunks().size()));
         }
     }
 
@@ -525,13 +609,13 @@ public class AllianceWarService {
         String dName = defenderAlliance != null ? defenderAlliance.getName() : "Defender";
 
         if (attackerWins) {
-            // Force-unclaim contested chunks that still belong to defender
+            // Transfer contested chunks still owned by defender to the attacker
             TerritoryManager tm = TerritoryManager.get(server);
             List<ChunkKey> affected = new ArrayList<>();
             for (ChunkKey chunk : war.contestedChunks()) {
                 TerritoryClaim claim = tm.getClaimAt(chunk);
                 if (claim != null && claim.getAllianceId().equals(war.defenderId())) {
-                    tm.forceUnclaimChunk(chunk);
+                    tm.forceTransferClaim(chunk, war.attackerId());
                     affected.add(chunk);
                 }
             }
@@ -543,7 +627,7 @@ public class AllianceWarService {
                 }
             }
             notifyBothAlliances(war,
-                    "[WAR] " + aName + " wins! " + affected.size() + " contested chunk(s) unclaimed.",
+                    "[WAR] " + aName + " wins! " + affected.size() + " contested chunk(s) transferred to " + aName + ".",
                     ChatFormatting.RED);
         } else {
             // Defender wins: influence payout + emerald loot
@@ -570,6 +654,8 @@ public class AllianceWarService {
         updateWar(war, ended);
         removeBossBar(war.id());
         warPlayerStats.remove(war.id());
+
+        broadcastRollbackEligible(war.id());
     }
 
     private CustomBossEvent getOrCreateBossBar(AllianceWar war) {
