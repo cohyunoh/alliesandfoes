@@ -53,7 +53,13 @@
       "Bash(python *)",
       "Bash(grep -v \"^Binary\\\\|//\")",
       "Bash(xargs grep *)",
-      "Bash(grep -E \"\\\\.java$\")"
+      "Bash(grep -E \"\\\\.java$\")",
+      "Bash(./gradlew dependencies *)",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" net.minecraft.server.level.ServerPlayer)",
+      "Bash(xargs -I{} sh -c 'jar tf \"{}\" 2>/dev/null | grep -l \"ServerPlayer\" && echo \"{}:\"')",
+      "Bash(jar xf *)",
+      "Bash(javap -p net/minecraft/server/level/ServerPlayer.class)",
+      "Bash(./gradlew compileJava -Xdiags:verbose)"
     ]
   }
 }

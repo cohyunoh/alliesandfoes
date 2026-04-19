@@ -22,12 +22,17 @@ import java.util.WeakHashMap;
  * Lazily snapshots blocks and container contents the first time they are modified
  * during a war. Snapshots are in-memory only — they do not persist across server
  * restarts (V1 limitation).
+ *
+ * Also tracks which chests have been raided per war to prevent multiple raids.
  */
 public class WarSnapshotService {
     private static final Map<MinecraftServer, WarSnapshotService> INSTANCES = new WeakHashMap<>();
 
     // warId -> ("dimensionId:x:y:z" -> record)
     private final Map<UUID, Map<String, BlockChangeRecord>> snapshots = new HashMap<>();
+
+    // warId -> set of posKeys that have been raided (chest contents extracted)
+    private final Map<UUID, Set<String>> raidedChestKeys = new HashMap<>();
 
     private WarSnapshotService(MinecraftServer server) {
     }
@@ -61,6 +66,17 @@ public class WarSnapshotService {
         warSnapshots.put(key, new BlockChangeRecord(level.dimension().identifier().toString(), pos, state, containerContents));
     }
 
+    /** Returns true if the chest at this pos has already been raided during this war. */
+    public boolean isRaided(UUID warId, String posKey) {
+        Set<String> raided = raidedChestKeys.get(warId);
+        return raided != null && raided.contains(posKey);
+    }
+
+    /** Marks a chest position as raided for the given war. */
+    public void markRaided(UUID warId, String posKey) {
+        raidedChestKeys.computeIfAbsent(warId, k -> new HashSet<>()).add(posKey);
+    }
+
     /**
      * Restores all snapshotted blocks for the given war to their pre-war state.
      *
@@ -70,7 +86,6 @@ public class WarSnapshotService {
         Map<String, BlockChangeRecord> warSnapshots = this.snapshots.remove(warId);
         if (warSnapshots == null || warSnapshots.isEmpty()) return 0;
 
-        // Collect distinct chunks affected
         Set<String> chunksRestored = new HashSet<>();
 
         for (BlockChangeRecord record : warSnapshots.values()) {
@@ -91,7 +106,6 @@ public class WarSnapshotService {
                 }
             }
 
-            // Track distinct chunks (16-block grid)
             String chunkKey = record.dimensionId() + ":"
                     + (record.pos().getX() >> 4) + ":" + (record.pos().getZ() >> 4);
             chunksRestored.add(chunkKey);
@@ -113,12 +127,13 @@ public class WarSnapshotService {
         return chunks.size();
     }
 
-    /** Frees all snapshot data for a war (call after rollback or on war cleanup). */
+    /** Frees all snapshot and raid data for a war (call after rollback or on war cleanup). */
     public void clearWar(UUID warId) {
         this.snapshots.remove(warId);
+        this.raidedChestKeys.remove(warId);
     }
 
-    private static String makeKey(ServerLevel level, BlockPos pos) {
+    public static String makeKey(ServerLevel level, BlockPos pos) {
         return level.dimension().identifier() + ":" + pos.getX() + ":" + pos.getY() + ":" + pos.getZ();
     }
 

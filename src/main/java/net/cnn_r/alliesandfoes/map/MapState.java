@@ -4,6 +4,7 @@ import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
+import net.cnn_r.alliesandfoes.map.cache.WarSyncCache;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryPreviewSyncCache;
@@ -30,6 +31,7 @@ public class MapState {
     private static final int BLOCK_DIRTY_DELAY_TICKS = 3;
     private static TerritoryChunkSyncCache territoryChunkSyncCache;
     private static TerritoryPreviewSyncCache territoryPreviewSyncCache;
+    private static WarSyncCache warSyncCache;
 
     /** Y level used as the ceiling cap for chunk scanning. Updated each client tick. */
     private static volatile int playerScanY = 64;
@@ -167,6 +169,13 @@ public class MapState {
             territoryPreviewSyncCache = new TerritoryPreviewSyncCache();
         }
         return territoryPreviewSyncCache;
+    }
+
+    public static WarSyncCache getWarSyncCache() {
+        if (warSyncCache == null) {
+            warSyncCache = new WarSyncCache();
+        }
+        return warSyncCache;
     }
 
     // -------------------------------------------------------------------------
@@ -339,6 +348,10 @@ public class MapState {
         if (territoryPreviewSyncCache != null) {
             territoryPreviewSyncCache.clear();
         }
+        if (warSyncCache != null) {
+            warSyncCache.clear();
+        }
+        warSyncCache = null;
         loadedChunks.clear();
         pendingBlockDirty.clear();
         mapDirty = false;

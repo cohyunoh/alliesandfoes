@@ -3,6 +3,7 @@ package net.cnn_r.alliesandfoes;
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
+import net.cnn_r.alliesandfoes.alliance.war.AllianceWar;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarCommands;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
 import net.cnn_r.alliesandfoes.alliance.war.WarSnapshotService;
@@ -13,8 +14,13 @@ import net.cnn_r.alliesandfoes.map.intuition.IntuitionTarget;
 import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.structure.StructureChunkValueCalculator;
+import net.cnn_r.alliesandfoes.network.DeclareWarRequestPayload;
+import net.cnn_r.alliesandfoes.network.WarStateSyncPayload;
 import net.cnn_r.alliesandfoes.territory.*;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -44,16 +50,19 @@ import net.minecraft.world.level.storage.loot.predicates.LootItemRandomChanceCon
 import net.minecraft.world.level.storage.loot.providers.number.ConstantValue;
 import net.cnn_r.alliesandfoes.territory.ChestLootScorer;
 
+import net.minecraft.world.entity.EquipmentSlot;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 public class Alliesandfoes implements ModInitializer {
-	// pos key → chest score for chests cleared during a war break event
-	private static final Map<String, Integer> pendingWarChestDrops = new HashMap<>();
+	// Tracks each player's last known chunk (as "dim:cx:cz") for entry notifications
+	private static final Map<UUID, String> playerLastChunkKey = new HashMap<>();
 
 	@Override
 	public void onInitialize() {
@@ -94,6 +103,8 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(RequestTerritoryActionPayload.TYPE, RequestTerritoryActionPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(ExplorerDiscoverySyncPayload.TYPE, ExplorerDiscoverySyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SetIntuitionTargetPayload.TYPE, SetIntuitionTargetPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(DeclareWarRequestPayload.TYPE, DeclareWarRequestPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(WarStateSyncPayload.TYPE, WarStateSyncPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -271,11 +282,9 @@ public class Alliesandfoes implements ModInitializer {
 					);
 				};
 
-				// Send the result message back to the acting player immediately.
 				context.player().sendSystemMessage(
 						Component.literal(result.message()));
 
-				// Sync the changed chunk to all players.
 				TerritoryQueryService queryService = new TerritoryQueryService(territoryManager);
 				TerritoryChunkBatchPayload territoryPayload = TerritoryMapSyncService.buildChunkBatch(
 						queryService,
@@ -302,6 +311,21 @@ public class Alliesandfoes implements ModInitializer {
 			});
 		});
 
+		ServerPlayNetworking.registerGlobalReceiver(DeclareWarRequestPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				ServerPlayer player = context.player();
+				List<ChunkKey> chunks = new ArrayList<>();
+				for (int i = 0; i < payload.chunkXs().length; i++) {
+					chunks.add(new ChunkKey(payload.dimensionId(), payload.chunkXs()[i], payload.chunkZs()[i]));
+				}
+				String error = AllianceWarService.get(context.server())
+						.declareWar(player, payload.targetAllianceId(), chunks);
+				if (error != null) {
+					player.sendSystemMessage(Component.literal(error).withStyle(ChatFormatting.RED));
+				}
+			});
+		});
+
 
 		// Inject the Monocle into ruined portal chest loot tables (~10% chance)
 		LootTableEvents.MODIFY.register((key, tableBuilder, source, registries) -> {
@@ -323,6 +347,9 @@ public class Alliesandfoes implements ModInitializer {
 				return;
 			}
 
+			// Tick war timers and transitions
+			AllianceWarService.get(server).tickWars();
+
 			ExplorerSkillService explorerSkillService = ExplorerSkillService.get(server);
 			List<PlayerPositionsPayload.Entry> entries = new ArrayList<>();
 
@@ -341,6 +368,64 @@ public class Alliesandfoes implements ModInitializer {
 			for (ServerPlayer receiver : players) {
 				ServerPlayNetworking.send(receiver, payload);
 			}
+
+			// Territory entry action bar notifications
+			for (ServerPlayer player : players) {
+				ChunkPos cp = player.chunkPosition();
+				String dimId = ((ServerLevel) player.level()).dimension().identifier().toString();
+				String currentKey = dimId + ":" + cp.x() + ":" + cp.z();
+				String lastKey = playerLastChunkKey.get(player.getUUID());
+				if (!currentKey.equals(lastKey)) {
+					playerLastChunkKey.put(player.getUUID(), currentKey);
+					sendChunkEntryMessage(server, player, cp);
+				}
+			}
+		});
+
+		// War kill tracking: save victim's inventory, record kill, allow death
+		ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+			if (!(entity instanceof ServerPlayer victim)) return true;
+			if (!(source.getEntity() instanceof ServerPlayer killer)) return true;
+
+			MinecraftServer server = (MinecraftServer) victim.level().getServer();
+			Alliance victimAlliance = AllianceManager.get(server).getAllianceFor(victim.getUUID());
+			Alliance killerAlliance = AllianceManager.get(server).getAllianceFor(killer.getUUID());
+			if (victimAlliance == null || killerAlliance == null) return true;
+
+			Optional<AllianceWar> warOpt = AllianceWarService.get(server)
+					.getActiveWarBetween(victimAlliance.getId(), killerAlliance.getId());
+			if (warOpt.isEmpty()) return true;
+
+			AllianceWarService ws = AllianceWarService.get(server);
+			ws.saveAndClearInventory(victim); // clears inventory so no drops occur
+			ws.recordKill(warOpt.get().id(), killer, victim);
+			return true;
+		});
+
+		// Friendly fire prevention: same-alliance players cannot damage each other
+		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+			if (!(entity instanceof ServerPlayer victim)) return true;
+			if (!(source.getEntity() instanceof ServerPlayer attacker)) return true;
+			MinecraftServer server = (MinecraftServer) victim.level().getServer();
+			Alliance victimAlliance = AllianceManager.get(server).getAllianceFor(victim.getUUID());
+			Alliance attackerAlliance = AllianceManager.get(server).getAllianceFor(attacker.getUUID());
+			if (victimAlliance == null || attackerAlliance == null) return true;
+			return !victimAlliance.getId().equals(attackerAlliance.getId());
+		});
+
+		// Restore saved inventory after war death respawn
+		ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+			MinecraftServer srv = (MinecraftServer) newPlayer.level().getServer();
+			List<ItemStack> saved = AllianceWarService.get(srv).popSavedInventory(newPlayer.getUUID());
+			if (saved == null) return;
+			var inv = newPlayer.getInventory();
+			int idx = 0;
+			for (int i = 0; i < 36 && idx < saved.size(); i++, idx++) inv.setItem(i, saved.get(idx));
+			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.FEET, saved.get(idx++));
+			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.LEGS, saved.get(idx++));
+			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.CHEST, saved.get(idx++));
+			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.HEAD, saved.get(idx++));
+			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.OFFHAND, saved.get(idx));
 		});
 
 		ServerChunkEvents.CHUNK_LOAD.register((world, chunk, wasAlreadyLoaded) -> {
@@ -351,7 +436,7 @@ public class Alliesandfoes implements ModInitializer {
 			ChunkPos pos = chunk.getPos();
 			var structureData = StructureChunkValueCalculator.analyze(level, pos);
 
-			ChunkStructurePayload payload = new ChunkStructurePayload(
+			ChunkStructurePayload chunkPayload = new ChunkStructurePayload(
 					level.dimension().identifier().toString(),
 					pos.x(),
 					pos.z(),
@@ -362,22 +447,16 @@ public class Alliesandfoes implements ModInitializer {
 			for (ServerPlayer player : level.players()) {
 				ChunkPos playerPos = player.chunkPosition();
 
-				/*
-				 * Only sync to nearby players so this stays bounded.
-				 */
 				int dx = Math.abs(playerPos.x() - pos.x());
 				int dz = Math.abs(playerPos.z() - pos.z());
 
 				if (Math.max(dx, dz) <= 8) {
-					ServerPlayNetworking.send(player, payload);
+					ServerPlayNetworking.send(player, chunkPayload);
 				}
 			}
 		});
 
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-
-			// Sync nearby cached structure data once when the player joins.
-			// Chunk-load-driven sync was removed to avoid passive per-chunk work.
 			ServerPlayer player = handler.player;
 
 			ServerLevel level = player.level();
@@ -387,8 +466,9 @@ public class Alliesandfoes implements ModInitializer {
 			ExplorerSkillService.get(server).syncPlayer(player);
 			ExplorerDiscoveryService.get(server).syncPlayer(player);
 
-			// Sync all existing territory claims so the player sees persisted
-			// territory immediately on join (not just after a live territory action).
+			// Add player to any ongoing war boss bars for their alliance
+			AllianceWarService.get(server).onPlayerJoin(player);
+
 			TerritoryManager tm = TerritoryManager.get(server);
 			Collection<TerritoryClaim> allClaims = tm.getAllClaims();
 			if (!allClaims.isEmpty()) {
@@ -415,7 +495,7 @@ public class Alliesandfoes implements ModInitializer {
 
 					var structureData = StructureChunkValueCalculator.analyze(level, pos);
 
-					ChunkStructurePayload payload = new ChunkStructurePayload(
+					ChunkStructurePayload structPayload = new ChunkStructurePayload(
 							level.dimension().identifier().toString(),
 							pos.x(),
 							pos.z(),
@@ -423,7 +503,7 @@ public class Alliesandfoes implements ModInitializer {
 							structureData.getStructureNames()
 					);
 
-					ServerPlayNetworking.send(player, payload);
+					ServerPlayNetworking.send(player, structPayload);
 
 				}
 
@@ -431,30 +511,55 @@ public class Alliesandfoes implements ModInitializer {
 
 		});
 
-		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
-				ExplorerSkillService.get(server).onPlayerDisconnect(handler.player.getUUID()));
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+			playerLastChunkKey.remove(handler.player.getUUID());
+			ExplorerSkillService.get(server).onPlayerDisconnect(handler.player.getUUID());
+		});
 	}
 
-	private static TerritoryChunkBatchPayload buildTerritoryPayloadForChunks(
-			ServerLevel level,
-			List<ChunkPos> chunkPositions
-	) {
-		TerritoryQueryService queryService = new TerritoryQueryService(TerritoryManager.get(level.getServer()));
-		List<ChunkKey> chunkKeys = new ArrayList<>(chunkPositions.size());
+	private static void sendChunkEntryMessage(MinecraftServer server, ServerPlayer player, ChunkPos cp) {
+		ChunkKey key = ChunkKey.of((ServerLevel) player.level(), cp);
+		TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(key);
 
-		for (ChunkPos pos : chunkPositions) {
-			chunkKeys.add(ChunkKey.of(level, pos));
+		if (claim == null) {
+			player.sendSystemMessage(
+					Component.literal("Unclaimed Territory").withStyle(ChatFormatting.GRAY), true);
+			return;
 		}
 
-		return TerritoryMapSyncService.buildChunkBatch(queryService, chunkKeys);
+		TerritoryAnchor anchor = TerritoryManager.get(server).getAnchorById(claim.getAnchorId());
+		String anchorName = anchor != null ? anchor.getName() : "Unknown";
+		Alliance claimAlliance = AllianceManager.get(server).getAllianceById(claim.getAllianceId());
+		String allianceName = claimAlliance != null ? claimAlliance.getName() : "Unknown";
+
+		Alliance playerAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+		boolean isOwn = playerAlliance != null && playerAlliance.getId().equals(claim.getAllianceId());
+		boolean isActiveWar = !isOwn && playerAlliance != null
+				&& AllianceWarService.get(server).areAtWar(claim.getAllianceId(), playerAlliance.getId());
+
+		Component msg;
+		if (isOwn) {
+			msg = Component.empty()
+					.append(Component.literal(anchorName + " ✦ ").withStyle(ChatFormatting.GOLD))
+					.append(Component.literal(allianceName).withStyle(ChatFormatting.AQUA));
+		} else if (isActiveWar) {
+			msg = Component.literal("⚔ " + anchorName + " ✦ " + allianceName)
+					.withStyle(ChatFormatting.RED).withStyle(s -> s.withBold(true));
+		} else {
+			msg = Component.empty()
+					.append(Component.literal(anchorName + " ✦ ").withStyle(ChatFormatting.DARK_RED))
+					.append(Component.literal(allianceName).withStyle(ChatFormatting.RED));
+		}
+		player.sendSystemMessage(msg, true);
 	}
 
 	private static void registerTerritoryProtection() {
 
 		// Block breaking: blocked in enemy territory unless at war.
-		// Chests cleared before breaking to produce war loot instead of real drops.
+		// Chests in enemy territory during war: cancel the break, spawn abstracted loot.
 		PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) -> {
 			if (!(level instanceof ServerLevel sl)) return true;
+			if (!(player instanceof ServerPlayer sp)) return true;
 			MinecraftServer server = sl.getServer();
 
 			ChunkKey chunk = ChunkKey.of(sl, new ChunkPos(pos.getX() >> 4, pos.getZ() >> 4));
@@ -462,38 +567,45 @@ public class Alliesandfoes implements ModInitializer {
 			if (claim == null) return true;
 
 			if (!isAllowedBlockInteraction(server, player.getUUID(), claim)) {
-				if (player instanceof ServerPlayer sp)
-					sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED));
+				sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED));
 				return false;
 			}
 
-			// At war: snapshot before modifying, and handle chest loot substitution.
+			// At war: handle chest raiding and non-chest snapshots
 			Alliance pAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
 			if (pAlliance != null) {
-				AllianceWarService.get(server)
-						.getActiveWarBetween(claim.getAllianceId(), pAlliance.getId())
-						.ifPresent(war -> {
-							WarSnapshotService.get(server).snapshotIfFirst(war.id(), sl, pos);
+				Optional<AllianceWar> warOpt = AllianceWarService.get(server)
+						.getActiveWarBetween(claim.getAllianceId(), pAlliance.getId());
+				if (warOpt.isPresent()) {
+					AllianceWar war = warOpt.get();
 
-							// If it's a container: score contents, clear them, queue war loot drop.
-							if (blockEntity instanceof Container container) {
-								int score = ChestLootScorer.score(container);
-								pendingWarChestDrops.put(makePosKey(sl, pos), score);
-								container.clearContent();
+					if (blockEntity instanceof Container container) {
+						// Chest stays in place — cancel the break, spawn proportional loot
+						String posKey = WarSnapshotService.makeKey(sl, pos);
+						if (WarSnapshotService.get(server).isRaided(war.id(), posKey)) {
+							sp.sendSystemMessage(Component.literal("This chest has already been raided.")
+									.withStyle(ChatFormatting.RED));
+						} else {
+							WarSnapshotService.get(server).markRaided(war.id(), posKey);
+							ItemStack loot = ChestLootScorer.computeDrop(container, sl.getRandom());
+							if (!loot.isEmpty()) {
+								double x = pos.getX() + 0.5, y = pos.getY() + 0.5, z = pos.getZ() + 0.5;
+								sl.addFreshEntity(new ItemEntity(sl, x, y, z, loot));
+								sp.sendSystemMessage(Component.literal("You raided the chest!")
+										.withStyle(ChatFormatting.GOLD));
+							} else {
+								sp.sendSystemMessage(Component.literal("The chest was empty.")
+										.withStyle(ChatFormatting.GRAY));
 							}
-						});
+						}
+						return false; // Always cancel chest break during war
+					}
+
+					// Non-chest block: snapshot before breaking (for post-war rollback)
+					WarSnapshotService.get(server).snapshotIfFirst(war.id(), sl, pos);
+				}
 			}
 			return true;
-		});
-
-		// After break: spawn war loot if a chest was intercepted.
-		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
-			String key = makePosKey(level, pos);
-			Integer score = pendingWarChestDrops.remove(key);
-			if (score == null) return;
-
-			ChestLootScorer.DropTier tier = ChestLootScorer.tierFor(score);
-			spawnWarLoot(level, pos, tier);
 		});
 
 		// Block placement: blocked in enemy territory unless at war + snapshot.
@@ -506,7 +618,6 @@ public class Alliesandfoes implements ModInitializer {
 			BlockPos targetPos = hitResult.getBlockPos();
 
 			if (!isPlacing) {
-				// Only intercept containers; leave all other interactions alone.
 				BlockEntity be = world.getBlockEntity(targetPos);
 				if (be instanceof Container) {
 					ChunkKey chunk = ChunkKey.of(sl, new ChunkPos(targetPos.getX() >> 4, targetPos.getZ() >> 4));
@@ -520,7 +631,6 @@ public class Alliesandfoes implements ModInitializer {
 				return InteractionResult.PASS;
 			}
 
-			// Block placement: check position where the block would land.
 			BlockPos placePos = targetPos.relative(hitResult.getDirection());
 			ChunkKey chunk = ChunkKey.of(sl, new ChunkPos(placePos.getX() >> 4, placePos.getZ() >> 4));
 			TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
@@ -532,7 +642,7 @@ public class Alliesandfoes implements ModInitializer {
 				return InteractionResult.FAIL;
 			}
 
-			// At war: snapshot the position before placing.
+			// At war: snapshot the position before placing
 			Alliance pAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
 			if (pAlliance != null) {
 				AllianceWarService.get(server)
@@ -552,30 +662,5 @@ public class Alliesandfoes implements ModInitializer {
 		if (isOwnTerritory(server, playerUuid, claim)) return true;
 		Alliance a = AllianceManager.get(server).getAllianceFor(playerUuid);
 		return a != null && AllianceWarService.get(server).areAtWar(claim.getAllianceId(), a.getId());
-	}
-
-	private static String makePosKey(net.minecraft.world.level.Level level, BlockPos pos) {
-		return level.dimension().identifier() + ":" + pos.getX() + ":" + pos.getY() + ":" + pos.getZ();
-	}
-
-	private static void spawnWarLoot(net.minecraft.world.level.Level level, BlockPos pos,
-			ChestLootScorer.DropTier tier) {
-		ItemStack drop = switch (tier) {
-			case JUNK    -> new ItemStack(Items.COBWEB, 1 + level.getRandom().nextInt(2));
-			case IRON    -> new ItemStack(Items.IRON_INGOT, 1 + level.getRandom().nextInt(3));
-			case EMERALD -> new ItemStack(Items.EMERALD, 1 + level.getRandom().nextInt(3));
-			case DIAMOND -> new ItemStack(Items.DIAMOND, 1 + level.getRandom().nextInt(2));
-			case RICH    -> new ItemStack(Items.DIAMOND, 3 + level.getRandom().nextInt(3));
-		};
-
-		double x = pos.getX() + 0.5;
-		double y = pos.getY() + 0.5;
-		double z = pos.getZ() + 0.5;
-
-		level.addFreshEntity(new ItemEntity(level, x, y, z, drop));
-
-		if (tier == ChestLootScorer.DropTier.RICH) {
-			level.addFreshEntity(new ItemEntity(level, x, y, z, new ItemStack(Items.EMERALD, 1)));
-		}
 	}
 }

@@ -407,6 +407,10 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(WarStateSyncPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> MapState.getWarSyncCache().update(payload.wars()));
+        });
+
         KeyBindings.register();
 
         // Clear all client-side caches when leaving a world so stale data
