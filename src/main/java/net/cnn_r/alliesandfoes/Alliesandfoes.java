@@ -71,9 +71,12 @@ import java.util.UUID;
 public class Alliesandfoes implements ModInitializer {
 	// Tracks each player's last known chunk (as "dim:cx:cz") for entry notifications
 	private static final Map<UUID, String> playerLastChunkKey = new HashMap<>();
+	// Tracks last territory owner per player — message only fires on owner change
+	private static final Map<UUID, String> playerLastTerritoryKey = new HashMap<>();
 
 	@Override
 	public void onInitialize() {
+		net.cnn_r.alliesandfoes.config.ModConfig.load();
 		ModItems.register();
 		TerritoryCommands.register();
 		AllianceProgressionCommands.register();
@@ -444,19 +447,29 @@ public class Alliesandfoes implements ModInitializer {
 				if (war == null || !war.defenderId().equals(alliance.getId())) return;
 
 				WarSnapshotService snap = WarSnapshotService.get(server);
-				List<WarSnapshotService.PetDeathRecord> pets = snap.getPetDeaths(payload.warId());
-				if (pets.isEmpty()) return;
+				List<WarSnapshotService.PetDeathRecord> allPets = snap.getPetDeaths(payload.warId());
+				if (allPets.isEmpty()) return;
 
-				int cost = pets.size() * AllianceWarService.PET_REVIVE_COST_EACH;
+				List<Integer> selected = payload.selectedIndices().stream()
+						.filter(i -> i >= 0 && i < allPets.size())
+						.distinct()
+						.sorted()
+						.toList();
+				if (selected.isEmpty()) return;
+
+				int cost = selected.size() * AllianceWarService.PET_REVIVE_COST_EACH;
 				AllianceProgressionService prog = AllianceProgressionService.get(server);
 				if (!prog.canAfford(alliance.getId(), cost)) {
 					ServerPlayNetworking.send(player, new MapScreenMessagePayload(
-							"Need " + cost + " influence to revive " + pets.size() + " pet(s)."));
+							"Need " + cost + " influence to revive " + selected.size() + " pet(s)."));
 					return;
 				}
 				prog.trySpend(alliance.getId(), cost);
 
-				for (WarSnapshotService.PetDeathRecord pet : pets) {
+				// Revive selected pets and remove them from the list (iterate in reverse to preserve indices)
+				List<WarSnapshotService.PetDeathRecord> mutablePets = new java.util.ArrayList<>(allPets);
+				for (int i = selected.size() - 1; i >= 0; i--) {
+					WarSnapshotService.PetDeathRecord pet = mutablePets.remove((int) selected.get(i));
 					ServerPlayer owner = pet.ownerUuid() != null
 							? server.getPlayerList().getPlayer(pet.ownerUuid()) : null;
 					ServerPlayer spawnTarget = owner != null ? owner : player;
@@ -469,7 +482,7 @@ public class Alliesandfoes implements ModInitializer {
 								return e;
 							});
 				}
-				snap.clearPetDeaths(payload.warId());
+				snap.replacePetDeaths(payload.warId(), mutablePets);
 				AllianceWarService.get(server).broadcastDeadPets(payload.warId());
 			});
 		});
@@ -541,15 +554,25 @@ public class Alliesandfoes implements ModInitializer {
 				ServerPlayNetworking.send(receiver, payload);
 			}
 
-			// Territory entry action bar notifications
+			// Territory border action bar notifications — fires only when territory owner changes
 			for (ServerPlayer player : players) {
 				ChunkPos cp = player.chunkPosition();
 				String dimId = ((ServerLevel) player.level()).dimension().identifier().toString();
-				String currentKey = dimId + ":" + cp.x() + ":" + cp.z();
-				String lastKey = playerLastChunkKey.get(player.getUUID());
-				if (!currentKey.equals(lastKey)) {
-					playerLastChunkKey.put(player.getUUID(), currentKey);
-					sendChunkEntryMessage(server, player, cp);
+				String currentChunkKey = dimId + ":" + cp.x() + ":" + cp.z();
+				String lastChunkKey = playerLastChunkKey.get(player.getUUID());
+				if (currentChunkKey.equals(lastChunkKey)) continue;
+				playerLastChunkKey.put(player.getUUID(), currentChunkKey);
+
+				ChunkKey chunkKey = ChunkKey.of((ServerLevel) player.level(), cp);
+				TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunkKey);
+				String ownerKey = dimId + ":" + (claim != null ? claim.getAllianceId().toString() : "unclaimed");
+				String lastOwnerKey = playerLastTerritoryKey.get(player.getUUID());
+
+				if (!ownerKey.equals(lastOwnerKey)) {
+					playerLastTerritoryKey.put(player.getUUID(), ownerKey);
+					if (net.cnn_r.alliesandfoes.config.ModConfig.get().showTerritoryBorderMessages) {
+						sendChunkEntryMessage(server, player, cp);
+					}
 				}
 			}
 		});
@@ -698,6 +721,7 @@ public class Alliesandfoes implements ModInitializer {
 
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
 			playerLastChunkKey.remove(handler.player.getUUID());
+			playerLastTerritoryKey.remove(handler.player.getUUID());
 			ExplorerSkillService.get(server).onPlayerDisconnect(handler.player.getUUID());
 		});
 	}

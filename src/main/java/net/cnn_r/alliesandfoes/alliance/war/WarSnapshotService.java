@@ -148,6 +148,9 @@ public class WarSnapshotService {
         TagValueOutput output = TagValueOutput.createWithoutContext(ProblemReporter.DISCARDING);
         entity.saveWithoutId(output);
         CompoundTag nbt = output.buildResult();
+        // loadEntityRecursive requires the entity type "id" tag which saveWithoutId omits
+        nbt.putString("id", net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE
+                .getKey(entity.getType()).toString());
         petDeaths.computeIfAbsent(warId, k -> new ArrayList<>())
                  .add(new PetDeathRecord(
                          entity.level().dimension().identifier().toString(),
@@ -167,9 +170,18 @@ public class WarSnapshotService {
         return list == null ? 0 : list.size();
     }
 
-    /** Removes all dead pet records for a war (call after reviving). */
+    /** Removes all dead pet records for a war (call after reviving all). */
     public void clearPetDeaths(UUID warId) {
         petDeaths.remove(warId);
+    }
+
+    /** Replaces the dead pet list for a war with the given list (used after selective revival). */
+    public void replacePetDeaths(UUID warId, List<PetDeathRecord> remaining) {
+        if (remaining.isEmpty()) {
+            petDeaths.remove(warId);
+        } else {
+            petDeaths.put(warId, new ArrayList<>(remaining));
+        }
     }
 
     /** Returns all chunk keys that have at least one snapshotted block for this war. */

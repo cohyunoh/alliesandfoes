@@ -27,6 +27,19 @@ public final class ChestLootScorer {
         WEIGHTS.put(Items.LAPIS_LAZULI,     5);
         WEIGHTS.put(Items.COPPER_INGOT,     5);
         WEIGHTS.put(Items.COAL,             1);
+        // Common junk — explicitly scored low so they don't inflate tier
+        WEIGHTS.put(Items.STICK,            1);
+        WEIGHTS.put(Items.BONE,             1);
+        WEIGHTS.put(Items.ROTTEN_FLESH,     1);
+        WEIGHTS.put(Items.POISONOUS_POTATO, 1);
+        WEIGHTS.put(Items.SPIDER_EYE,       1);
+        WEIGHTS.put(Items.STRING,           1);
+        WEIGHTS.put(Items.FEATHER,          1);
+        WEIGHTS.put(Items.GUNPOWDER,        1);
+        WEIGHTS.put(Items.DIRT,             1);
+        WEIGHTS.put(Items.GRAVEL,           1);
+        WEIGHTS.put(Items.SAND,             1);
+        WEIGHTS.put(Items.COBBLESTONE,      1);
     }
 
     /** Returns the total loot score of the container's current contents. */
@@ -43,10 +56,10 @@ public final class ChestLootScorer {
 
     /** Maps a score to a drop tier. */
     public static DropTier tierFor(int score) {
-        if (score <= 10)  return DropTier.JUNK;
-        if (score <= 50)  return DropTier.IRON;
-        if (score <= 200) return DropTier.EMERALD;
-        if (score <= 500) return DropTier.DIAMOND;
+        if (score <= 30)   return DropTier.JUNK;
+        if (score <= 150)  return DropTier.IRON;
+        if (score <= 500)  return DropTier.EMERALD;
+        if (score <= 2000) return DropTier.DIAMOND;
         return DropTier.RICH;
     }
 
@@ -107,7 +120,7 @@ public final class ChestLootScorer {
 
         // Generic / mixed chest — use score tier to determine loot
         return switch (tierFor(totalScore)) {
-            case JUNK    -> new ItemStack(Items.DIRT, 2 + random.nextInt(4));
+            case JUNK    -> new ItemStack(Items.COBWEB, 1 + random.nextInt(3));
             case IRON    -> new ItemStack(Items.IRON_INGOT, 1 + random.nextInt(3));
             case EMERALD -> new ItemStack(Items.EMERALD, 1 + random.nextInt(3));
             case DIAMOND -> new ItemStack(Items.DIAMOND, 1 + random.nextInt(2));

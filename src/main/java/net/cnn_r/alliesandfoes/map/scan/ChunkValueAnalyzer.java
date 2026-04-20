@@ -224,21 +224,20 @@ public class ChunkValueAnalyzer {
 
     private WaterStats getWaterStats(ChunkPos pos) {
         SurfaceWaterSample localSample = this.sampleWaterColumnsInChunk(pos);
-        int nearbyWaterChunkCount = this.countNearbyWaterChunks(pos);
-
-        return new WaterStats(
-                localSample.waterColumns,
-                localSample.sampledColumns,
-                nearbyWaterChunkCount
-        );
+        return new WaterStats(localSample.waterColumns, localSample.sampledColumns, 0);
     }
 
     private OreCounts countValuableOres(LevelChunk chunk) {
         OreCounts counts = new OreCounts();
 
         LevelChunkSection[] sections = chunk.getSections();
+        int minSection = level.getMinY() >> 4;
 
-        for (LevelChunkSection section : sections) {
+        for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+            int sectionBottomY = (minSection + sectionIndex) * 16;
+            if (sectionBottomY > 80) break; // no valuable ores above y=80
+
+            LevelChunkSection section = sections[sectionIndex];
             if (section == null || section.hasOnlyAir()) {
                 continue;
             }

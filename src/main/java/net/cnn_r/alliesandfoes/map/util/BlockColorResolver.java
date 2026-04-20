@@ -1,25 +1,24 @@
 package net.cnn_r.alliesandfoes.map.util;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.BiomeColors;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.MapColor;
 
 public class BlockColorResolver {
-    public static int getColor(BlockState state, BlockAndTintGetter level, BlockPos pos) {
+    public static int getColor(BlockState state, ClientLevel level, BlockPos pos) {
         int color;
 
-        // Biome-tinted terrain first
+        // Single-point biome color — bypasses the default 5×5 blending average
+        // that BiomeColors.getAverage*Color performs per pixel (25 lookups → 1).
         if (state.is(Blocks.GRASS_BLOCK) ||
                 state.is(Blocks.SHORT_GRASS) ||
                 state.is(Blocks.TALL_GRASS) ||
                 state.is(Blocks.FERN) ||
                 state.is(Blocks.LARGE_FERN)) {
-
-            color = BiomeColors.getAverageGrassColor(level, pos);
+            color = level.getBiome(pos).value().getGrassColor(pos.getX(), pos.getZ());
             return 0xFF000000 | color;
         }
 
@@ -29,13 +28,12 @@ public class BlockColorResolver {
                 state.is(Blocks.DARK_OAK_LEAVES) ||
                 state.is(Blocks.MANGROVE_LEAVES) ||
                 state.is(Blocks.VINE)) {
-
-            color = BiomeColors.getAverageFoliageColor(level, pos);
+            color = level.getBiome(pos).value().getFoliageColor();
             return 0xFF000000 | color;
         }
 
         if (state.is(Blocks.WATER) || state.is(Blocks.BUBBLE_COLUMN)) {
-            color = BiomeColors.getAverageWaterColor(level, pos);
+            color = level.getBiome(pos).value().getWaterColor();
             return 0xFF000000 | color;
         }
 
@@ -53,7 +51,6 @@ public class BlockColorResolver {
             return 0xFF000000 | mapColor.col;
         }
 
-        // Final fallback
         return 0xFF777777;
     }
 }

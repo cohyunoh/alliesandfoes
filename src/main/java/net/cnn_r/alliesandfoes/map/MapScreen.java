@@ -9,7 +9,6 @@ import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
-import net.cnn_r.alliesandfoes.map.indoor.IndoorMask;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
@@ -95,7 +94,6 @@ public class MapScreen extends Screen {
     private MapTexture mapTexture;
     private MapRenderer renderer;
     private ChunkCache cache;
-    private ChunkCache caveCache;
     private ChunkCache netherCache;
     private ChunkCache endCache;
     private ChunkValueCache chunkValueCache;
@@ -166,6 +164,11 @@ public class MapScreen extends Screen {
     private Button petReviveButton;
     private boolean petRevivePanelOpen = false;
     private Button confirmPetReviveButton;
+    private final java.util.Set<Integer> selectedPetIndices = new java.util.LinkedHashSet<>();
+
+    private boolean anchorCycleMode = false;
+    private Button anchorCyclePrevButton;
+    private Button anchorCycleNextButton;
 
     private static final Identifier ROLLBACK_FIRE_TEXTURE =
             Identifier.fromNamespaceAndPath("alliesandfoes", "textures/map/rollback_fire.png");
@@ -176,6 +179,11 @@ public class MapScreen extends Screen {
     private ChunkPos lastRequestedPreviewChunk;
     private long lastPreviewRequestMillis;
     private static final long PREVIEW_REQUEST_INTERVAL_MS = 150L;
+
+    private record AnchorEntry(UUID anchorId, String anchorName, int chunkX, int chunkZ) {}
+    private final List<AnchorEntry> anchorCycleList = new ArrayList<>();
+    private int anchorCycleIndex = -1;
+
     private static final int INTUITION_REFRESH_DISTANCE_CHUNKS = 2;
     private static final int INTUITION_STATUS_BG_COLOR = 0xA0000000;
     private static final float MIN_INTUITION_STATUS_STRENGTH = 0.16f;
@@ -193,7 +201,6 @@ public class MapScreen extends Screen {
         this.mapTexture = new MapTexture(TEXTURE_SIZE);
         this.renderer = new MapRenderer(this.mapTexture);
         this.cache = MapState.getChunkCache();
-        this.caveCache = MapState.getCaveChunkCache();
         this.netherCache = MapState.getNetherChunkCache();
         this.endCache = MapState.getEndChunkCache();
         this.chunkValueCache = MapState.getChunkValueCache();
@@ -207,9 +214,15 @@ public class MapScreen extends Screen {
                 : "minecraft:overworld";
         this.lastValidSurface.clear();
         WorldIdentity worldId = getWorldIdentity();
-        MapPersistence.load(worldId, this.cache, this.caveCache, this.netherCache,
-                this.endCache, this.chunkValueCache);
         this.textureDirty = true;
+        if (this.cache.positions().isEmpty()) {
+            Thread loadThread = new Thread(() -> {
+                MapPersistence.load(worldId, this.cache, this.netherCache, this.endCache, this.chunkValueCache);
+                MapState.markMapDirty();
+            }, "map-persistence-load");
+            loadThread.setDaemon(true);
+            loadThread.start();
+        }
 
         if (this.minecraft.player != null) {
             this.cameraBlockX = (double)this.minecraft.player.getX();
@@ -358,12 +371,14 @@ public class MapScreen extends Screen {
         ).bounds(TOP_BUTTON_X, TOP_BUTTON_Y, TOP_BUTTON_WIDTH, TOP_BUTTON_HEIGHT).build();
         this.petReviveButton.visible = false;
 
-        this.confirmPetReviveButton = Button.builder(Component.literal("Revive All"), btn -> {
-            if (MapState.getDeadPetsWarId() != null) {
-                ClientPlayNetworking.send(new RequestPetRevivePayload(MapState.getDeadPetsWarId()));
+        this.confirmPetReviveButton = Button.builder(Component.literal("Revive Selected"), btn -> {
+            if (MapState.getDeadPetsWarId() != null && !this.selectedPetIndices.isEmpty()) {
+                ClientPlayNetworking.send(new RequestPetRevivePayload(
+                        MapState.getDeadPetsWarId(), new java.util.ArrayList<>(this.selectedPetIndices)));
+                this.selectedPetIndices.clear();
                 this.petRevivePanelOpen = false;
             }
-        }).bounds(this.width / 2 - 60, this.height / 2 + 40, 120, 20).build();
+        }).bounds(this.width / 2 - 80, this.height / 2 + 40, 160, 20).build();
         this.confirmPetReviveButton.visible = false;
 
         this.addRenderableWidget(this.allianceButton);
@@ -380,6 +395,18 @@ public class MapScreen extends Screen {
         this.addRenderableWidget(this.confirmRepairButton);
         this.addRenderableWidget(this.petReviveButton);
         this.addRenderableWidget(this.confirmPetReviveButton);
+
+        int cycBtnW = 30, cycBtnH = 20;
+        int cycBtnY = this.height / 2 - cycBtnH / 2;
+        this.anchorCyclePrevButton = Button.builder(Component.literal("◄"), btn -> cycleAnchor(-1))
+                .bounds(this.width / 2 - 90 - cycBtnW, cycBtnY, cycBtnW, cycBtnH).build();
+        this.anchorCyclePrevButton.visible = false;
+        this.anchorCycleNextButton = Button.builder(Component.literal("►"), btn -> cycleAnchor(1))
+                .bounds(this.width / 2 + 90, cycBtnY, cycBtnW, cycBtnH).build();
+        this.anchorCycleNextButton.visible = false;
+        this.addRenderableWidget(this.anchorCyclePrevButton);
+        this.addRenderableWidget(this.anchorCycleNextButton);
+
         this.refreshExplorerIntuition(true);
         refreshTopButtons();
     }
@@ -427,10 +454,12 @@ public class MapScreen extends Screen {
                 this.confirmTerritoryButton.visible = false;
         }
         if (this.confirmPetReviveButton != null) {
+            int selCost = this.selectedPetIndices.size() * AllianceWarService.PET_REVIVE_COST_EACH;
             this.confirmPetReviveButton.setMessage(Component.literal(
-                    "Revive All — " + MapState.getPetReviveTotalCost() + " inf"));
-            this.confirmPetReviveButton.setX(this.width / 2 - 60);
+                    "Revive Selected (" + this.selectedPetIndices.size() + ") — " + selCost + " inf"));
+            this.confirmPetReviveButton.setX(this.width / 2 - 80);
             this.confirmPetReviveButton.setY(this.height / 2 + 40);
+            this.confirmPetReviveButton.active = !this.selectedPetIndices.isEmpty();
             this.confirmPetReviveButton.visible = this.petRevivePanelOpen && MapState.hasDeadPets();
         }
         if (this.warReviewAcceptButton != null) {
@@ -565,22 +594,29 @@ public class MapScreen extends Screen {
 
         this.refreshExplorerIntuition(false);
 
-        // Only rebuild the texture when data or camera actually changed.
-        if (MapState.pollMapDirty()) {
-            this.textureDirty = true;
-        }
         float currentZoom = this.renderer.getZoom();
         int blockXNow = (int) Math.floor(this.cameraBlockX);
         int blockZNow = (int) Math.floor(this.cameraBlockZ);
-        if (this.textureDirty
-                || blockXNow != this.lastCameraBlockXInt
-                || blockZNow != this.lastCameraBlockZInt
-                || currentZoom != this.lastZoom) {
+        boolean cameraChanged = blockXNow != this.lastCameraBlockXInt
+                || blockZNow != this.lastCameraBlockZInt;
+        boolean zoomChanged = currentZoom != this.lastZoom;
+
+        if (this.textureDirty || cameraChanged || zoomChanged) {
+            MapState.drainRecentlyScanned(); // discard — full rebuild covers everything
             this.rebuildVisibleTexture();
             this.lastCameraBlockXInt = blockXNow;
             this.lastCameraBlockZInt = blockZNow;
             this.lastZoom = currentZoom;
             this.textureDirty = false;
+        } else {
+            List<ChunkKey> dirty = MapState.drainRecentlyScanned();
+            if (!dirty.isEmpty()) {
+                this.applyIncrementalUpdates(dirty);
+            }
+        }
+        // Non-chunk dirty events (mode change, persistence complete) set textureDirty for next frame.
+        if (MapState.pollMapDirty()) {
+            this.textureDirty = true;
         }
         this.renderer.render(context, this.width, this.height, BLOCK_PIXEL_SIZE);
 
@@ -597,6 +633,7 @@ public class MapScreen extends Screen {
 
         this.renderTerritoryModeGlow(context);
 
+        this.renderAnchorCycleBanner(context);
         this.renderTerritoryPreviewStatus(context);
         this.renderWarDeclarationStatus(context);
         this.renderWarStatusPanel(context);
@@ -837,6 +874,20 @@ public class MapScreen extends Screen {
             return true;
         }
 
+        // Pet revive panel: clicking a row toggles selection
+        if (this.petRevivePanelOpen && MapState.hasDeadPets() && click.button() == 0) {
+            List<String> pets = MapState.getDeadPetDescriptions();
+            for (int i = 0; i < pets.size(); i++) {
+                int[] bounds = getPetRevivePanelRowBounds(i);
+                if (click.x() >= bounds[0] && click.x() <= bounds[2]
+                        && click.y() >= bounds[1] && click.y() <= bounds[3]) {
+                    if (this.selectedPetIndices.contains(i)) this.selectedPetIndices.remove(i);
+                    else this.selectedPetIndices.add(i);
+                    return true;
+                }
+            }
+        }
+
         this.hoveredChunk = this.getChunkAtMouse((int) click.x(), (int) click.y());
 
         // Left click in REPAIR mode: toggle damaged chunk selection
@@ -1020,12 +1071,24 @@ public class MapScreen extends Screen {
             return true;
         }
 
+        // In anchor cycle mode: arrows cycle, ESC exits
+        if (this.anchorCycleMode) {
+            if (key == 256) { // ESC
+                exitAnchorCycleMode();
+                return true;
+            }
+            if (key == 263) { cycleAnchor(-1); return true; } // left
+            if (key == 262) { cycleAnchor(1);  return true; } // right
+            return true; // block all other keys
+        }
+
         int panAmount = (modifiers & 1) != 0 ? 64 : 16;
 
         switch (key) {
             case 256 -> { // ESC
                 if (this.petRevivePanelOpen) {
                     this.petRevivePanelOpen = false;
+                    this.selectedPetIndices.clear();
                     return true;
                 }
                 if (this.repairMode != RepairMode.NONE) {
@@ -1172,6 +1235,12 @@ public class MapScreen extends Screen {
                 }
                 return true;
             }
+            case 91, 93 -> { // [ or ] — enter anchor cycle mode
+                if (AllianceClientState.isInAlliance()) {
+                    enterAnchorCycleMode();
+                    return true;
+                }
+            }
             case 67 -> { // C
                 if (!AllianceMapIntelPolicy.canUseTerritoryActions()) {
                     this.showScreenMessage(
@@ -1221,8 +1290,7 @@ public class MapScreen extends Screen {
         this.lastIntuitionEvalChunk = null;
         this.intuitionMessageController.reset();
         super.removed();
-        MapPersistence.save(getWorldIdentity(), this.cache, this.caveCache, this.netherCache,
-                this.endCache, this.chunkValueCache);
+        MapPersistence.save(getWorldIdentity(), this.cache, this.netherCache, this.endCache, this.chunkValueCache);
     }
 
     @Override
@@ -1269,6 +1337,45 @@ public class MapScreen extends Screen {
         return new ChunkPos(blockX >> 4, blockZ >> 4);
     }
 
+    private void applyIncrementalUpdates(List<ChunkKey> keys) {
+        int centerWorldX = (int) Math.floor(this.cameraBlockX);
+        int centerWorldZ = (int) Math.floor(this.cameraBlockZ);
+        int texCx = this.mapTexture.getSize() / 2;
+        int texCz = this.mapTexture.getSize() / 2;
+        MapRenderMode mode = MapState.getCurrentMode();
+        boolean anyWritten = false;
+
+        for (ChunkKey key : keys) {
+            if (!key.getDimensionId().equals(this.dimensionId)) continue;
+            if (!MapState.isCurrentlyLoaded(key)) continue;
+
+            int[] pixels = switch (mode) {
+                case NETHER -> this.netherCache.get(key);
+                case END    -> this.endCache.get(key);
+                default     -> this.cache.get(key);
+            };
+            if (pixels == null) pixels = this.cache.get(key);
+            if (pixels == null) continue;
+
+            int chunkMinX = key.getChunkX() * 16;
+            int chunkMinZ = key.getChunkZ() * 16;
+
+            for (int lx = 0; lx < 16; lx++) {
+                for (int lz = 0; lz < 16; lz++) {
+                    int texX = texCx + (chunkMinX + lx - centerWorldX);
+                    int texZ = texCz + (chunkMinZ + lz - centerWorldZ);
+                    if (texX < 0 || texZ < 0 || texX >= this.mapTexture.getSize()
+                            || texZ >= this.mapTexture.getSize()) continue;
+                    int color = pixels[lx + lz * 16];
+                    if (color != 0) this.mapTexture.setPixel(texX, texZ, color);
+                }
+            }
+            anyWritten = true;
+        }
+
+        if (anyWritten) this.mapTexture.upload();
+    }
+
     private void rebuildVisibleTexture() {
         this.mapTexture.clear(0xFF101010);
 
@@ -1284,46 +1391,31 @@ public class MapScreen extends Screen {
         int maxChunkZ = (centerWorldZ + textureCenterY) >> 4;
 
         MapRenderMode mode = MapState.getCurrentMode();
-        IndoorMask indoorMask = (mode == MapRenderMode.INDOOR_LOCAL) ? MapState.getIndoorMask() : null;
 
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 ChunkKey key = new ChunkKey(this.dimensionId, chunkX, chunkZ);
+                if (!MapState.isCurrentlyLoaded(key)) continue;
                 long packedKey = ((long) chunkX << 32) | (chunkZ & 0xFFFFFFFFL);
 
                 int[] surfaceColors = this.cache.get(key);
-                int[] caveColorsArr = this.caveCache.get(key);
                 int[] netherColorsArr = this.netherCache.get(key);
                 int[] endColorsArr = this.endCache.get(key);
 
-                // Determine primary color array based on mode; fall back to last-valid surface
-                int[] primaryColors;
-                boolean useSurfaceAsDim = false;
-                switch (mode) {
-                    case SURFACE -> primaryColors = surfaceColors;
-                    case CAVE -> {
-                        primaryColors = (caveColorsArr != null) ? caveColorsArr : null;
-                        useSurfaceAsDim = true; // surface shown dimmed as background
-                    }
-                    case INDOOR_LOCAL -> primaryColors = caveColorsArr; // indoor mask applied per-pixel
-                    case NETHER -> primaryColors = netherColorsArr;
-                    case END -> primaryColors = endColorsArr;
-                    default -> primaryColors = surfaceColors;
-                }
+                int[] primaryColors = switch (mode) {
+                    case NETHER -> netherColorsArr;
+                    case END    -> endColorsArr;
+                    default     -> surfaceColors;
+                };
 
-                // If no primary data, try last-valid surface as fallback (prevents blank flicker)
+                // Cache last-valid surface for flicker-free fallback (render-mode switches only)
                 if (primaryColors == null && surfaceColors != null) {
                     lastValidSurface.put(packedKey, surfaceColors);
                 } else if (primaryColors != null && mode == MapRenderMode.SURFACE) {
                     lastValidSurface.put(packedKey, primaryColors);
                 }
 
-                int[] fallbackColors = lastValidSurface.get(packedKey);
-
-                boolean hasAnything = (primaryColors != null)
-                        || (useSurfaceAsDim && surfaceColors != null)
-                        || fallbackColors != null;
-                if (!hasAnything) continue;
+                if (primaryColors == null) continue;
 
                 ChunkPos pos = new ChunkPos(chunkX, chunkZ);
                 int chunkMinWorldX = pos.getMinBlockX();
@@ -1344,56 +1436,10 @@ public class MapScreen extends Screen {
                         }
 
                         int blockIdx = localX + localZ * 16;
-                        int color = 0;
-                        boolean skip = false;
 
-                        switch (mode) {
-                            case SURFACE: {
-                                if (surfaceColors != null) {
-                                    color = surfaceColors[blockIdx];
-                                } else if (fallbackColors != null) {
-                                    color = fallbackColors[blockIdx];
-                                } else { skip = true; }
-                                break;
-                            }
-                            case CAVE: {
-                                if (caveColorsArr != null && caveColorsArr[blockIdx] != 0) {
-                                    color = caveColorsArr[blockIdx];
-                                } else if (surfaceColors != null) {
-                                    color = darken(surfaceColors[blockIdx], 0.4f);
-                                } else if (fallbackColors != null) {
-                                    color = darken(fallbackColors[blockIdx], 0.4f);
-                                } else { skip = true; }
-                                break;
-                            }
-                            case INDOOR_LOCAL: {
-                                boolean insideMask = (indoorMask == null)
-                                        || indoorMask.contains(worldX, worldZ);
-                                if (insideMask && caveColorsArr != null && caveColorsArr[blockIdx] != 0) {
-                                    color = caveColorsArr[blockIdx];
-                                } else if (surfaceColors != null) {
-                                    color = surfaceColors[blockIdx];
-                                } else if (fallbackColors != null) {
-                                    color = fallbackColors[blockIdx];
-                                } else { skip = true; }
-                                break;
-                            }
-                            case NETHER: {
-                                if (netherColorsArr != null && netherColorsArr[blockIdx] != 0) {
-                                    color = netherColorsArr[blockIdx];
-                                } else { skip = true; }
-                                break;
-                            }
-                            case END: {
-                                if (endColorsArr != null && endColorsArr[blockIdx] != 0) {
-                                    color = endColorsArr[blockIdx];
-                                } else { skip = true; }
-                                break;
-                            }
-                            default: skip = true; break;
-                        }
+                        int color = primaryColors[blockIdx];
+                        if (color == 0) continue;
 
-                        if (skip) continue;
                         this.mapTexture.setPixel(texX, texY, color);
                     }
                 }
@@ -1403,12 +1449,6 @@ public class MapScreen extends Screen {
         this.mapTexture.upload();
     }
 
-    private static int darken(int argb, float factor) {
-        int r = (int)(((argb >> 16) & 0xFF) * factor);
-        int g = (int)(((argb >> 8)  & 0xFF) * factor);
-        int b = (int)((argb & 0xFF)          * factor);
-        return (argb & 0xFF000000) | (r << 16) | (g << 8) | b;
-    }
 
     private void renderChunkOverlays(GuiGraphicsExtractor context) {
         int centerWorldX = (int) Math.floor(this.cameraBlockX);
@@ -1805,6 +1845,10 @@ public class MapScreen extends Screen {
             return;
         }
 
+        boolean anyWidgetHovered = this.children().stream()
+                .anyMatch(listener -> listener instanceof net.minecraft.client.gui.components.AbstractWidget w && w.isHovered());
+        if (anyWidgetHovered) return;
+
         ChunkKey hoveredKey = new ChunkKey(this.dimensionId, this.hoveredChunk.x(), this.hoveredChunk.z());
         if (!this.cache.hasChunk(hoveredKey)) {
             return;
@@ -2023,9 +2067,7 @@ public class MapScreen extends Screen {
         float zoomY = (float) this.height / (blocksAcross * BLOCK_PIXEL_SIZE);
         float zoom = Math.max(0.5f, Math.min(6.0f, Math.min(zoomX, zoomY)));
 
-        if (MapState.getCurrentMode() == MapRenderMode.CAVE
-                || MapState.getCurrentMode() == MapRenderMode.INDOOR_LOCAL
-                || MapState.getCurrentMode() == MapRenderMode.NETHER) {
+        if (MapState.getCurrentMode() == MapRenderMode.NETHER) {
             zoom = Math.max(zoom, CAVE_DEFAULT_ZOOM);
         }
 
@@ -2647,6 +2689,10 @@ public class MapScreen extends Screen {
             if (AllianceClientState.isOwner()) {
                 lines.add("W: Declare War");
             }
+
+            if (AllianceClientState.isInAlliance()) {
+                lines.add("[: Anchor Cycle Mode");
+            }
         }
 
         int maxWidth = 0;
@@ -3137,6 +3183,42 @@ public class MapScreen extends Screen {
         refreshTopButtons();
     }
 
+    private void enterAnchorCycleMode() {
+        buildAnchorCycleList();
+        if (anchorCycleList.isEmpty()) {
+            showScreenMessage(Component.literal("No anchor territories found.").withColor(0xFFAAAAAA), 2000);
+            return;
+        }
+        this.anchorCycleMode = true;
+        // Sync index to currently selected anchor, or default to 0
+        anchorCycleIndex = 0;
+        for (int i = 0; i < anchorCycleList.size(); i++) {
+            if (anchorCycleList.get(i).anchorId().equals(this.selectedAnchorId)) {
+                anchorCycleIndex = i;
+                break;
+            }
+        }
+        // Apply the current anchor immediately
+        AnchorEntry entry = anchorCycleList.get(anchorCycleIndex);
+        this.selectedAnchorId = entry.anchorId();
+        this.selectedAnchorName = entry.anchorName();
+        this.cameraBlockX = entry.chunkX() * 16.0 + 8;
+        this.cameraBlockZ = entry.chunkZ() * 16.0 + 8;
+        this.followPlayer = false;
+        this.textureDirty = true;
+        hideTopButtons(true);
+        if (this.anchorCyclePrevButton != null) this.anchorCyclePrevButton.visible = true;
+        if (this.anchorCycleNextButton != null) this.anchorCycleNextButton.visible = true;
+    }
+
+    private void exitAnchorCycleMode() {
+        this.anchorCycleMode = false;
+        if (this.anchorCyclePrevButton != null) this.anchorCyclePrevButton.visible = false;
+        if (this.anchorCycleNextButton != null) this.anchorCycleNextButton.visible = false;
+        hideTopButtons(false);
+        refreshTopButtons();
+    }
+
     private void hideTopButtons(boolean hide) {
         boolean show = !hide;
         if (this.allianceButton != null) this.allianceButton.visible = show;
@@ -3163,10 +3245,34 @@ public class MapScreen extends Screen {
         this.targetEnemyAllianceName = null;
     }
 
+    private void renderAnchorCycleBanner(GuiGraphicsExtractor context) {
+        if (!this.anchorCycleMode || anchorCycleList.isEmpty()) return;
+
+        AnchorEntry entry = anchorCycleList.get(anchorCycleIndex);
+        String anchorLabel = entry.anchorName() != null && !entry.anchorName().isBlank()
+                ? entry.anchorName()
+                : entry.anchorId().toString().substring(0, 8);
+        String title = "⚓ " + anchorLabel + "  (" + (anchorCycleIndex + 1) + "/" + anchorCycleList.size() + ")";
+        String hint  = "◄ ► to cycle   ESC to exit";
+
+        int titleWidth = this.font.width(title);
+        int hintWidth  = this.font.width(hint);
+        int boxWidth   = Math.max(titleWidth, hintWidth) + 16;
+        int boxHeight  = 26;
+        int x = (this.width - boxWidth) / 2;
+        int y = this.height / 2 - boxHeight / 2 - 30;
+
+        context.fill(x, y, x + boxWidth, y + boxHeight, 0xCC000000);
+        context.fill(x, y, x + boxWidth, y + 1, 0xFF99EEFF);
+        context.fill(x, y + boxHeight - 1, x + boxWidth, y + boxHeight, 0xFF99EEFF);
+        context.text(this.font, title, x + (boxWidth - titleWidth) / 2, y + 4,  0xFF99EEFF);
+        context.text(this.font, hint,  x + (boxWidth - hintWidth)  / 2, y + 15, 0xFFAAAAAA);
+    }
+
     private void renderPetRevivePanel(GuiGraphicsExtractor context) {
         List<String> pets = MapState.getDeadPetDescriptions();
         int lineH = 11;
-        int panelW = 240;
+        int panelW = 260;
         int panelH = 36 + pets.size() * lineH;
         int px = (this.width - panelW) / 2;
         int py = (this.height - panelH) / 2 - 20;
@@ -3177,10 +3283,25 @@ public class MapScreen extends Screen {
         context.fill(px, py, px + 1, py + panelH, 0xFF888888);
         context.fill(px + panelW - 1, py, px + panelW, py + panelH, 0xFF888888);
 
-        context.text(this.font, "Dead Pets", px + 8, py + 7, 0xFFFFAA44);
+        context.text(this.font, "Dead Pets — click to select", px + 8, py + 7, 0xFFFFAA44);
         for (int i = 0; i < pets.size(); i++) {
-            context.text(this.font, "• " + pets.get(i), px + 8, py + 20 + i * lineH, 0xFFDDDDDD);
+            boolean sel = this.selectedPetIndices.contains(i);
+            String checkbox = sel ? "[x] " : "[ ] ";
+            int rowColor = sel ? 0xFF99FF99 : 0xFFDDDDDD;
+            context.text(this.font, checkbox + pets.get(i), px + 8, py + 20 + i * lineH, rowColor);
         }
+    }
+
+    /** Returns the bounding box of a pet row in the revive panel, or null if panel is not open. */
+    private int[] getPetRevivePanelRowBounds(int petIndex) {
+        List<String> pets = MapState.getDeadPetDescriptions();
+        int lineH = 11;
+        int panelW = 260;
+        int panelH = 36 + pets.size() * lineH;
+        int px = (this.width - panelW) / 2;
+        int py = (this.height - panelH) / 2 - 20;
+        int rowY = py + 20 + petIndex * lineH;
+        return new int[]{px, rowY, px + panelW, rowY + lineH};
     }
 
     private void renderWarDeclarationStatus(GuiGraphicsExtractor context) {
@@ -3237,6 +3358,30 @@ public class MapScreen extends Screen {
         this.lastRequestedPreviewChunk = null;
         this.lastPreviewRequestMillis = 0L;
         MapState.getTerritoryPreviewSyncCache().clear();
+    }
+
+    private void buildAnchorCycleList() {
+        anchorCycleList.clear();
+        String myAlliance = AllianceClientState.getAllianceName();
+        if (myAlliance == null) return;
+        this.territoryChunkSyncCache.getAll().stream()
+                .filter(td -> td.anchorChunk() && myAlliance.equals(td.allianceName()))
+                .sorted(java.util.Comparator.comparing(td -> td.anchorName() != null ? td.anchorName() : ""))
+                .forEach(td -> anchorCycleList.add(
+                        new AnchorEntry(td.anchorId(), td.anchorName(), td.chunkX(), td.chunkZ())));
+    }
+
+    private void cycleAnchor(int direction) {
+        if (anchorCycleList.isEmpty()) return;
+        anchorCycleIndex = Math.floorMod(anchorCycleIndex + direction, anchorCycleList.size());
+        AnchorEntry entry = anchorCycleList.get(anchorCycleIndex);
+        this.selectedAnchorId = entry.anchorId();
+        this.selectedAnchorName = entry.anchorName();
+        this.cameraBlockX = entry.chunkX() * 16.0 + 8;
+        this.cameraBlockZ = entry.chunkZ() * 16.0 + 8;
+        this.followPlayer = false;
+        MapState.getTerritoryPreviewSyncCache().clear();
+        this.textureDirty = true;
     }
 
     private void showScreenMessage(Component message, int durationMs) {

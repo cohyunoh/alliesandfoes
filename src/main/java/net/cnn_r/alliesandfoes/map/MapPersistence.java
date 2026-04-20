@@ -23,25 +23,23 @@ public class MapPersistence {
      * Save all cache types to per-dimension files under
      * alliesandfoes/world_cache/{levelId}/{dimId}/
      */
-    public static void save(WorldIdentity id, ChunkCache surface, ChunkCache cave,
+    public static void save(WorldIdentity id, ChunkCache surface,
                             ChunkCache nether, ChunkCache end, ChunkValueCache values) {
         String segment = id.toPathSegment();
-        saveColors(surface,  getPath(segment, "surface_chunks.dat"));
-        saveColors(cave,     getPath(segment, "cave_chunks.dat"));
-        saveColors(nether,   getPath(segment, "nether_chunks.dat"));
-        saveColors(end,      getPath(segment, "end_chunks.dat"));
-        saveValues(values,   getPath(segment, "chunk_values.dat"));
+        saveColors(surface, getPath(segment, "surface_chunks.dat"));
+        saveColors(nether,  getPath(segment, "nether_chunks.dat"));
+        saveColors(end,     getPath(segment, "end_chunks.dat"));
+        saveValues(values,  getPath(segment, "chunk_values.dat"));
     }
 
     /**
      * Load all cache types from per-dimension files.
      * Skips files that don't exist yet.
      */
-    public static void load(WorldIdentity id, ChunkCache surface, ChunkCache cave,
+    public static void load(WorldIdentity id, ChunkCache surface,
                             ChunkCache nether, ChunkCache end, ChunkValueCache values) {
         String segment = id.toPathSegment();
         loadColors(surface, getPath(segment, "surface_chunks.dat"), id.dimensionId());
-        loadColors(cave,    getPath(segment, "cave_chunks.dat"),    id.dimensionId());
         loadColors(nether,  getPath(segment, "nether_chunks.dat"),  id.dimensionId());
         loadColors(end,     getPath(segment, "end_chunks.dat"),     id.dimensionId());
         loadValues(values,  getPath(segment, "chunk_values.dat"),   id.dimensionId());

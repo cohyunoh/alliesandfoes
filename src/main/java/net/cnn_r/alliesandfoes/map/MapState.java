@@ -5,7 +5,6 @@ import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.cache.WarSyncCache;
-import net.cnn_r.alliesandfoes.map.indoor.IndoorMask;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryPreviewSyncCache;
@@ -18,13 +17,14 @@ import net.minecraft.world.level.chunk.LevelChunk;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class MapState {
     private static ChunkCache chunkCache;
-    private static ChunkCache caveChunkCache;
     private static ChunkCache netherChunkCache;
     private static ChunkCache endChunkCache;
     private static ChunkValueCache chunkValueCache;
@@ -44,31 +44,21 @@ public class MapState {
 
     private static final int Y_RESCAN_THRESHOLD = 8;
 
-    /**
-     * Minimum distance between the WORLD_SURFACE height and the player's Y for
-     * ceiling mode to activate. Values ≤ this threshold are treated as small
-     * overhangs (trees, porches) and rendered in normal surface mode.
-     */
-    public static final int CEILING_DETECTION_THRESHOLD = 4;
-
     /** Current map render mode, updated each client tick via ModeResolver. */
     private static volatile MapRenderMode currentMode = MapRenderMode.SURFACE;
-
-    /** Game tick of the last mode switch (Long.MIN_VALUE = never switched). */
-    private static volatile long lastModeChangeTick = Long.MIN_VALUE;
-    private static final int MODE_HYSTERESIS_TICKS = 5;
 
     /** Current world+dimension identity — used for cache isolation. */
     private static volatile WorldIdentity currentWorldId = null;
 
-    /** Flood-fill mask for INDOOR_LOCAL mode; null when not in indoor mode. */
-    private static volatile IndoorMask indoorMask = null;
-
     /** Set to true by the scanner thread after a chunk finishes scanning. */
     private static volatile boolean mapDirty = false;
 
+    /** Per-chunk queue populated by scanner threads; drained each frame for incremental texture updates. */
+    private static final Queue<ChunkKey> recentlyScanned = new ConcurrentLinkedQueue<>();
+
     private static volatile String pendingMapMessage = null;
     private static volatile int allianceInfluenceBalance = 0;
+    private static volatile int allianceTierBonus = 0;
 
     private static volatile UUID rollbackWarId = null;
     private static final Set<ChunkKey> rollbackEligibleChunks = ConcurrentHashMap.newKeySet();
@@ -81,11 +71,6 @@ public class MapState {
     public static ChunkCache getChunkCache() {
         if (chunkCache == null) chunkCache = new ChunkCache();
         return chunkCache;
-    }
-
-    public static ChunkCache getCaveChunkCache() {
-        if (caveChunkCache == null) caveChunkCache = new ChunkCache();
-        return caveChunkCache;
     }
 
     public static ChunkCache getNetherChunkCache() {
@@ -132,7 +117,21 @@ public class MapState {
         loadedChunks.add(key);
 
         ChunkScanner s = getScanner();
-        if (s == null || s.isQueued(pos)) return;
+        if (s == null) return;
+
+        // Immediately queue dimension-specific scan so nether/end chunks don't
+        // wait for the per-tick maybeScanNearbyCaveChunks radius.
+        if (currentMode == MapRenderMode.NETHER) {
+            if (!getNetherChunkCache().hasChunk(key) && !s.isNetherQueued(pos)) {
+                s.requestNetherScan(chunk);
+            }
+        } else if (currentMode == MapRenderMode.END) {
+            if (!getEndChunkCache().hasChunk(key) && !s.isEndQueued(pos)) {
+                s.requestEndScan(chunk);
+            }
+        }
+
+        if (s.isQueued(pos)) return;
 
         boolean hasMapColors = getChunkCache().hasChunk(key);
         boolean hasValueData = getChunkValueCache().has(key);
@@ -190,58 +189,25 @@ public class MapState {
         return currentMode;
     }
 
-    /**
-     * Updates the render mode with hysteresis to prevent flicker at mode boundaries.
-     * Changes are rejected if a mode switch happened within the last MODE_HYSTERESIS_TICKS ticks.
-     */
     public static void setCurrentMode(MapRenderMode newMode) {
         if (newMode == currentMode) return;
-
-        ClientLevel level = Minecraft.getInstance().level;
-        long tick = level != null ? level.getGameTime() : 0L;
-
-        if (lastModeChangeTick != Long.MIN_VALUE && tick - lastModeChangeTick < MODE_HYSTERESIS_TICKS) {
-            return;
-        }
-
-        MapRenderMode old = currentMode;
         currentMode = newMode;
-        lastModeChangeTick = tick;
-
-        // Clear indoor mask when leaving INDOOR_LOCAL
-        if (old == MapRenderMode.INDOOR_LOCAL && newMode != MapRenderMode.INDOOR_LOCAL) {
-            indoorMask = null;
-        }
-
-        // Clear cave cache when freshly entering cave/indoor from surface
-        if (old == MapRenderMode.SURFACE
-                && (newMode == MapRenderMode.CAVE || newMode == MapRenderMode.INDOOR_LOCAL)) {
-            clearCaveDimensionCache();
-        }
-
-        // Rescan dimension when returning to surface
         if (newMode == MapRenderMode.SURFACE) {
             triggerRescanCurrentDimension();
         }
     }
 
-    /** Force-resets mode without hysteresis. Use on dimension change / world switch. */
+    /** Force-resets mode without side effects. Use on dimension change / world switch. */
     public static void resetMode() {
         currentMode = MapRenderMode.SURFACE;
-        lastModeChangeTick = Long.MIN_VALUE;
-        indoorMask = null;
     }
 
     // -------------------------------------------------------------------------
-    // Backwards-compatible ceiling accessor (used by HudMinimapRenderer, MapScreen,
-    // ChunkScanner, flushBlockDirtyChunks, etc.)
+    // Ceiling accessor used by some callers — true only in NETHER (no sky)
     // -------------------------------------------------------------------------
 
-    /** Returns true when the player is in a mode that requires ceiling-aware rendering. */
     public static boolean getPlayerHasCeiling() {
-        return currentMode == MapRenderMode.CAVE
-                || currentMode == MapRenderMode.INDOOR_LOCAL
-                || currentMode == MapRenderMode.NETHER;
+        return currentMode == MapRenderMode.NETHER;
     }
 
     // -------------------------------------------------------------------------
@@ -257,19 +223,7 @@ public class MapState {
     }
 
     // -------------------------------------------------------------------------
-    // Indoor mask
-    // -------------------------------------------------------------------------
-
-    public static IndoorMask getIndoorMask() {
-        return indoorMask;
-    }
-
-    public static void setIndoorMask(IndoorMask mask) {
-        indoorMask = mask;
-    }
-
-    // -------------------------------------------------------------------------
-    // Player Y tracking for ceiling-aware scanning
+    // Player Y tracking for scanning
     // -------------------------------------------------------------------------
 
     public static int getPlayerScanY() {
@@ -310,15 +264,13 @@ public class MapState {
             if (entry.getValue() > now) return false;
             ChunkKey key = entry.getKey();
             getChunkCache().remove(key);
-            getCaveChunkCache().remove(key);
             if (level.hasChunk(key.getChunkX(), key.getChunkZ())) {
                 LevelChunk chunk = level.getChunk(key.getChunkX(), key.getChunkZ());
                 s.requestScan(chunk);
                 switch (currentMode) {
-                    case CAVE, INDOOR_LOCAL -> s.requestCaveScan(chunk);
                     case NETHER -> s.requestNetherScan(chunk);
-                    case END -> s.requestEndScan(chunk);
-                    default -> {}
+                    case END    -> s.requestEndScan(chunk);
+                    default     -> {}
                 }
             }
             return true;
@@ -335,44 +287,82 @@ public class MapState {
         return dirty;
     }
 
+    /** Called by ChunkScanner after each chunk finishes — enables incremental texture updates. */
+    public static void markChunkScanned(ChunkKey key) {
+        recentlyScanned.add(key);
+        mapDirty = true;
+    }
+
+    /** Drains and returns every chunk that finished scanning since the last call. */
+    public static List<ChunkKey> drainRecentlyScanned() {
+        if (recentlyScanned.isEmpty()) return List.of();
+        List<ChunkKey> result = new ArrayList<>();
+        ChunkKey k;
+        while ((k = recentlyScanned.poll()) != null) result.add(k);
+        return result;
+    }
+
     // -------------------------------------------------------------------------
-    // Nearby cave chunk management
+    // Nearby nether/end chunk management
     // -------------------------------------------------------------------------
 
-    public static void clearNearbyCaveChunks(ClientLevel level, ChunkPos center, int radius) {
-        ChunkCache cave = getCaveChunkCache();
+    public static void clearNearbyNetherChunks(ClientLevel level, ChunkPos center, int radius) {
+        ChunkCache nether = getNetherChunkCache();
         String dimId = level.dimension().identifier().toString();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                cave.remove(new ChunkKey(dimId, center.x() + dx, center.z() + dz));
+                nether.remove(new ChunkKey(dimId, center.x() + dx, center.z() + dz));
             }
         }
     }
 
-    private static void clearCaveDimensionCache() {
+    /** Clears the entire nether cache and immediately re-queues every loaded chunk for
+     *  re-scan. Called on significant player Y changes. Full cache clear ensures all
+     *  displayed chunks reflect the same Y level — no mixed-perspective artifacts. */
+    public static void clearAndRescanAllNetherChunks() {
+        ChunkScanner s = getScanner();
         ClientLevel level = Minecraft.getInstance().level;
-        if (level == null) return;
+        if (s == null || level == null) return;
         String dimId = level.dimension().identifier().toString();
-        for (ChunkKey key : loadedChunks) {
-            if (key.getDimensionId().equals(dimId)) {
-                getCaveChunkCache().remove(key);
-            }
-        }
+
+        s.invalidateNetherScans();
+        getNetherChunkCache().clear();
+
+        ChunkPos playerChunk = Minecraft.getInstance().player != null
+                ? Minecraft.getInstance().player.chunkPosition() : new ChunkPos(0, 0);
+
+        loadedChunks.stream()
+                .filter(key -> key.getDimensionId().equals(dimId))
+                .sorted(java.util.Comparator.comparingInt(key ->
+                        Math.abs(key.getChunkX() - playerChunk.x()) +
+                        Math.abs(key.getChunkZ() - playerChunk.z())))
+                .forEach(key -> {
+                    int cx = key.getChunkX(), cz = key.getChunkZ();
+                    if (level.hasChunk(cx, cz)) {
+                        s.requestNetherScan(level.getChunk(cx, cz));
+                    }
+                });
     }
 
     private static void triggerRescanCurrentDimension() {
         ChunkScanner s = getScanner();
         ClientLevel level = Minecraft.getInstance().level;
-        if (s != null && level != null) {
-            String dimId = level.dimension().identifier().toString();
-            for (ChunkKey key : loadedChunks) {
-                if (key.getDimensionId().equals(dimId)) {
+        if (s == null || level == null) return;
+        String dimId = level.dimension().identifier().toString();
+
+        ChunkPos playerChunk = Minecraft.getInstance().player != null
+                ? Minecraft.getInstance().player.chunkPosition() : new ChunkPos(0, 0);
+
+        loadedChunks.stream()
+                .filter(key -> key.getDimensionId().equals(dimId))
+                .sorted(java.util.Comparator.comparingInt(key ->
+                        Math.abs(key.getChunkX() - playerChunk.x()) +
+                        Math.abs(key.getChunkZ() - playerChunk.z())))
+                .forEach(key -> {
                     getChunkCache().remove(key);
                     LevelChunk chunk = level.getChunk(key.getChunkX(), key.getChunkZ());
                     s.requestScan(chunk);
-                }
-            }
-        }
+                });
     }
 
     // -------------------------------------------------------------------------
@@ -393,6 +383,13 @@ public class MapState {
 
     public static int getAllianceInfluenceBalance() { return allianceInfluenceBalance; }
     public static void setAllianceInfluenceBalance(int balance) { allianceInfluenceBalance = balance; }
+
+    // -------------------------------------------------------------------------
+    // Alliance tier bonus (additive Explorer tier bonus from alliance XP)
+    // -------------------------------------------------------------------------
+
+    public static int getAllianceTierBonus() { return allianceTierBonus; }
+    public static void setAllianceTierBonus(int bonus) { allianceTierBonus = bonus; }
 
     // -------------------------------------------------------------------------
     // Rollback eligible chunks
@@ -432,7 +429,6 @@ public class MapState {
             scanner = null;
         }
         if (chunkCache != null) chunkCache.clear();
-        if (caveChunkCache != null) caveChunkCache.clear();
         if (netherChunkCache != null) netherChunkCache.clear();
         if (endChunkCache != null) endChunkCache.clear();
         netherChunkCache = null;
@@ -447,9 +443,8 @@ public class MapState {
         loadedChunks.clear();
         pendingBlockDirty.clear();
         mapDirty = false;
+        recentlyScanned.clear();
         currentMode = MapRenderMode.SURFACE;
-        lastModeChangeTick = Long.MIN_VALUE;
-        indoorMask = null;
         currentWorldId = null;
         rollbackWarId = null;
         rollbackEligibleChunks.clear();

@@ -3,6 +3,7 @@ package net.cnn_r.alliesandfoes.map.intuition;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillTier;
+import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
@@ -40,8 +41,110 @@ public final class ExplorerIntuitionEvaluator {
     private static final int MIN_REQUIRED_SAMPLES = 6;
     private static final float DOMINANCE_RANGE_FOR_MAX_SIGNAL = 0.20f;
     private static final double TARGET_SCORE_MULTIPLIER = 6.0;
+    private static final double MAX_CHUNK_SCORE = 10.75; // 10 value + 0.75 structure bonus
 
-    private ExplorerIntuitionEvaluator() {
+    /** Per-edge glow intensities relative to the player's screen orientation. */
+    public record EdgeGlowResult(float front, float right, float back, float left) {}
+
+    private ExplorerIntuitionEvaluator() {}
+
+    // -------------------------------------------------------------------------
+    // Edge glow evaluation — called by HudMinimapRenderer
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns per-edge glow intensities {front, right, back, left} in [0,1]
+     * relative to the player's screen orientation (yawDeg = player Y rotation).
+     * Radius and noise floor scale with Explorer tier + alliance bonus.
+     * When a Journal target is active, only matching chunks contribute signal.
+     */
+    public static EdgeGlowResult evaluateEdgeScores(
+            ChunkPos center, float yawDeg, String dimensionId,
+            ChunkValueCache chunkValueCache, ChunkStructureSyncCache structureCache) {
+
+        ExplorerSkillTier personal = ExplorerSkillClientState.getTier();
+        int allianceBonus = MapState.getAllianceTierBonus();
+        ExplorerSkillTier[] tiers = ExplorerSkillTier.values();
+        ExplorerSkillTier effective = tiers[Math.min(tiers.length - 1, personal.ordinal() + allianceBonus)];
+
+        int radius = radiusForTier(effective);
+        float noiseFloor = noiseFloorForTier(effective);
+
+        IntuitionTarget target = ExplorerDiscoveryClientState.getActiveTarget();
+        boolean targetMode = (target != null);
+
+        Level level = null;
+        if (targetMode && target.type() == IntuitionTarget.TargetType.BIOME) {
+            level = Minecraft.getInstance().level;
+        }
+
+        double yawRad  = Math.toRadians(yawDeg);
+        double facingX = -Math.sin(yawRad);
+        double facingZ =  Math.cos(yawRad);
+        double rightX  =  Math.cos(yawRad);
+        double rightZ  =  Math.sin(yawRad);
+
+        double frontAcc = 0, rightAcc = 0, backAcc = 0, leftAcc = 0;
+
+        for (int dz = -radius; dz <= radius; dz++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                if (dx == 0 && dz == 0) continue;
+
+                ChunkKey key = new ChunkKey(dimensionId, center.x() + dx, center.z() + dz);
+                ChunkValueData valueData = chunkValueCache.get(key);
+                if (valueData == null) continue;
+
+                ChunkStructureData structureData = structureCache.get(key);
+                double baseScore = ExplorerIntuitionProfile.INSTANCE.scoreChunk(valueData, structureData);
+
+                double score;
+                if (targetMode) {
+                    double boosted = applyTargetBoost(baseScore, new ChunkPos(center.x() + dx, center.z() + dz),
+                            structureData, target, level);
+                    score = (boosted > baseScore) ? (boosted / (MAX_CHUNK_SCORE * TARGET_SCORE_MULTIPLIER)) : 0.0;
+                } else {
+                    score = baseScore / MAX_CHUNK_SCORE;
+                }
+                if (score <= 0) continue;
+
+                double mag = Math.sqrt((double)(dx * dx + dz * dz));
+                double ndx = dx / mag;
+                double ndz = dz / mag;
+
+                double fDot = ndx * facingX + ndz * facingZ;
+                double rDot = ndx * rightX  + ndz * rightZ;
+
+                frontAcc += score * Math.max(0, fDot);
+                backAcc  += score * Math.max(0, -fDot);
+                rightAcc += score * Math.max(0, rDot);
+                leftAcc  += score * Math.max(0, -rDot);
+            }
+        }
+
+        // Normalize to [0,1] with brightest edge = 1.0
+        double maxAcc = Math.max(Math.max(frontAcc, backAcc), Math.max(rightAcc, leftAcc));
+        if (maxAcc <= 0) return new EdgeGlowResult(0, 0, 0, 0);
+        float f = (float)(frontAcc / maxAcc);
+        float r = (float)(rightAcc / maxAcc);
+        float b = (float)(backAcc  / maxAcc);
+        float l = (float)(leftAcc  / maxAcc);
+
+        // Apply noise floor — zero out weak directions
+        if (f < noiseFloor) f = 0;
+        if (r < noiseFloor) r = 0;
+        if (b < noiseFloor) b = 0;
+        if (l < noiseFloor) l = 0;
+
+        return new EdgeGlowResult(f, r, b, l);
+    }
+
+    private static float noiseFloorForTier(ExplorerSkillTier tier) {
+        return switch (tier) {
+            case NONE   -> 0.4f;
+            case TIER_1 -> 0.3f;
+            case TIER_2 -> 0.2f;
+            case TIER_3 -> 0.1f;
+        };
     }
 
     // -------------------------------------------------------------------------

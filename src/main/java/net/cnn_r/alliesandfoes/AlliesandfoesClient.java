@@ -5,18 +5,18 @@ import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteManagementScreen;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryRules;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillClientState;
-import net.cnn_r.alliesandfoes.hud.HudMinimapRenderer;
+import net.cnn_r.alliesandfoes.hud.HudIntuitionRenderer;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
+import net.cnn_r.alliesandfoes.map.MapPersistence;
 import net.cnn_r.alliesandfoes.map.MapRenderMode;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.ModeResolver;
 import net.cnn_r.alliesandfoes.map.WorldIdentity;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
-import net.cnn_r.alliesandfoes.map.indoor.IndoorMask;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.network.*;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
@@ -35,7 +35,6 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.chunk.LevelChunk;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -340,7 +339,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
         });
 
         HudElementRegistry.addLast(net.minecraft.resources.Identifier.parse("alliesandfoes:minimap"),
-                (drawContext, tickCounter) -> HudMinimapRenderer.render(drawContext, tickCounter));
+                (drawContext, tickCounter) -> HudIntuitionRenderer.render(drawContext, tickCounter));
 
         // Update the Y level and render mode used for chunk scanning each tick.
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -361,30 +360,21 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     }
                 }
 
-                // Resolve the current render mode using openness, enclosure, and dimension checks.
+                // Resolve the current render mode from dimension only.
                 MapRenderMode resolved = ModeResolver.resolve(client.level, player);
                 MapState.setCurrentMode(resolved);
 
-                if (resolved == MapRenderMode.CAVE || resolved == MapRenderMode.INDOOR_LOCAL) {
-                    if (lastCavePlayerY == Integer.MIN_VALUE
-                            || Math.abs(playerY - lastCavePlayerY) >= CAVE_Y_RESCAN_THRESHOLD) {
-                        MapState.clearNearbyCaveChunks(client.level, player.chunkPosition(),
-                                CAVE_SCAN_RADIUS + 1);
-                        lastCavePlayerY = playerY;
-                    }
-                    // Refresh indoor mask every 20 ticks in INDOOR_LOCAL mode
-                    if (resolved == MapRenderMode.INDOOR_LOCAL) {
-                        if (indoorMaskTicker++ >= 20) {
-                            indoorMaskTicker = 0;
-                            IndoorMask mask = IndoorMask.compute(
-                                    client.level, player.blockPosition(), MapState.getPlayerScanY());
-                            MapState.setIndoorMask(mask);
+                if (resolved == MapRenderMode.NETHER || resolved == MapRenderMode.END) {
+                    if (resolved == MapRenderMode.NETHER) {
+                        if (lastNetherPlayerY == Integer.MIN_VALUE
+                                || Math.abs(playerY - lastNetherPlayerY) >= NETHER_Y_RESCAN_THRESHOLD) {
+                            MapState.clearAndRescanAllNetherChunks();
+                            lastNetherPlayerY = playerY;
                         }
                     }
                     maybeScanNearbyCaveChunks(client, player);
                 } else {
-                    lastCavePlayerY = Integer.MIN_VALUE;
-                    indoorMaskTicker = 0;
+                    lastNetherPlayerY = Integer.MIN_VALUE;
                 }
 
                 // Periodically rescan nearby chunks to pick up placed/broken blocks.
@@ -481,7 +471,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
             AllianceClientState.clearPendingWarInvites();
             ExplorerSkillClientState.reset();
             ExplorerDiscoveryClientState.reset();
-            HudMinimapRenderer.reset();
+            HudIntuitionRenderer.reset();
+            lastNetherPlayerY = Integer.MIN_VALUE;
         });
 
         // Also clear at the very start of a new connection (before any world
@@ -494,7 +485,24 @@ public class AlliesandfoesClient implements ClientModInitializer {
             MapState.setCurrentWorldId(WorldIdentity.current(client));
             ExplorerSkillClientState.reset();
             ExplorerDiscoveryClientState.reset();
-            HudMinimapRenderer.reset();
+            HudIntuitionRenderer.reset();
+        });
+
+        // Pre-load the disk cache as soon as the player enters the world so that
+        // the map screen renders instantly on first open rather than showing blank.
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            WorldIdentity worldId = WorldIdentity.current(client);
+            MapState.setCurrentWorldId(worldId);
+            Thread t = new Thread(() -> {
+                MapPersistence.load(worldId,
+                        MapState.getChunkCache(),
+                        MapState.getNetherChunkCache(),
+                        MapState.getEndChunkCache(),
+                        MapState.getChunkValueCache());
+                MapState.markMapDirty();
+            }, "map-persistence-preload");
+            t.setDaemon(true);
+            t.start();
         });
     }
 
@@ -572,13 +580,12 @@ public class AlliesandfoesClient implements ClientModInitializer {
     }
 
     private static final int CAVE_SCAN_RADIUS = 2;
-    private static final int CAVE_Y_RESCAN_THRESHOLD = 3;
-    private static int lastCavePlayerY = Integer.MIN_VALUE;
+    private static final int NETHER_Y_RESCAN_THRESHOLD = 8;
+    private static int lastNetherPlayerY = Integer.MIN_VALUE;
 
     private static final int NEARBY_RESCAN_INTERVAL_TICKS = 80; // ~4 seconds
     private static final int NEARBY_RESCAN_RADIUS = 1;
     private static int nearbyRescanTicker = 0;
-    private static int indoorMaskTicker = 0;
 
     private static void maybeRescanNearbyChunks(Minecraft client, LocalPlayer player) {
         ChunkScanner scanner = MapState.getScanner();
@@ -599,9 +606,6 @@ public class AlliesandfoesClient implements ClientModInitializer {
             }
         }
 
-        if (MapState.getPlayerHasCeiling()) {
-            MapState.clearNearbyCaveChunks(level, playerChunk, NEARBY_RESCAN_RADIUS);
-        }
     }
 
     private static void maybeScanNearbyCaveChunks(Minecraft client, LocalPlayer player) {
@@ -621,11 +625,6 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 if (!level.hasChunk(cx, cz)) continue;
 
                 switch (mode) {
-                    case CAVE, INDOOR_LOCAL -> {
-                        if (!MapState.getCaveChunkCache().hasChunk(key) && !scanner.isCaveQueued(chunkPos)) {
-                            scanner.requestCaveScan(level.getChunk(cx, cz));
-                        }
-                    }
                     case NETHER -> {
                         if (!MapState.getNetherChunkCache().hasChunk(key) && !scanner.isNetherQueued(chunkPos)) {
                             scanner.requestNetherScan(level.getChunk(cx, cz));

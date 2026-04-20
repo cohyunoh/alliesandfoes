@@ -36,11 +36,7 @@ public class MapTexture {
     }
 
     public void clear(int color) {
-        for (int x = 0; x < this.textureSize; x++) {
-            for (int y = 0; y < this.textureSize; y++) {
-                this.image.setPixel(x, y, color);
-            }
-        }
+        this.image.fillRect(0, 0, this.textureSize, this.textureSize, color);
     }
 
     public void upload() {
