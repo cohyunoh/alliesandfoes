@@ -448,6 +448,10 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 MapState.setRollbackEligible(payload.warId(), chunks, payload.costPerChunk());
             }));
 
+        ClientPlayNetworking.registerGlobalReceiver(DeadPetListSyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() ->
+                MapState.setDeadPets(payload.warId(), payload.petDescriptions(), payload.totalCost())));
+
         KeyBindings.register();
 
         // Clear all client-side caches when leaving a world so stale data

@@ -73,7 +73,13 @@
       "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.1.2/minecraft-merged-deobf-26.1.2.jar\" \"net.minecraft.world.entity.Entity\")",
       "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.1.2/minecraft-merged-deobf-26.1.2.jar\" \"net.minecraft.world.entity.EntityType\")",
       "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.1.2/minecraft-merged-deobf-26.1.2.jar\" \"net.minecraft.world.level.storage.TagValueOutput\")",
-      "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.1.2/minecraft-merged-deobf-26.1.2.jar\" \"net.minecraft.util.ProblemReporter\")"
+      "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged-deobf/26.1.2/minecraft-merged-deobf-26.1.2.jar\" \"net.minecraft.util.ProblemReporter\")",
+      "Bash(gradle compileJava)",
+      "Bash(bash gradlew *)",
+      "Bash(/usr/libexec/java_home)",
+      "Bash(JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-22.jdk/Contents/Home bash gradlew compileJava)",
+      "Bash(/usr/libexec/java_home *)",
+      "Bash(chmod +x gradlew)"
     ]
   }
 }

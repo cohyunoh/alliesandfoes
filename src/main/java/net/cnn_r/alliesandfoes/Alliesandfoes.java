@@ -2,6 +2,8 @@ package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.network.DeadPetListSyncPayload;
+import net.cnn_r.alliesandfoes.network.RequestPetRevivePayload;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWar;
@@ -117,6 +119,8 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.clientboundPlay().register(AllianceInfluenceSyncPayload.TYPE, AllianceInfluenceSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(RollbackEligibleSyncPayload.TYPE, RollbackEligibleSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestRollbackChunkPayload.TYPE, RequestRollbackChunkPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(DeadPetListSyncPayload.TYPE, DeadPetListSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestPetRevivePayload.TYPE, RequestPetRevivePayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -385,6 +389,91 @@ public class Alliesandfoes implements ModInitializer {
 			});
 		});
 
+		// Territory protection: non-members cannot hurt alliance members or their tamed pets
+		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+			MinecraftServer server = entity.level() instanceof ServerLevel sl ? sl.getServer() : null;
+			if (server == null) return true;
+
+			String dimId = entity.level().dimension().identifier().toString();
+			ChunkKey victimChunk = new ChunkKey(dimId,
+					entity.blockPosition().getX() >> 4,
+					entity.blockPosition().getZ() >> 4);
+
+			TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(victimChunk);
+			if (claim == null) return true;
+
+			boolean inActiveWar = AllianceWarService.get(server).getActiveWars().stream()
+					.anyMatch(w -> w.contestedChunks().contains(victimChunk));
+			if (inActiveWar) return true;
+
+			UUID claimingAllianceId = claim.getAllianceId();
+
+			boolean victimIsProtected = false;
+			if (entity instanceof ServerPlayer vp) {
+				Alliance va = AllianceManager.get(server).getAllianceFor(vp.getUUID());
+				victimIsProtected = va != null && va.getId().equals(claimingAllianceId);
+			} else if (entity instanceof TamableAnimal tamable && tamable.isTame()) {
+				var ownerRef = tamable.getOwnerReference();
+				if (ownerRef != null) {
+					Alliance oa = AllianceManager.get(server).getAllianceFor(ownerRef.getUUID());
+					victimIsProtected = oa != null && oa.getId().equals(claimingAllianceId);
+				}
+			}
+
+			if (!victimIsProtected) return true;
+
+			net.minecraft.world.entity.Entity attacker = source.getEntity();
+			if (attacker == null) return true;
+
+			if (attacker instanceof ServerPlayer ap) {
+				Alliance aa = AllianceManager.get(server).getAllianceFor(ap.getUUID());
+				return aa != null && aa.getId().equals(claimingAllianceId);
+			}
+			return false;
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestPetRevivePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				ServerPlayer player = context.player();
+				MinecraftServer server = context.server();
+				Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+				if (alliance == null || !alliance.getOwnerUuid().equals(player.getUUID())) return;
+
+				net.cnn_r.alliesandfoes.alliance.war.AllianceWar war =
+						AllianceWarService.get(server).getWarById(payload.warId());
+				if (war == null || !war.defenderId().equals(alliance.getId())) return;
+
+				WarSnapshotService snap = WarSnapshotService.get(server);
+				List<WarSnapshotService.PetDeathRecord> pets = snap.getPetDeaths(payload.warId());
+				if (pets.isEmpty()) return;
+
+				int cost = pets.size() * AllianceWarService.PET_REVIVE_COST_EACH;
+				AllianceProgressionService prog = AllianceProgressionService.get(server);
+				if (!prog.canAfford(alliance.getId(), cost)) {
+					ServerPlayNetworking.send(player, new MapScreenMessagePayload(
+							"Need " + cost + " influence to revive " + pets.size() + " pet(s)."));
+					return;
+				}
+				prog.trySpend(alliance.getId(), cost);
+
+				for (WarSnapshotService.PetDeathRecord pet : pets) {
+					ServerPlayer owner = pet.ownerUuid() != null
+							? server.getPlayerList().getPlayer(pet.ownerUuid()) : null;
+					ServerPlayer spawnTarget = owner != null ? owner : player;
+					net.minecraft.server.level.ServerLevel spawnLevel = (net.minecraft.server.level.ServerLevel) spawnTarget.level();
+					net.minecraft.world.entity.EntityType.loadEntityRecursive(
+							pet.entityNbt(), spawnLevel, net.minecraft.world.entity.EntitySpawnReason.LOAD,
+							e -> {
+								e.setPos(spawnTarget.getX(), spawnTarget.getY(), spawnTarget.getZ());
+								spawnLevel.addFreshEntity(e);
+								return e;
+							});
+				}
+				snap.clearPetDeaths(payload.warId());
+				AllianceWarService.get(server).broadcastDeadPets(payload.warId());
+			});
+		});
+
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
 			if (!(entity instanceof TamableAnimal tamable) || !tamable.isTame()) return;
 			var ownerRef = tamable.getOwnerReference();
@@ -559,7 +648,10 @@ public class Alliesandfoes implements ModInitializer {
 				// Broadcast any rollback-eligible chunks for ended wars this player defended
 				AllianceWarService.get(server).getEndedWarsFor(joinAlliance.getId()).stream()
 						.filter(w -> w.defenderId().equals(joinAlliance.getId()))
-						.forEach(w -> AllianceWarService.get(server).broadcastRollbackEligible(w.id()));
+						.forEach(w -> {
+							AllianceWarService.get(server).broadcastRollbackEligible(w.id());
+							AllianceWarService.get(server).broadcastDeadPets(w.id());
+						});
 			}
 
 			TerritoryManager tm = TerritoryManager.get(server);

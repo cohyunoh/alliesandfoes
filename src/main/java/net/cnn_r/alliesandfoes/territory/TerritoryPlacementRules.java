@@ -99,9 +99,7 @@ public final class TerritoryPlacementRules {
             int distance = chebyshevDistance(targetChunk, claim.getChunkKey());
             if (distance <= SAME_ALLIANCE_FOUNDING_SPACING) {
                 return RuleResult.deny(
-                        "Too close to existing alliance territory. Founding requires at least "
-                                + (SAME_ALLIANCE_FOUNDING_SPACING + 1)
-                                + " chunks of spacing from your alliance's claimed territory."
+                        "Too close to own territory (need " + (SAME_ALLIANCE_FOUNDING_SPACING + 1) + " chunk gap)"
                 );
             }
         }
@@ -127,9 +125,7 @@ public final class TerritoryPlacementRules {
             int distance = chebyshevDistance(targetChunk, claim.getChunkKey());
             if (distance <= FOREIGN_ALLIANCE_FOUNDING_SPACING) {
                 return RuleResult.deny(
-                        "Too close to foreign territory. Founding requires at least "
-                                + (FOREIGN_ALLIANCE_FOUNDING_SPACING + 1)
-                                + " chunks of spacing from another alliance's claimed territory."
+                        "Too close to foreign territory (need " + (FOREIGN_ALLIANCE_FOUNDING_SPACING + 1) + " chunk gap)"
                 );
             }
         }

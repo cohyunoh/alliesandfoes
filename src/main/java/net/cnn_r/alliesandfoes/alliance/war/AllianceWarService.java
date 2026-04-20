@@ -8,6 +8,7 @@ import net.cnn_r.alliesandfoes.territory.TerritoryClaim;
 import net.cnn_r.alliesandfoes.territory.TerritoryManager;
 import net.cnn_r.alliesandfoes.territory.TerritoryMapSyncService;
 import net.cnn_r.alliesandfoes.territory.TerritoryQueryService;
+import net.cnn_r.alliesandfoes.network.DeadPetListSyncPayload;
 import net.cnn_r.alliesandfoes.network.RollbackEligibleSyncPayload;
 import net.cnn_r.alliesandfoes.network.TerritoryChunkBatchPayload;
 import net.cnn_r.alliesandfoes.network.WarInvitePayload;
@@ -26,7 +27,10 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 
+import net.minecraft.nbt.CompoundTag;
+
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -37,6 +41,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
+import java.util.stream.Collectors;
 
 public class AllianceWarService {
     private static final Map<MinecraftServer, AllianceWarService> INSTANCES = new WeakHashMap<>();
@@ -54,6 +59,7 @@ public class AllianceWarService {
     public static final int ANCHOR_CONTEST_COST       = 50;
     public static final int ANCHOR_EXTRA_COST_PER_CLAIM = 5;
     public static final int ROLLBACK_COST_PER_CHUNK   = 10;
+    public static final int PET_REVIVE_COST_EACH       = 5;
 
     private final MinecraftServer server;
     private final List<AllianceWar> wars = new ArrayList<>();
@@ -272,6 +278,35 @@ public class AllianceWarService {
             ServerPlayer p = server.getPlayerList().getPlayer(memberId);
             if (p != null) ServerPlayNetworking.send(p, payload);
         }
+    }
+
+    public void broadcastDeadPets(UUID warId) {
+        AllianceWar war = getWarById(warId);
+        if (war == null) return;
+        List<WarSnapshotService.PetDeathRecord> pets = WarSnapshotService.get(server).getPetDeaths(warId);
+        int total = pets.size() * PET_REVIVE_COST_EACH;
+        List<String> descriptions = pets.stream().map(p -> describeEntity(p.entityNbt())).toList();
+        DeadPetListSyncPayload payload = new DeadPetListSyncPayload(warId, descriptions, total);
+        Alliance defender = AllianceManager.get(server).getAllianceById(war.defenderId());
+        if (defender == null) return;
+        for (UUID memberId : defender.getMemberUuids()) {
+            ServerPlayer p = server.getPlayerList().getPlayer(memberId);
+            if (p != null) ServerPlayNetworking.send(p, payload);
+        }
+    }
+
+    private static String describeEntity(CompoundTag nbt) {
+        String id = nbt.getString("id").orElse("unknown");
+        String path = id.contains(":") ? id.substring(id.indexOf(':') + 1) : id;
+        String base = Arrays.stream(path.split("_"))
+                .map(w -> w.isEmpty() ? w : Character.toUpperCase(w.charAt(0)) + w.substring(1))
+                .collect(Collectors.joining(" "));
+        String customNameTag = nbt.getString("CustomName").orElse("");
+        if (!customNameTag.isBlank()) {
+            String plain = customNameTag.replaceAll("\\{.*?\"text\":\"(.*?)\".*?\\}", "$1");
+            if (!plain.equals(customNameTag) && !plain.isBlank()) base += " — " + plain;
+        }
+        return base;
     }
 
     // =========================================================================
@@ -656,6 +691,7 @@ public class AllianceWarService {
         warPlayerStats.remove(war.id());
 
         broadcastRollbackEligible(war.id());
+        broadcastDeadPets(war.id());
     }
 
     private CustomBossEvent getOrCreateBossBar(AllianceWar war) {

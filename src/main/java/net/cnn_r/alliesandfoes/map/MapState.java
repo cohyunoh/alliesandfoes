@@ -61,6 +61,10 @@ public class MapState {
     private static final Set<ChunkKey> rollbackEligibleChunks = ConcurrentHashMap.newKeySet();
     private static volatile int rollbackCostPerChunk = 10;
 
+    private static volatile UUID deadPetsWarId = null;
+    private static volatile List<String> deadPetDescriptions = List.of();
+    private static volatile int petReviveTotalCost = 0;
+
     public static ChunkCache getChunkCache() {
         if (chunkCache == null) {
             chunkCache = new ChunkCache();
@@ -365,6 +369,21 @@ public class MapState {
     public static int getRollbackCostPerChunk()             { return rollbackCostPerChunk; }
 
     // -------------------------------------------------------------------------
+    // Dead pets state (synced from server after war ends)
+    // -------------------------------------------------------------------------
+
+    public static void setDeadPets(UUID warId, List<String> descriptions, int cost) {
+        deadPetsWarId = warId;
+        deadPetDescriptions = List.copyOf(descriptions);
+        petReviveTotalCost = cost;
+    }
+
+    public static boolean hasDeadPets()                      { return !deadPetDescriptions.isEmpty(); }
+    public static List<String> getDeadPetDescriptions()      { return deadPetDescriptions; }
+    public static UUID getDeadPetsWarId()                    { return deadPetsWarId; }
+    public static int getPetReviveTotalCost()                { return petReviveTotalCost; }
+
+    // -------------------------------------------------------------------------
 
     public static void clearAll() {
         if (scanner != null) {
@@ -402,5 +421,8 @@ public class MapState {
         rollbackWarId = null;
         rollbackEligibleChunks.clear();
         rollbackCostPerChunk = 10;
+        deadPetsWarId = null;
+        deadPetDescriptions = List.of();
+        petReviveTotalCost = 0;
     }
 }

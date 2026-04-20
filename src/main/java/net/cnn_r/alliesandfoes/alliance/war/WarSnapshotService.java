@@ -9,6 +9,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -139,6 +140,11 @@ public class WarSnapshotService {
 
     /** Records a tamed pet death that occurred in contested territory during a war. */
     public void recordPetDeath(UUID warId, LivingEntity entity) {
+        UUID ownerUuid = null;
+        if (entity instanceof TamableAnimal tamable && tamable.isTame()) {
+            var ref = tamable.getOwnerReference();
+            if (ref != null) ownerUuid = ref.getUUID();
+        }
         TagValueOutput output = TagValueOutput.createWithoutContext(ProblemReporter.DISCARDING);
         entity.saveWithoutId(output);
         CompoundTag nbt = output.buildResult();
@@ -146,7 +152,24 @@ public class WarSnapshotService {
                  .add(new PetDeathRecord(
                          entity.level().dimension().identifier().toString(),
                          entity.blockPosition(),
-                         nbt));
+                         nbt,
+                         ownerUuid));
+    }
+
+    /** Returns all dead pet records for a war (read-only view). */
+    public List<PetDeathRecord> getPetDeaths(UUID warId) {
+        return petDeaths.getOrDefault(warId, List.of());
+    }
+
+    /** Returns how many dead pets are recorded for this war. */
+    public int getPetDeathCount(UUID warId) {
+        List<PetDeathRecord> list = petDeaths.get(warId);
+        return list == null ? 0 : list.size();
+    }
+
+    /** Removes all dead pet records for a war (call after reviving). */
+    public void clearPetDeaths(UUID warId) {
+        petDeaths.remove(warId);
     }
 
     /** Returns all chunk keys that have at least one snapshotted block for this war. */
@@ -160,7 +183,8 @@ public class WarSnapshotService {
     }
 
     /**
-     * Restores only the blocks (and pets) in a single chunk for the given war.
+     * Restores only the blocks in a single chunk for the given war.
+     * Pets are revived separately via the pet revive system.
      *
      * @return number of blocks restored
      */
@@ -198,29 +222,6 @@ public class WarSnapshotService {
         toRemove.forEach(changes::remove);
         if (changes.isEmpty()) this.snapshots.remove(warId);
 
-        // Respawn tamed pets that died in this chunk
-        List<PetDeathRecord> pets = this.petDeaths.getOrDefault(warId, new ArrayList<>());
-        List<PetDeathRecord> remaining = new ArrayList<>();
-        for (PetDeathRecord pet : pets) {
-            if (pet.dimensionId().equals(chunk.getDimensionId())
-                    && (pet.pos().getX() >> 4) == chunk.getChunkX()
-                    && (pet.pos().getZ() >> 4) == chunk.getChunkZ()) {
-                ServerLevel level = resolveDimension(server, pet.dimensionId());
-                if (level != null) {
-                    EntityType.loadEntityRecursive(pet.entityNbt(), level,
-                            EntitySpawnReason.LOAD, entity -> {
-                        entity.setPos(pet.pos().getX() + 0.5, pet.pos().getY(), pet.pos().getZ() + 0.5);
-                        level.addFreshEntity(entity);
-                        return entity;
-                    });
-                }
-            } else {
-                remaining.add(pet);
-            }
-        }
-        if (remaining.isEmpty()) this.petDeaths.remove(warId);
-        else this.petDeaths.put(warId, remaining);
-
         return count;
     }
 
@@ -235,7 +236,7 @@ public class WarSnapshotService {
         return level.dimension().identifier() + ":" + pos.getX() + ":" + pos.getY() + ":" + pos.getZ();
     }
 
-    private static ServerLevel resolveDimension(MinecraftServer server, String dimensionId) {
+    public static ServerLevel resolveDimension(MinecraftServer server, String dimensionId) {
         for (ServerLevel level : server.getAllLevels()) {
             if (level.dimension().identifier().toString().equals(dimensionId)) return level;
         }
@@ -252,6 +253,7 @@ public class WarSnapshotService {
     public record PetDeathRecord(
             String dimensionId,
             BlockPos pos,
-            CompoundTag entityNbt
+            CompoundTag entityNbt,
+            UUID ownerUuid
     ) {}
 }
