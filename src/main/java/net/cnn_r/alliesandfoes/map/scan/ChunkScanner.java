@@ -1,9 +1,12 @@
 package net.cnn_r.alliesandfoes.map.scan;
 
+import net.cnn_r.alliesandfoes.map.MapRenderMode;
 import net.cnn_r.alliesandfoes.map.MapState;
+import net.cnn_r.alliesandfoes.map.WorldIdentity;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
+import net.cnn_r.alliesandfoes.map.indoor.IndoorMask;
 import net.cnn_r.alliesandfoes.map.util.BlockColorResolver;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -26,22 +29,30 @@ public class ChunkScanner {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Set<ChunkPos> queued = ConcurrentHashMap.newKeySet();
     private final Set<ChunkPos> caveQueued = ConcurrentHashMap.newKeySet();
+    private final Set<ChunkPos> netherQueued = ConcurrentHashMap.newKeySet();
+    private final Set<ChunkPos> endQueued = ConcurrentHashMap.newKeySet();
     private final ClientLevel level;
+    private final WorldIdentity capturedWorldId;
 
-    public ChunkScanner(ChunkCache cache, ChunkValueCache chunkValueCache, ClientLevel level) {
+    public ChunkScanner(ChunkCache cache, ChunkValueCache chunkValueCache, ClientLevel level,
+                        WorldIdentity capturedWorldId) {
         this.cache = cache;
         this.chunkValueCache = chunkValueCache;
         this.level = level;
+        this.capturedWorldId = capturedWorldId;
         this.chunkValueAnalyzer = new ChunkValueAnalyzer(level);
     }
 
-    public boolean isQueued(ChunkPos pos) {
-        return this.queued.contains(pos);
+    /** Returns true if the world/dimension has changed since this scanner was created. */
+    private boolean isWorldStale() {
+        WorldIdentity current = MapState.getCurrentWorldId();
+        return current == null || !current.equals(capturedWorldId);
     }
 
-    public boolean isCaveQueued(ChunkPos pos) {
-        return this.caveQueued.contains(pos);
-    }
+    public boolean isQueued(ChunkPos pos) { return this.queued.contains(pos); }
+    public boolean isCaveQueued(ChunkPos pos) { return this.caveQueued.contains(pos); }
+    public boolean isNetherQueued(ChunkPos pos) { return this.netherQueued.contains(pos); }
+    public boolean isEndQueued(ChunkPos pos) { return this.endQueued.contains(pos); }
 
     // -------------------------------------------------------------------------
     // Surface scan — writes to ChunkCache (surface background)
@@ -49,13 +60,8 @@ public class ChunkScanner {
 
     public void requestScan(LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
-
-        if (!this.queued.add(pos)) {
-            return;
-        }
-
+        if (!this.queued.add(pos)) return;
         int playerScanY = MapState.getPlayerScanY();
-
         this.executor.execute(() -> {
             try {
                 this.scanChunk(chunk, playerScanY);
@@ -66,41 +72,27 @@ public class ChunkScanner {
     }
 
     private void scanChunk(LevelChunk chunk, int playerScanY) {
-        if (this.executor.isShutdown()) {
-            return;
-        }
-
+        if (this.executor.isShutdown() || isWorldStale()) return;
         ChunkPos pos = chunk.getPos();
         ChunkKey key = ChunkKey.of(this.level, pos);
-        // Surface scans always use surface mode (playerHasCeiling = false).
         int[] pixels = buildPixels(chunk, playerScanY, false);
-
-        if (this.executor.isShutdown()) {
-            return;
-        }
-
+        if (this.executor.isShutdown() || isWorldStale()) return;
         this.cache.put(key, pixels);
-
         ChunkValueData valueData = this.chunkValueAnalyzer.analyze(chunk);
-        if (!this.executor.isShutdown()) {
+        if (!this.executor.isShutdown() && !isWorldStale()) {
             this.chunkValueCache.put(key, valueData);
             MapState.markMapDirty();
         }
     }
 
     // -------------------------------------------------------------------------
-    // Cave scan — writes to CaveChunkCache (cave overlay)
+    // Cave / indoor scan — writes to CaveChunkCache
     // -------------------------------------------------------------------------
 
     public void requestCaveScan(LevelChunk chunk) {
         ChunkPos pos = chunk.getPos();
-
-        if (!this.caveQueued.add(pos)) {
-            return;
-        }
-
+        if (!this.caveQueued.add(pos)) return;
         int playerScanY = MapState.getPlayerScanY();
-
         this.executor.execute(() -> {
             try {
                 this.scanCaveChunk(chunk, playerScanY);
@@ -111,36 +103,94 @@ public class ChunkScanner {
     }
 
     private void scanCaveChunk(LevelChunk chunk, int playerScanY) {
-        if (this.executor.isShutdown()) {
-            return;
-        }
+        if (this.executor.isShutdown() || isWorldStale()) return;
         // Discard if player exited ceiling mode while scan was queued.
-        if (!MapState.getPlayerHasCeiling()) {
-            return;
-        }
+        if (!MapState.getPlayerHasCeiling()) return;
 
         ChunkPos pos = chunk.getPos();
         ChunkKey key = ChunkKey.of(this.level, pos);
-        int[] pixels = buildPixels(chunk, playerScanY, true);
+        IndoorMask mask = (MapState.getCurrentMode() == MapRenderMode.INDOOR_LOCAL)
+                ? MapState.getIndoorMask() : null;
+        int[] pixels = buildPixels(chunk, playerScanY, true, mask);
 
-        if (this.executor.isShutdown() || !MapState.getPlayerHasCeiling()) {
-            return;
-        }
-
+        if (this.executor.isShutdown() || isWorldStale() || !MapState.getPlayerHasCeiling()) return;
         MapState.getCaveChunkCache().put(key, pixels);
         MapState.markMapDirty();
     }
 
     // -------------------------------------------------------------------------
-    // Shared pixel-building logic (surface and cave)
+    // Nether scan — writes to NetherChunkCache
+    // -------------------------------------------------------------------------
+
+    public void requestNetherScan(LevelChunk chunk) {
+        ChunkPos pos = chunk.getPos();
+        if (!this.netherQueued.add(pos)) return;
+        int playerScanY = MapState.getPlayerScanY();
+        this.executor.execute(() -> {
+            try {
+                this.scanNetherChunk(chunk, playerScanY);
+            } finally {
+                this.netherQueued.remove(pos);
+            }
+        });
+    }
+
+    private void scanNetherChunk(LevelChunk chunk, int playerScanY) {
+        if (this.executor.isShutdown() || isWorldStale()) return;
+        if (MapState.getCurrentMode() != MapRenderMode.NETHER) return;
+
+        ChunkPos pos = chunk.getPos();
+        ChunkKey key = ChunkKey.of(this.level, pos);
+        int[] pixels = buildNetherPixels(chunk, playerScanY);
+
+        if (this.executor.isShutdown() || isWorldStale()) return;
+        MapState.getNetherChunkCache().put(key, pixels);
+        MapState.markMapDirty();
+    }
+
+    // -------------------------------------------------------------------------
+    // End scan — writes to EndChunkCache
+    // -------------------------------------------------------------------------
+
+    public void requestEndScan(LevelChunk chunk) {
+        ChunkPos pos = chunk.getPos();
+        if (!this.endQueued.add(pos)) return;
+        this.executor.execute(() -> {
+            try {
+                this.scanEndChunk(chunk);
+            } finally {
+                this.endQueued.remove(pos);
+            }
+        });
+    }
+
+    private void scanEndChunk(LevelChunk chunk) {
+        if (this.executor.isShutdown() || isWorldStale()) return;
+        if (MapState.getCurrentMode() != MapRenderMode.END) return;
+
+        ChunkPos pos = chunk.getPos();
+        ChunkKey key = ChunkKey.of(this.level, pos);
+        int[] pixels = buildEndPixels(chunk);
+
+        if (this.executor.isShutdown() || isWorldStale()) return;
+        MapState.getEndChunkCache().put(key, pixels);
+        MapState.markMapDirty();
+    }
+
+    // -------------------------------------------------------------------------
+    // Surface / cave pixel builder
     // -------------------------------------------------------------------------
 
     private int[] buildPixels(LevelChunk chunk, int playerScanY, boolean playerHasCeiling) {
+        return buildPixels(chunk, playerScanY, playerHasCeiling, null);
+    }
+
+    private int[] buildPixels(LevelChunk chunk, int playerScanY, boolean playerHasCeiling,
+                               IndoorMask indoorMask) {
         ChunkPos pos = chunk.getPos();
         int[] pixels = new int[256];
 
-        // One block above the player's feet — the downward walk then starts at the
-        // exact block the player is standing on (the floor), which is what we render.
+        // One block above the player's feet — the downward walk starts at the floor block.
         int scanCap = playerScanY + 1;
 
         for (int localX = 0; localX < 16; localX++) {
@@ -154,26 +204,29 @@ public class ChunkScanner {
                 int westSurface  = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX - 1, worldZ);
                 int eastSurface  = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX + 1, worldZ);
 
+                // Per-column: treat as cave only if ceiling mode AND inside indoor mask (or no mask)
+                boolean colCeiling = playerHasCeiling
+                        && (indoorMask == null || indoorMask.contains(worldX, worldZ));
+
                 int y;
 
-                if (playerHasCeiling) {
-                    // Per-column passage check: read the actual block at the player's Y.
-                    // Solid rock here means no cave opening at this depth — render black.
-                    // Air / fluid here means there IS a passage — find the floor below.
-                    BlockState stateAtPlayerY = level.getBlockState(
-                            new BlockPos(worldX, playerScanY, worldZ));
-                    boolean hasPassage = stateAtPlayerY.isAir()
-                            || stateAtPlayerY.is(Blocks.WATER)
-                            || stateAtPlayerY.is(Blocks.LAVA)
-                            || !stateAtPlayerY.blocksMotion();
-
+                if (colCeiling) {
+                    // 3-block vertical band passage check: passable if ANY of Y-1..Y+1 is open.
+                    boolean hasPassage = false;
+                    for (int bandY = playerScanY - 1; bandY <= playerScanY + 1; bandY++) {
+                        BlockState bs = level.getBlockState(new BlockPos(worldX, bandY, worldZ));
+                        if (bs.isAir() || bs.is(Blocks.WATER) || bs.is(Blocks.LAVA)
+                                || !bs.blocksMotion()) {
+                            hasPassage = true;
+                            break;
+                        }
+                    }
                     if (!hasPassage) {
                         pixels[localX + localZ * 16] = 0xFF000000;
                         continue;
                     }
                     y = scanCap;
                 } else {
-                    // Normal surface rendering — full WORLD_SURFACE height, no cap.
                     y = colSurfaceY;
                 }
 
@@ -185,62 +238,98 @@ public class ChunkScanner {
                 BlockPos.MutableBlockPos blockPos = new BlockPos.MutableBlockPos(worldX, y - 1, worldZ);
                 BlockState state = level.getBlockState(blockPos);
 
-                // In ceiling mode, scan as far down as needed to reveal lava lakes,
-                // open pits, and deep cavern floors below the player.
-                // In surface mode, 6 blocks is enough to skip flowers and snow.
-                int maxWalkDepth = playerHasCeiling ? (y - level.getMinY()) : 6;
+                int maxWalkDepth = colCeiling ? (y - level.getMinY()) : 6;
 
                 if (!state.is(Blocks.WATER) && !state.is(Blocks.LAVA)) {
                     for (int i = 0; i < maxWalkDepth; i++) {
-                        if (!shouldSkipTopBlock(state)) {
-                            break;
-                        }
+                        if (!shouldSkipTopBlock(state)) break;
                         blockPos.move(0, -1, 0);
-                        if (blockPos.getY() <= level.getMinY()) {
-                            break;
-                        }
+                        if (blockPos.getY() <= level.getMinY()) break;
                         state = level.getBlockState(blockPos);
-                        if (state.is(Blocks.WATER) || state.is(Blocks.LAVA)) {
-                            break;
-                        }
+                        if (state.is(Blocks.WATER) || state.is(Blocks.LAVA)) break;
                     }
                 }
 
                 int color = BlockColorResolver.getColor(state, level, blockPos);
-
-                // Use the actual found block Y (after the downward walk) for shading.
                 int actualBlockY = blockPos.getY() + 1;
 
-                int shade;
-                if (playerHasCeiling) {
-                    // Cave shading: compare actual cave floor Y against neighboring cave floors.
-                    // This makes inclines, pits, and ledges visible on the cave map.
+                if (colCeiling) {
                     int nFloor = findCaveFloor(worldX,     worldZ - 1, scanCap);
                     int sFloor = findCaveFloor(worldX,     worldZ + 1, scanCap);
                     int wFloor = findCaveFloor(worldX - 1, worldZ,     scanCap);
                     int eFloor = findCaveFloor(worldX + 1, worldZ,     scanCap);
                     int avgFloor = (nFloor + sFloor + wFloor + eFloor) / 4;
-                    shade = actualBlockY - avgFloor;
-                } else {
-                    // Surface shading: 4-directional slope using heightmap neighbors.
-                    int avgNeighbor = (northSurface + southSurface + westSurface + eastSurface) / 4;
-                    shade = actualBlockY - avgNeighbor;
-                }
-
-                if (playerHasCeiling) {
-                    shade = clamp(shade, -6, 6);
+                    int shade = clamp(actualBlockY - avgFloor, -6, 6);
                     color = applyShading(color, shade * 40);
-                } else {
-                    shade = clamp(shade, -3, 3);
-                    color = applyShading(color, shade * 15);
-                }
 
-                // Depth tinting for caves: deeper floors get a cool blue-grey tint.
-                if (playerHasCeiling) {
                     int depth = scanCap - actualBlockY;
                     if (depth > 0) {
                         float depthFactor = Math.min(depth / 30.0f, 1.0f);
                         color = blendWithColor(color, 0x1A2540, depthFactor * 0.35f);
+                    }
+                } else {
+                    int avgNeighbor = (northSurface + southSurface + westSurface + eastSurface) / 4;
+                    int shade = clamp(actualBlockY - avgNeighbor, -3, 3);
+                    color = applyShading(color, shade * 15);
+                }
+
+                pixels[localX + localZ * 16] = color;
+            }
+        }
+
+        return pixels;
+    }
+
+    // -------------------------------------------------------------------------
+    // Nether pixel builder — uses player Y as anchor, never WORLD_SURFACE
+    // -------------------------------------------------------------------------
+
+    private int[] buildNetherPixels(LevelChunk chunk, int playerScanY) {
+        ChunkPos pos = chunk.getPos();
+        int[] pixels = new int[256];
+        int bandTop = playerScanY + 2;
+
+        for (int localX = 0; localX < 16; localX++) {
+            for (int localZ = 0; localZ < 16; localZ++) {
+                int worldX = pos.getMinBlockX() + localX;
+                int worldZ = pos.getMinBlockZ() + localZ;
+
+                BlockPos.MutableBlockPos bp = new BlockPos.MutableBlockPos(worldX, bandTop, worldZ);
+                int color = 0xFF111111;
+                boolean foundLava = false;
+
+                // Scan downward from bandTop to find lava or solid floor
+                for (int y = bandTop; y >= level.getMinY(); y--) {
+                    bp.setY(y);
+                    BlockState state = level.getBlockState(bp);
+                    if (state.is(Blocks.LAVA)) {
+                        color = BlockColorResolver.getColor(state, level, bp);
+                        color = blendWithColor(color, 0xFF2200, 0.4f);
+                        foundLava = true;
+                        break;
+                    } else if (!state.isAir() && state.blocksMotion()) {
+                        color = BlockColorResolver.getColor(state, level, bp);
+                        break;
+                    }
+                }
+
+                int actualY = bp.getY();
+
+                // Shading vs neighbor floors
+                int nFloor = findNetherFloor(worldX,     worldZ - 1, bandTop);
+                int sFloor = findNetherFloor(worldX,     worldZ + 1, bandTop);
+                int wFloor = findNetherFloor(worldX - 1, worldZ,     bandTop);
+                int eFloor = findNetherFloor(worldX + 1, worldZ,     bandTop);
+                int avgFloor = (nFloor + sFloor + wFloor + eFloor) / 4;
+                int shade = clamp(actualY - avgFloor, -6, 6);
+                color = applyShading(color, shade * 30);
+
+                // Depth tinting — deeper = darker red
+                if (!foundLava) {
+                    int depth = bandTop - actualY;
+                    if (depth > 0) {
+                        float depthFactor = Math.min(depth / 15.0f, 1.0f);
+                        color = blendWithColor(color, 0x220000, depthFactor * 0.3f);
                     }
                 }
 
@@ -251,11 +340,83 @@ public class ChunkScanner {
         return pixels;
     }
 
-    /**
-     * Finds the cave floor Y for a neighboring column used in shading comparisons.
-     * If the neighbor column is solid at the player's Y (a wall), returns playerScanY
-     * so that blocks adjacent to walls shade darker — a "wall shadow" effect.
-     */
+    private int findNetherFloor(int worldX, int worldZ, int bandTop) {
+        for (int y = bandTop; y >= level.getMinY(); y--) {
+            BlockState state = level.getBlockState(new BlockPos(worldX, y, worldZ));
+            if (!state.isAir() && (state.blocksMotion() || state.is(Blocks.LAVA))) return y;
+        }
+        return level.getMinY();
+    }
+
+    // -------------------------------------------------------------------------
+    // End pixel builder — top-down scan with void/island classification
+    // -------------------------------------------------------------------------
+
+    private int[] buildEndPixels(LevelChunk chunk) {
+        ChunkPos pos = chunk.getPos();
+        int[] pixels = new int[256];
+
+        for (int localX = 0; localX < 16; localX++) {
+            for (int localZ = 0; localZ < 16; localZ++) {
+                int worldX = pos.getMinBlockX() + localX;
+                int worldZ = pos.getMinBlockZ() + localZ;
+
+                int colSurface = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX, worldZ);
+
+                if (colSurface <= level.getMinY()) {
+                    pixels[localX + localZ * 16] = 0xFF050810;
+                    continue;
+                }
+
+                BlockPos.MutableBlockPos bp = new BlockPos.MutableBlockPos(worldX, colSurface - 1, worldZ);
+                BlockState state = level.getBlockState(bp);
+
+                for (int i = 0; i < 6; i++) {
+                    if (!shouldSkipTopBlock(state)) break;
+                    bp.move(0, -1, 0);
+                    if (bp.getY() <= level.getMinY()) break;
+                    state = level.getBlockState(bp);
+                }
+
+                if (bp.getY() <= level.getMinY() || state.isAir()) {
+                    pixels[localX + localZ * 16] = 0xFF050810;
+                    continue;
+                }
+
+                int color = BlockColorResolver.getColor(state, level, bp);
+
+                // Edge detection via neighbor surface heights
+                int nSurf = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX,     worldZ - 1);
+                int sSurf = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX,     worldZ + 1);
+                int wSurf = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX - 1, worldZ);
+                int eSurf = level.getHeight(Heightmap.Types.WORLD_SURFACE, worldX + 1, worldZ);
+
+                int maxDelta = 0;
+                maxDelta = Math.max(maxDelta, Math.abs(colSurface - nSurf));
+                maxDelta = Math.max(maxDelta, Math.abs(colSurface - sSurf));
+                maxDelta = Math.max(maxDelta, Math.abs(colSurface - wSurf));
+                maxDelta = Math.max(maxDelta, Math.abs(colSurface - eSurf));
+
+                if (maxDelta > 3) {
+                    // Island edge — brighten
+                    color = blendWithColor(color, 0xFFFFFF, 0.3f);
+                } else {
+                    int avgNeighbor = (nSurf + sSurf + wSurf + eSurf) / 4;
+                    int shade = clamp(bp.getY() + 1 - avgNeighbor, -3, 3);
+                    color = applyShading(color, shade * 15);
+                }
+
+                pixels[localX + localZ * 16] = color;
+            }
+        }
+
+        return pixels;
+    }
+
+    // -------------------------------------------------------------------------
+    // Shared helpers
+    // -------------------------------------------------------------------------
+
     private int findCaveFloor(int worldX, int worldZ, int scanCap) {
         int playerScanY = scanCap - 1;
         BlockState stateAtPlayerY = level.getBlockState(new BlockPos(worldX, playerScanY, worldZ));
@@ -264,10 +425,7 @@ public class ChunkScanner {
                 && !stateAtPlayerY.is(Blocks.LAVA)
                 && stateAtPlayerY.blocksMotion();
 
-        if (isWall) {
-            // Solid wall at player Y — use playerScanY as the shading reference.
-            return playerScanY;
-        }
+        if (isWall) return playerScanY;
 
         BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos(worldX, playerScanY - 1, worldZ);
         BlockState state = level.getBlockState(p);
@@ -320,15 +478,12 @@ public class ChunkScanner {
         int br = (base >> 16) & 0xFF;
         int bg = (base >> 8)  & 0xFF;
         int bb = base & 0xFF;
-
         int tr = (target >> 16) & 0xFF;
         int tg = (target >> 8)  & 0xFF;
         int tb = target & 0xFF;
-
         int r = (int)(br + (tr - br) * alpha);
         int g = (int)(bg + (tg - bg) * alpha);
         int b = (int)(bb + (tb - bb) * alpha);
-
         return (base & 0xFF000000) | (clamp(r, 0, 255) << 16) | (clamp(g, 0, 255) << 8) | clamp(b, 0, 255);
     }
 
@@ -336,11 +491,7 @@ public class ChunkScanner {
         return Math.max(min, Math.min(max, value));
     }
 
-    public ClientLevel getLevel() {
-        return this.level;
-    }
+    public ClientLevel getLevel() { return this.level; }
 
-    public void shutdown() {
-        this.executor.shutdownNow();
-    }
+    public void shutdown() { this.executor.shutdownNow(); }
 }

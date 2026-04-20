@@ -4,7 +4,9 @@ import com.mojang.blaze3d.platform.NativeImage;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.item.ModItems;
+import net.cnn_r.alliesandfoes.map.MapRenderMode;
 import net.cnn_r.alliesandfoes.map.MapState;
+import net.cnn_r.alliesandfoes.map.indoor.IndoorMask;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
@@ -30,7 +32,9 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
 
 import java.util.Collection;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Renders the Explorer HUD minimap and ambient intuition text when the
@@ -87,12 +91,15 @@ public final class HudMinimapRenderer {
     private static Identifier      minimapTextureId = null;
 
     // Rebuild triggers
-    private static float  lastMinimapPlayerX = Float.NaN;
-    private static float  lastMinimapPlayerZ = Float.NaN;
-    private static float  lastMinimapYaw     = Float.NaN;
-    private static String lastMinimapDimension = null;
-    private static boolean lastCaveMode       = false;
-    private static long   lastMinimapRebuildMs = 0L;
+    private static float           lastMinimapPlayerX   = Float.NaN;
+    private static float           lastMinimapPlayerZ   = Float.NaN;
+    private static float           lastMinimapYaw       = Float.NaN;
+    private static String          lastMinimapDimension = null;
+    private static MapRenderMode   lastRenderMode       = MapRenderMode.SURFACE;
+    private static long            lastMinimapRebuildMs = 0L;
+
+    /** Per-pixel last-valid colors keyed by packed world X,Z — prevents blank flicker on cache miss. */
+    private static final Map<Long, Integer> lastValidColors = new ConcurrentHashMap<>();
 
     private static final MapIntuitionMessageController messageController =
             new MapIntuitionMessageController();
@@ -109,12 +116,13 @@ public final class HudMinimapRenderer {
         activeMessage = null;
         messageExpiryMs = 0L;
         messageController.reset();
-        lastMinimapPlayerX = Float.NaN;
-        lastMinimapPlayerZ = Float.NaN;
-        lastMinimapYaw = Float.NaN;
+        lastMinimapPlayerX   = Float.NaN;
+        lastMinimapPlayerZ   = Float.NaN;
+        lastMinimapYaw       = Float.NaN;
         lastMinimapDimension = null;
-        lastCaveMode = false;
+        lastRenderMode       = MapRenderMode.SURFACE;
         lastMinimapRebuildMs = 0L;
+        lastValidColors.clear();
         if (minimapTexture != null) {
             minimapTexture.close();
             minimapTexture = null;
@@ -139,7 +147,9 @@ public final class HudMinimapRenderer {
         maybeRefreshIntuition(player);
         maybeEmitIntuitionMessage();
 
-        boolean caveMode  = MapState.getPlayerHasCeiling();
+        MapRenderMode mode = MapState.getCurrentMode();
+        boolean caveMode  = (mode == MapRenderMode.CAVE || mode == MapRenderMode.INDOOR_LOCAL
+                || mode == MapRenderMode.NETHER);
         float   playerX   = (float) player.getX();
         float   playerZ   = (float) player.getZ();
         float   playerYaw = player.getYRot();
@@ -154,7 +164,7 @@ public final class HudMinimapRenderer {
         int ts          = texSize(caveMode);
 
         renderBackground(context, mapLeft, mapTop, caveMode);
-        maybeRebuildTexture(player, playerX, playerZ, playerYaw, dimId, caveMode);
+        maybeRebuildTexture(player, playerX, playerZ, playerYaw, dimId, mode, caveMode);
 
         if (minimapTextureId != null) {
             context.blit(RenderPipelines.GUI_TEXTURED, minimapTextureId,
@@ -215,9 +225,9 @@ public final class HudMinimapRenderer {
 
     private static void maybeRebuildTexture(LocalPlayer player,
                                             float playerX, float playerZ, float playerYaw,
-                                            String dimId, boolean caveMode) {
+                                            String dimId, MapRenderMode mode, boolean caveMode) {
         boolean dimensionChanged = !dimId.equals(lastMinimapDimension);
-        boolean caveModeChanged  = caveMode != lastCaveMode;
+        boolean modeChanged      = mode != lastRenderMode;
         boolean moved = Float.isNaN(lastMinimapPlayerX)
                 || Math.abs(playerX - lastMinimapPlayerX) >= 0.5f
                 || Math.abs(playerZ - lastMinimapPlayerZ) >= 0.5f;
@@ -227,19 +237,21 @@ public final class HudMinimapRenderer {
         long now = System.currentTimeMillis();
         boolean elapsed = (now - lastMinimapRebuildMs) >= MINIMAP_REFRESH_INTERVAL_MS;
 
-        if (caveModeChanged && minimapTexture != null) {
+        if ((modeChanged || dimensionChanged) && minimapTexture != null) {
             minimapTexture.close(); minimapTexture = null;
             if (minimapImage != null) { minimapImage.close(); minimapImage = null; }
             minimapTextureId = null;
+            // Dimension/mode change — clear last-valid cache to avoid stale bleed
+            if (dimensionChanged) lastValidColors.clear();
         }
 
-        if (minimapTexture == null || moved || turned || dirty || elapsed || dimensionChanged || caveModeChanged) {
-            rebuildMinimapTexture(playerX, playerZ, playerYaw, dimId, caveMode);
+        if (minimapTexture == null || moved || turned || dirty || elapsed || dimensionChanged || modeChanged) {
+            rebuildMinimapTexture(playerX, playerZ, playerYaw, dimId, mode, caveMode);
             lastMinimapPlayerX   = playerX;
             lastMinimapPlayerZ   = playerZ;
             lastMinimapYaw       = playerYaw;
             lastMinimapDimension = dimId;
-            lastCaveMode         = caveMode;
+            lastRenderMode       = mode;
             lastMinimapRebuildMs = now;
         }
     }
@@ -251,15 +263,18 @@ public final class HudMinimapRenderer {
     }
 
     private static void rebuildMinimapTexture(float playerX, float playerZ, float playerYaw,
-                                              String dimensionId, boolean caveMode) {
+                                              String dimensionId, MapRenderMode mode, boolean caveMode) {
         int   ts     = texSize(caveMode);
         float rad    = radius(caveMode);
         float sc     = scale(caveMode);
         float halfTs = ts / 2.0f;
 
         ChunkCache surfaceCache = MapState.getChunkCache();
-        ChunkCache caveCache    = caveMode ? MapState.getCaveChunkCache() : null;
+        ChunkCache caveCache    = MapState.getCaveChunkCache();
+        ChunkCache netherCache  = MapState.getNetherChunkCache();
+        ChunkCache endCache     = MapState.getEndChunkCache();
         TerritoryChunkSyncCache terCache = MapState.getTerritoryChunkSyncCache();
+        IndoorMask indoorMask   = (mode == MapRenderMode.INDOOR_LOCAL) ? MapState.getIndoorMask() : null;
 
         double sinYaw = Math.sin(Math.toRadians(playerYaw));
         double cosYaw = Math.cos(Math.toRadians(playerYaw));
@@ -295,36 +310,93 @@ public final class HudMinimapRenderer {
                 int localX  = worldX & 15;
                 int localZ  = worldZ & 15;
                 int idx     = localX + localZ * 16;
+                long pixelKey = ((long) worldX << 32) | (worldZ & 0xFFFFFFFFL);
 
-                ChunkKey key      = new ChunkKey(dimensionId, chunkX, chunkZ);
-                int[]    cave3d   = (caveCache != null) ? caveCache.get(key) : null;
+                ChunkKey key       = new ChunkKey(dimensionId, chunkX, chunkZ);
+                int[]    cave3d    = caveCache.get(key);
                 int[]    surface3d = surfaceCache.get(key);
+                int[]    nether3d  = netherCache.get(key);
+                int[]    end3d     = endCache.get(key);
 
                 int argb;
-                if (cave3d != null && cave3d[idx] != 0) {
-                    argb = cave3d[idx] | 0xFF000000;
-                } else if (surface3d != null) {
-                    int base = surface3d[idx] | 0xFF000000;
-                    argb = caveMode ? darken(base, 0.4f) : base;
-                } else {
-                    argb = 0xFF101010;
+                switch (mode) {
+                    case CAVE -> {
+                        if (cave3d != null && cave3d[idx] != 0) {
+                            argb = cave3d[idx] | 0xFF000000;
+                        } else if (surface3d != null) {
+                            argb = darken(surface3d[idx] | 0xFF000000, 0.4f);
+                        } else {
+                            argb = lastValidColors.getOrDefault(pixelKey, 0xFF101010);
+                        }
+                    }
+                    case INDOOR_LOCAL -> {
+                        boolean inside = (indoorMask == null) || indoorMask.contains(worldX, worldZ);
+                        if (inside && cave3d != null && cave3d[idx] != 0) {
+                            argb = cave3d[idx] | 0xFF000000;
+                        } else if (surface3d != null) {
+                            argb = surface3d[idx] | 0xFF000000;
+                        } else {
+                            argb = lastValidColors.getOrDefault(pixelKey, 0xFF101010);
+                        }
+                    }
+                    case NETHER -> {
+                        if (nether3d != null && nether3d[idx] != 0) {
+                            argb = nether3d[idx] | 0xFF000000;
+                            // Apply mild red bias to Nether colors
+                            argb = blendOver(argb, 0x33440000);
+                        } else {
+                            argb = lastValidColors.getOrDefault(pixelKey, 0xFF111111);
+                        }
+                    }
+                    case END -> {
+                        if (end3d != null && end3d[idx] != 0) {
+                            argb = end3d[idx] | 0xFF000000;
+                        } else {
+                            argb = lastValidColors.getOrDefault(pixelKey, 0xFF050810);
+                        }
+                    }
+                    default -> { // SURFACE
+                        if (surface3d != null) {
+                            argb = surface3d[idx] | 0xFF000000;
+                        } else {
+                            argb = lastValidColors.getOrDefault(pixelKey, 0xFF101010);
+                        }
+                    }
                 }
 
-                // Bake territory tint
-                TerritoryChunkDataPayload ter = terCache.get(key);
-                if (ter != null && ter.claimed()) {
-                    boolean mine = AllianceClientState.isInAlliance()
-                            && AllianceClientState.getAllianceName().equals(ter.allianceName());
-                    int fill = ter.anchorChunk()
-                            ? (mine ? ANCHOR_FILL : ENEMY_ANCHOR_FILL)
-                            : (mine ? CLAIMED_FILL : ENEMY_CLAIMED_FILL);
-                    argb = blendOver(argb, fill);
+                // Store as last-valid for next frame
+                lastValidColors.put(pixelKey, argb);
+
+                // Bake territory tint (only meaningful in overworld)
+                if (mode != MapRenderMode.NETHER && mode != MapRenderMode.END) {
+                    TerritoryChunkDataPayload ter = terCache.get(key);
+                    if (ter != null && ter.claimed()) {
+                        boolean mine = AllianceClientState.isInAlliance()
+                                && AllianceClientState.getAllianceName().equals(ter.allianceName());
+                        int fill = ter.anchorChunk()
+                                ? (mine ? ANCHOR_FILL : ENEMY_ANCHOR_FILL)
+                                : (mine ? CLAIMED_FILL : ENEMY_CLAIMED_FILL);
+                        argb = blendOver(argb, fill);
+                    }
                 }
 
                 minimapImage.setPixel(u, v, argb);
             }
         }
         minimapTexture.upload();
+    }
+
+    private static int blendWithColor(int base, int target, float alpha) {
+        int br = (base >> 16) & 0xFF, bg = (base >> 8) & 0xFF, bb = base & 0xFF;
+        int tr = (target >> 16) & 0xFF, tg = (target >> 8) & 0xFF, tb = target & 0xFF;
+        int r = (int)(br + (tr - br) * alpha);
+        int g = (int)(bg + (tg - bg) * alpha);
+        int b = (int)(bb + (tb - bb) * alpha);
+        int clamp = 255;
+        return (base & 0xFF000000)
+                | (Math.min(clamp, Math.max(0, r)) << 16)
+                | (Math.min(clamp, Math.max(0, g)) << 8)
+                | Math.min(clamp, Math.max(0, b));
     }
 
     // -------------------------------------------------------------------------

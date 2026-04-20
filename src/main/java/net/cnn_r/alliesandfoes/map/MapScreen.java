@@ -9,6 +9,7 @@ import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
+import net.cnn_r.alliesandfoes.map.indoor.IndoorMask;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
@@ -44,8 +45,10 @@ import net.minecraft.ChatFormatting;
 import net.cnn_r.alliesandfoes.map.cache.WarSyncCache;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class MapScreen extends Screen {
@@ -92,10 +95,16 @@ public class MapScreen extends Screen {
     private MapTexture mapTexture;
     private MapRenderer renderer;
     private ChunkCache cache;
+    private ChunkCache caveCache;
+    private ChunkCache netherCache;
+    private ChunkCache endCache;
     private ChunkValueCache chunkValueCache;
     private PlayerMarkerCache playerMarkerCache;
     private TerritoryChunkSyncCache territoryChunkSyncCache;
     private TerritoryPreviewSyncCache territoryPreviewSyncCache;
+
+    /** Last-valid surface colors per packed chunk key — prevents blank flicker while chunks reload. */
+    private final Map<Long, int[]> lastValidSurface = new HashMap<>();
 
     /** Dimension ID captured at init time, used as the cache key prefix. */
     private String dimensionId;
@@ -184,6 +193,9 @@ public class MapScreen extends Screen {
         this.mapTexture = new MapTexture(TEXTURE_SIZE);
         this.renderer = new MapRenderer(this.mapTexture);
         this.cache = MapState.getChunkCache();
+        this.caveCache = MapState.getCaveChunkCache();
+        this.netherCache = MapState.getNetherChunkCache();
+        this.endCache = MapState.getEndChunkCache();
         this.chunkValueCache = MapState.getChunkValueCache();
         this.chunkStructureSyncCache = MapState.getChunkStructureSyncCache();
         this.territoryChunkSyncCache = MapState.getTerritoryChunkSyncCache();
@@ -193,7 +205,10 @@ public class MapScreen extends Screen {
         this.dimensionId = (this.minecraft.level != null)
                 ? this.minecraft.level.dimension().identifier().toString()
                 : "minecraft:overworld";
-        MapPersistence.load(this.cache, this.chunkValueCache, getMapId());
+        this.lastValidSurface.clear();
+        WorldIdentity worldId = getWorldIdentity();
+        MapPersistence.load(worldId, this.cache, this.caveCache, this.netherCache,
+                this.endCache, this.chunkValueCache);
         this.textureDirty = true;
 
         if (this.minecraft.player != null) {
@@ -1206,7 +1221,8 @@ public class MapScreen extends Screen {
         this.lastIntuitionEvalChunk = null;
         this.intuitionMessageController.reset();
         super.removed();
-        MapPersistence.save(this.cache, this.chunkValueCache, getMapId());
+        MapPersistence.save(getWorldIdentity(), this.cache, this.caveCache, this.netherCache,
+                this.endCache, this.chunkValueCache);
     }
 
     @Override
@@ -1267,19 +1283,47 @@ public class MapScreen extends Screen {
         int minChunkZ = (centerWorldZ - textureCenterY) >> 4;
         int maxChunkZ = (centerWorldZ + textureCenterY) >> 4;
 
-        boolean inCaveMode = MapState.getPlayerHasCeiling();
-        ChunkCache caveCache = inCaveMode ? MapState.getCaveChunkCache() : null;
+        MapRenderMode mode = MapState.getCurrentMode();
+        IndoorMask indoorMask = (mode == MapRenderMode.INDOOR_LOCAL) ? MapState.getIndoorMask() : null;
 
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 ChunkKey key = new ChunkKey(this.dimensionId, chunkX, chunkZ);
-                int[] surfaceColors = this.cache.get(key);
-                int[] caveColors = (caveCache != null) ? caveCache.get(key) : null;
+                long packedKey = ((long) chunkX << 32) | (chunkZ & 0xFFFFFFFFL);
 
-                // Skip chunk entirely only if there is nothing to render.
-                if (surfaceColors == null && caveColors == null) {
-                    continue;
+                int[] surfaceColors = this.cache.get(key);
+                int[] caveColorsArr = this.caveCache.get(key);
+                int[] netherColorsArr = this.netherCache.get(key);
+                int[] endColorsArr = this.endCache.get(key);
+
+                // Determine primary color array based on mode; fall back to last-valid surface
+                int[] primaryColors;
+                boolean useSurfaceAsDim = false;
+                switch (mode) {
+                    case SURFACE -> primaryColors = surfaceColors;
+                    case CAVE -> {
+                        primaryColors = (caveColorsArr != null) ? caveColorsArr : null;
+                        useSurfaceAsDim = true; // surface shown dimmed as background
+                    }
+                    case INDOOR_LOCAL -> primaryColors = caveColorsArr; // indoor mask applied per-pixel
+                    case NETHER -> primaryColors = netherColorsArr;
+                    case END -> primaryColors = endColorsArr;
+                    default -> primaryColors = surfaceColors;
                 }
+
+                // If no primary data, try last-valid surface as fallback (prevents blank flicker)
+                if (primaryColors == null && surfaceColors != null) {
+                    lastValidSurface.put(packedKey, surfaceColors);
+                } else if (primaryColors != null && mode == MapRenderMode.SURFACE) {
+                    lastValidSurface.put(packedKey, primaryColors);
+                }
+
+                int[] fallbackColors = lastValidSurface.get(packedKey);
+
+                boolean hasAnything = (primaryColors != null)
+                        || (useSurfaceAsDim && surfaceColors != null)
+                        || fallbackColors != null;
+                if (!hasAnything) continue;
 
                 ChunkPos pos = new ChunkPos(chunkX, chunkZ);
                 int chunkMinWorldX = pos.getMinBlockX();
@@ -1293,22 +1337,63 @@ public class MapScreen extends Screen {
                         int texX = textureCenterX + (worldX - centerWorldX);
                         int texY = textureCenterY + (worldZ - centerWorldZ);
 
-                        if (texX < 0 || texY < 0 || texX >= this.mapTexture.getSize() || texY >= this.mapTexture.getSize()) {
+                        if (texX < 0 || texY < 0
+                                || texX >= this.mapTexture.getSize()
+                                || texY >= this.mapTexture.getSize()) {
                             continue;
                         }
 
                         int blockIdx = localX + localZ * 16;
-                        int color;
-                        if (caveColors != null) {
-                            // Explored cave floor — show at full brightness.
-                            color = caveColors[blockIdx];
-                        } else if (surfaceColors != null) {
-                            // Surface map always shows — dimmed when in cave mode.
-                            color = inCaveMode ? darken(surfaceColors[blockIdx], 0.4f) : surfaceColors[blockIdx];
-                        } else {
-                            continue;
+                        int color = 0;
+                        boolean skip = false;
+
+                        switch (mode) {
+                            case SURFACE: {
+                                if (surfaceColors != null) {
+                                    color = surfaceColors[blockIdx];
+                                } else if (fallbackColors != null) {
+                                    color = fallbackColors[blockIdx];
+                                } else { skip = true; }
+                                break;
+                            }
+                            case CAVE: {
+                                if (caveColorsArr != null && caveColorsArr[blockIdx] != 0) {
+                                    color = caveColorsArr[blockIdx];
+                                } else if (surfaceColors != null) {
+                                    color = darken(surfaceColors[blockIdx], 0.4f);
+                                } else if (fallbackColors != null) {
+                                    color = darken(fallbackColors[blockIdx], 0.4f);
+                                } else { skip = true; }
+                                break;
+                            }
+                            case INDOOR_LOCAL: {
+                                boolean insideMask = (indoorMask == null)
+                                        || indoorMask.contains(worldX, worldZ);
+                                if (insideMask && caveColorsArr != null && caveColorsArr[blockIdx] != 0) {
+                                    color = caveColorsArr[blockIdx];
+                                } else if (surfaceColors != null) {
+                                    color = surfaceColors[blockIdx];
+                                } else if (fallbackColors != null) {
+                                    color = fallbackColors[blockIdx];
+                                } else { skip = true; }
+                                break;
+                            }
+                            case NETHER: {
+                                if (netherColorsArr != null && netherColorsArr[blockIdx] != 0) {
+                                    color = netherColorsArr[blockIdx];
+                                } else { skip = true; }
+                                break;
+                            }
+                            case END: {
+                                if (endColorsArr != null && endColorsArr[blockIdx] != 0) {
+                                    color = endColorsArr[blockIdx];
+                                } else { skip = true; }
+                                break;
+                            }
+                            default: skip = true; break;
                         }
 
+                        if (skip) continue;
                         this.mapTexture.setPixel(texX, texY, color);
                     }
                 }
@@ -1505,7 +1590,7 @@ public class MapScreen extends Screen {
                     ? getOverallValueColor(valueData.getTotalValue())
                     : getOverallValueBorderColorSoft(valueData.getTotalValue());
         } else {
-            if (MapState.getPlayerHasCeiling() && !hovered) {
+            if (MapState.getPlayerHasCeiling() && !hovered && MapState.getCurrentMode() != MapRenderMode.END) {
                 return;
             }
             borderColor = hovered ? HOVERED_CHUNK_BORDER_COLOR : CHUNK_BORDER_COLOR;
@@ -1921,18 +2006,10 @@ public class MapScreen extends Screen {
         context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
     }
 
-    private String getMapId() {
-        if (this.minecraft.hasSingleplayerServer()) {
-            String levelName = this.minecraft.getSingleplayerServer().getWorldData().getLevelName();
-            return "singleplayer_" + levelName.replaceAll("[^a-zA-Z0-9._-]", "_");
-        }
-
-        if (this.minecraft.getCurrentServer() != null) {
-            String ip = this.minecraft.getCurrentServer().ip;
-            return "server_" + ip.replaceAll("[^a-zA-Z0-9._-]", "_");
-        }
-
-        return "unknown";
+    private WorldIdentity getWorldIdentity() {
+        WorldIdentity id = MapState.getCurrentWorldId();
+        if (id == null) id = WorldIdentity.current(this.minecraft);
+        return id;
     }
 
     private void syncZoomToLoadedRadius(Player player) {
@@ -1946,7 +2023,9 @@ public class MapScreen extends Screen {
         float zoomY = (float) this.height / (blocksAcross * BLOCK_PIXEL_SIZE);
         float zoom = Math.max(0.5f, Math.min(6.0f, Math.min(zoomX, zoomY)));
 
-        if (MapState.getPlayerHasCeiling()) {
+        if (MapState.getCurrentMode() == MapRenderMode.CAVE
+                || MapState.getCurrentMode() == MapRenderMode.INDOOR_LOCAL
+                || MapState.getCurrentMode() == MapRenderMode.NETHER) {
             zoom = Math.max(zoom, CAVE_DEFAULT_ZOOM);
         }
 

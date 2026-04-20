@@ -10,9 +10,13 @@ import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
+import net.cnn_r.alliesandfoes.map.MapRenderMode;
 import net.cnn_r.alliesandfoes.map.MapState;
+import net.cnn_r.alliesandfoes.map.ModeResolver;
+import net.cnn_r.alliesandfoes.map.WorldIdentity;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
+import net.cnn_r.alliesandfoes.map.indoor.IndoorMask;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.network.*;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
@@ -32,7 +36,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -339,33 +342,49 @@ public class AlliesandfoesClient implements ClientModInitializer {
         HudElementRegistry.addLast(net.minecraft.resources.Identifier.parse("alliesandfoes:minimap"),
                 (drawContext, tickCounter) -> HudMinimapRenderer.render(drawContext, tickCounter));
 
-        // Update the Y level and ceiling state used for chunk scanning each tick.
+        // Update the Y level and render mode used for chunk scanning each tick.
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             LocalPlayer player = client.player;
             if (player != null && client.level != null) {
                 int playerY = player.getBlockY();
                 MapState.setPlayerScanY(playerY);
 
-                // MOTION_BLOCKING_NO_LEAVES excludes leaf blocks from the surface height,
-                // so tree canopy never falsely triggers cave mode.
-                int surfaceAtPlayer = client.level.getHeight(
-                        Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-                        player.getBlockX(),
-                        player.getBlockZ()
-                );
-                boolean hasCeiling = surfaceAtPlayer > playerY + MapState.CEILING_DETECTION_THRESHOLD;
-                MapState.setPlayerHasCeiling(hasCeiling);
+                // Update world identity each tick; detect dimension changes.
+                WorldIdentity newWorldId = WorldIdentity.current(client);
+                WorldIdentity oldWorldId = MapState.getCurrentWorldId();
+                if (oldWorldId == null || !oldWorldId.equals(newWorldId)) {
+                    MapState.setCurrentWorldId(newWorldId);
+                    if (oldWorldId != null
+                            && !oldWorldId.dimensionId().equals(newWorldId.dimensionId())) {
+                        // Dimension changed — reset mode and indoor state
+                        MapState.resetMode();
+                    }
+                }
 
-                if (hasCeiling) {
+                // Resolve the current render mode using openness, enclosure, and dimension checks.
+                MapRenderMode resolved = ModeResolver.resolve(client.level, player);
+                MapState.setCurrentMode(resolved);
+
+                if (resolved == MapRenderMode.CAVE || resolved == MapRenderMode.INDOOR_LOCAL) {
                     if (lastCavePlayerY == Integer.MIN_VALUE
                             || Math.abs(playerY - lastCavePlayerY) >= CAVE_Y_RESCAN_THRESHOLD) {
                         MapState.clearNearbyCaveChunks(client.level, player.chunkPosition(),
                                 CAVE_SCAN_RADIUS + 1);
                         lastCavePlayerY = playerY;
                     }
+                    // Refresh indoor mask every 20 ticks in INDOOR_LOCAL mode
+                    if (resolved == MapRenderMode.INDOOR_LOCAL) {
+                        if (indoorMaskTicker++ >= 20) {
+                            indoorMaskTicker = 0;
+                            IndoorMask mask = IndoorMask.compute(
+                                    client.level, player.blockPosition(), MapState.getPlayerScanY());
+                            MapState.setIndoorMask(mask);
+                        }
+                    }
                     maybeScanNearbyCaveChunks(client, player);
                 } else {
                     lastCavePlayerY = Integer.MIN_VALUE;
+                    indoorMaskTicker = 0;
                 }
 
                 // Periodically rescan nearby chunks to pick up placed/broken blocks.
@@ -458,6 +477,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
         // from a previous world never bleeds into the next one.
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             MapState.clearAll();
+            MapState.setCurrentWorldId(null);
             AllianceClientState.clearPendingWarInvites();
             ExplorerSkillClientState.reset();
             ExplorerDiscoveryClientState.reset();
@@ -469,6 +489,9 @@ public class AlliesandfoesClient implements ClientModInitializer {
         // clear from the previous world's background scanner thread.
         ClientPlayConnectionEvents.INIT.register((handler, client) -> {
             MapState.clearAll();
+            // Set world identity eagerly so the scanner captures it immediately;
+            // dimension defaults to overworld until the first tick with a live level.
+            MapState.setCurrentWorldId(WorldIdentity.current(client));
             ExplorerSkillClientState.reset();
             ExplorerDiscoveryClientState.reset();
             HudMinimapRenderer.reset();
@@ -555,6 +578,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
     private static final int NEARBY_RESCAN_INTERVAL_TICKS = 80; // ~4 seconds
     private static final int NEARBY_RESCAN_RADIUS = 1;
     private static int nearbyRescanTicker = 0;
+    private static int indoorMaskTicker = 0;
 
     private static void maybeRescanNearbyChunks(Minecraft client, LocalPlayer player) {
         ChunkScanner scanner = MapState.getScanner();
@@ -582,10 +606,10 @@ public class AlliesandfoesClient implements ClientModInitializer {
 
     private static void maybeScanNearbyCaveChunks(Minecraft client, LocalPlayer player) {
         ChunkScanner scanner = MapState.getScanner();
-        ChunkCache caveCache = MapState.getCaveChunkCache();
         ClientLevel level = client.level;
         if (scanner == null || level == null) return;
 
+        MapRenderMode mode = MapState.getCurrentMode();
         ChunkPos playerChunk = player.chunkPosition();
 
         for (int dx = -CAVE_SCAN_RADIUS; dx <= CAVE_SCAN_RADIUS; dx++) {
@@ -594,8 +618,25 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 int cz = playerChunk.z() + dz;
                 ChunkPos chunkPos = new ChunkPos(cx, cz);
                 ChunkKey key = ChunkKey.of(level, chunkPos);
-                if (!caveCache.hasChunk(key) && !scanner.isCaveQueued(chunkPos) && level.hasChunk(cx, cz)) {
-                    scanner.requestCaveScan(level.getChunk(cx, cz));
+                if (!level.hasChunk(cx, cz)) continue;
+
+                switch (mode) {
+                    case CAVE, INDOOR_LOCAL -> {
+                        if (!MapState.getCaveChunkCache().hasChunk(key) && !scanner.isCaveQueued(chunkPos)) {
+                            scanner.requestCaveScan(level.getChunk(cx, cz));
+                        }
+                    }
+                    case NETHER -> {
+                        if (!MapState.getNetherChunkCache().hasChunk(key) && !scanner.isNetherQueued(chunkPos)) {
+                            scanner.requestNetherScan(level.getChunk(cx, cz));
+                        }
+                    }
+                    case END -> {
+                        if (!MapState.getEndChunkCache().hasChunk(key) && !scanner.isEndQueued(chunkPos)) {
+                            scanner.requestEndScan(level.getChunk(cx, cz));
+                        }
+                    }
+                    default -> {}
                 }
             }
         }

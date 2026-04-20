@@ -79,7 +79,9 @@
       "Bash(/usr/libexec/java_home)",
       "Bash(JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-22.jdk/Contents/Home bash gradlew compileJava)",
       "Bash(/usr/libexec/java_home *)",
-      "Bash(chmod +x gradlew)"
+      "Bash(chmod +x gradlew)",
+      "Bash(./gradlew classes *)",
+      "Bash(echo \"Client starting with PID $!\")"
     ]
   }
 }

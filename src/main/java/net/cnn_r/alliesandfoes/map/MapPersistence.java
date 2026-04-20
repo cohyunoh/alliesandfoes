@@ -19,230 +19,188 @@ import java.util.List;
 
 public class MapPersistence {
 
-    public static void save(ChunkCache chunkCache, ChunkValueCache chunkValueCache, String mapId) {
+    /**
+     * Save all cache types to per-dimension files under
+     * alliesandfoes/world_cache/{levelId}/{dimId}/
+     */
+    public static void save(WorldIdentity id, ChunkCache surface, ChunkCache cave,
+                            ChunkCache nether, ChunkCache end, ChunkValueCache values) {
+        String segment = id.toPathSegment();
+        saveColors(surface,  getPath(segment, "surface_chunks.dat"));
+        saveColors(cave,     getPath(segment, "cave_chunks.dat"));
+        saveColors(nether,   getPath(segment, "nether_chunks.dat"));
+        saveColors(end,      getPath(segment, "end_chunks.dat"));
+        saveValues(values,   getPath(segment, "chunk_values.dat"));
+    }
+
+    /**
+     * Load all cache types from per-dimension files.
+     * Skips files that don't exist yet.
+     */
+    public static void load(WorldIdentity id, ChunkCache surface, ChunkCache cave,
+                            ChunkCache nether, ChunkCache end, ChunkValueCache values) {
+        String segment = id.toPathSegment();
+        loadColors(surface, getPath(segment, "surface_chunks.dat"), id.dimensionId());
+        loadColors(cave,    getPath(segment, "cave_chunks.dat"),    id.dimensionId());
+        loadColors(nether,  getPath(segment, "nether_chunks.dat"),  id.dimensionId());
+        loadColors(end,     getPath(segment, "end_chunks.dat"),     id.dimensionId());
+        loadValues(values,  getPath(segment, "chunk_values.dat"),   id.dimensionId());
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal save/load helpers
+    // -------------------------------------------------------------------------
+
+    private static void saveColors(ChunkCache cache, Path path) {
+        ListTag list = new ListTag();
+        for (ChunkKey key : cache.positions()) {
+            int[] colors = cache.get(key);
+            if (colors == null) continue;
+            CompoundTag tag = new CompoundTag();
+            tag.putString("dimension", key.getDimensionId());
+            tag.putInt("x", key.getChunkX());
+            tag.putInt("z", key.getChunkZ());
+            tag.putIntArray("colors", colors);
+            list.add(tag);
+        }
         CompoundTag root = new CompoundTag();
+        root.put("chunks", list);
+        writeSafe(root, path);
+    }
 
-        root.put("chunks", saveChunkColors(chunkCache));
-        root.put("chunk_values", saveChunkValues(chunkValueCache));
-
-        try {
-            File file = getSavePath(mapId).toFile();
-            File parent = file.getParentFile();
-            if (parent != null) {
-                parent.mkdirs();
+    private static void loadColors(ChunkCache cache, Path path, String expectedDimension) {
+        CompoundTag root = readSafe(path);
+        if (root == null) return;
+        ListTag list = root.getListOrEmpty("chunks");
+        for (int i = 0; i < list.size(); i++) {
+            var opt = list.getCompound(i);
+            if (opt.isEmpty()) continue;
+            CompoundTag tag = opt.get();
+            if (!tag.contains("dimension")) continue;
+            String dimId = tag.getStringOr("dimension", "");
+            if (dimId.isBlank() || !dimId.equals(expectedDimension)) continue;
+            int x = tag.getIntOr("x", 0);
+            int z = tag.getIntOr("z", 0);
+            var colorsOpt = tag.getIntArray("colors");
+            if (colorsOpt.isEmpty()) continue;
+            int[] colors = colorsOpt.get();
+            if (colors.length == 256) {
+                cache.put(new ChunkKey(dimId, x, z), colors);
             }
+        }
+    }
 
+    private static void saveValues(ChunkValueCache cache, Path path) {
+        ListTag list = new ListTag();
+        for (ChunkValueData data : cache.values()) {
+            if (data == null) continue;
+            ChunkValueBreakdown bd = data.getBreakdown();
+            CompoundTag tag = new CompoundTag();
+            tag.putString("dimension", data.getKey().getDimensionId());
+            tag.putInt("x", data.getPos().x());
+            tag.putInt("z", data.getPos().z());
+            tag.putInt("total_value", data.getTotalValue());
+            tag.putInt("ore_value", bd.getOreValue());
+            tag.putInt("structure_value", bd.getStructureValue());
+            tag.putInt("water_value", bd.getWaterValue());
+            tag.putInt("biome_value", bd.getBiomeValue());
+            tag.putInt("diamond_count", bd.getDiamondOreCount());
+            tag.putInt("emerald_count", bd.getEmeraldOreCount());
+            tag.putInt("iron_count", bd.getIronOreCount());
+            tag.putInt("gold_count", bd.getGoldOreCount());
+            tag.putInt("redstone_count", bd.getRedstoneOreCount());
+            tag.putInt("lapis_count", bd.getLapisOreCount());
+            tag.putInt("coal_count", bd.getCoalOreCount());
+            tag.putBoolean("near_water", bd.isNearWater());
+            tag.putString("biome_name", bd.getBiomeName());
+            ListTag structures = new ListTag();
+            for (String s : bd.getStructures()) {
+                CompoundTag st = new CompoundTag();
+                st.putString("name", s);
+                structures.add(st);
+            }
+            tag.put("structures", structures);
+            list.add(tag);
+        }
+        CompoundTag root = new CompoundTag();
+        root.put("chunk_values", list);
+        writeSafe(root, path);
+    }
+
+    private static void loadValues(ChunkValueCache cache, Path path, String expectedDimension) {
+        CompoundTag root = readSafe(path);
+        if (root == null) return;
+        ListTag list = root.getListOrEmpty("chunk_values");
+        for (int i = 0; i < list.size(); i++) {
+            var opt = list.getCompound(i);
+            if (opt.isEmpty()) continue;
+            CompoundTag tag = opt.get();
+            if (!tag.contains("dimension")) continue;
+            String dimId = tag.getStringOr("dimension", "");
+            if (dimId.isBlank() || !dimId.equals(expectedDimension)) continue;
+            int x = tag.getIntOr("x", 0);
+            int z = tag.getIntOr("z", 0);
+            ChunkKey key = new ChunkKey(dimId, x, z);
+            int totalValue = tag.getIntOr("total_value", 1);
+            List<String> structures = new ArrayList<>();
+            ListTag structuresTag = tag.getListOrEmpty("structures");
+            for (int j = 0; j < structuresTag.size(); j++) {
+                var so = structuresTag.getCompound(j);
+                if (so.isEmpty()) continue;
+                String name = so.get().getStringOr("name", "");
+                if (!name.isEmpty()) structures.add(name);
+            }
+            ChunkValueBreakdown bd = new ChunkValueBreakdown(
+                    tag.getIntOr("ore_value", 0),
+                    tag.getIntOr("structure_value", 0),
+                    tag.getIntOr("water_value", 0),
+                    tag.getIntOr("biome_value", 0),
+                    tag.getIntOr("diamond_count", 0),
+                    tag.getIntOr("emerald_count", 0),
+                    tag.getIntOr("iron_count", 0),
+                    tag.getIntOr("gold_count", 0),
+                    tag.getIntOr("redstone_count", 0),
+                    tag.getIntOr("lapis_count", 0),
+                    tag.getIntOr("coal_count", 0),
+                    tag.getBooleanOr("near_water", false),
+                    tag.getStringOr("biome_name", "unknown"),
+                    structures
+            );
+            cache.put(key, new ChunkValueData(key, totalValue, bd));
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Path helpers
+    // -------------------------------------------------------------------------
+
+    private static Path getPath(String pathSegment, String filename) {
+        return Minecraft.getInstance().gameDirectory.toPath()
+                .resolve("alliesandfoes")
+                .resolve("world_cache")
+                .resolve(pathSegment)
+                .resolve(filename);
+    }
+
+    private static void writeSafe(CompoundTag root, Path path) {
+        try {
+            File file = path.toFile();
+            File parent = file.getParentFile();
+            if (parent != null) parent.mkdirs();
             NbtIo.writeCompressed(root, file.toPath());
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    public static void load(ChunkCache chunkCache, ChunkValueCache chunkValueCache, String mapId) {
-        File file = getSavePath(mapId).toFile();
-        if (!file.exists()) {
-            return;
-        }
-
+    private static CompoundTag readSafe(Path path) {
+        File file = path.toFile();
+        if (!file.exists()) return null;
         try {
-            CompoundTag root = NbtIo.readCompressed(file.toPath(), NbtAccounter.unlimitedHeap());
-            if (root == null) {
-                return;
-            }
-
-            loadChunkColors(root, chunkCache);
-            loadChunkValues(root, chunkValueCache);
+            return NbtIo.readCompressed(file.toPath(), NbtAccounter.unlimitedHeap());
         } catch (IOException e) {
             e.printStackTrace();
+            return null;
         }
-    }
-
-    private static ListTag saveChunkColors(ChunkCache chunkCache) {
-        ListTag chunks = new ListTag();
-
-        for (ChunkKey key : chunkCache.positions()) {
-            int[] colors = chunkCache.get(key);
-            if (colors == null) {
-                continue;
-            }
-
-            CompoundTag chunkTag = new CompoundTag();
-            chunkTag.putString("dimension", key.getDimensionId());
-            chunkTag.putInt("x", key.getChunkX());
-            chunkTag.putInt("z", key.getChunkZ());
-            chunkTag.putIntArray("colors", colors);
-
-            chunks.add(chunkTag);
-        }
-
-        return chunks;
-    }
-
-    private static ListTag saveChunkValues(ChunkValueCache chunkValueCache) {
-        ListTag values = new ListTag();
-
-        for (ChunkValueData data : chunkValueCache.values()) {
-            if (data == null) {
-                continue;
-            }
-
-            ChunkValueBreakdown breakdown = data.getBreakdown();
-            CompoundTag valueTag = new CompoundTag();
-
-            valueTag.putString("dimension", data.getKey().getDimensionId());
-            valueTag.putInt("x", data.getPos().x());
-            valueTag.putInt("z", data.getPos().z());
-            valueTag.putInt("total_value", data.getTotalValue());
-
-            valueTag.putInt("ore_value", breakdown.getOreValue());
-            valueTag.putInt("structure_value", breakdown.getStructureValue());
-            valueTag.putInt("water_value", breakdown.getWaterValue());
-            valueTag.putInt("biome_value", breakdown.getBiomeValue());
-
-            valueTag.putInt("diamond_count", breakdown.getDiamondOreCount());
-            valueTag.putInt("emerald_count", breakdown.getEmeraldOreCount());
-            valueTag.putInt("iron_count", breakdown.getIronOreCount());
-            valueTag.putInt("gold_count", breakdown.getGoldOreCount());
-            valueTag.putInt("redstone_count", breakdown.getRedstoneOreCount());
-            valueTag.putInt("lapis_count", breakdown.getLapisOreCount());
-            valueTag.putInt("coal_count", breakdown.getCoalOreCount());
-
-            valueTag.putBoolean("near_water", breakdown.isNearWater());
-            valueTag.putString("biome_name", breakdown.getBiomeName());
-
-            ListTag structuresTag = new ListTag();
-            for (String structure : breakdown.getStructures()) {
-                CompoundTag structureTag = new CompoundTag();
-                structureTag.putString("name", structure);
-                structuresTag.add(structureTag);
-            }
-            valueTag.put("structures", structuresTag);
-
-            values.add(valueTag);
-        }
-
-        return values;
-    }
-
-    private static void loadChunkColors(CompoundTag root, ChunkCache chunkCache) {
-        ListTag chunks = root.getListOrEmpty("chunks");
-
-        for (int i = 0; i < chunks.size(); i++) {
-            var chunkTagOptional = chunks.getCompound(i);
-            if (chunkTagOptional.isEmpty()) {
-                continue;
-            }
-
-            CompoundTag chunkTag = chunkTagOptional.get();
-
-            // Skip entries without dimension info (old format)
-            if (!chunkTag.contains("dimension")) {
-                continue;
-            }
-
-            String dimensionId = chunkTag.getStringOr("dimension", "");
-            if (dimensionId.isBlank()) {
-                continue;
-            }
-
-            int x = chunkTag.getIntOr("x", 0);
-            int z = chunkTag.getIntOr("z", 0);
-
-            var colorsOptional = chunkTag.getIntArray("colors");
-            if (colorsOptional.isEmpty()) {
-                continue;
-            }
-
-            int[] colors = colorsOptional.get();
-            if (colors.length == 256) {
-                chunkCache.put(new ChunkKey(dimensionId, x, z), colors);
-            }
-        }
-    }
-
-    private static void loadChunkValues(CompoundTag root, ChunkValueCache chunkValueCache) {
-        ListTag values = root.getListOrEmpty("chunk_values");
-
-        for (int i = 0; i < values.size(); i++) {
-            var valueTagOptional = values.getCompound(i);
-            if (valueTagOptional.isEmpty()) {
-                continue;
-            }
-
-            CompoundTag valueTag = valueTagOptional.get();
-
-            // Skip entries without dimension info (old format)
-            if (!valueTag.contains("dimension")) {
-                continue;
-            }
-
-            String dimensionId = valueTag.getStringOr("dimension", "");
-            if (dimensionId.isBlank()) {
-                continue;
-            }
-
-            int x = valueTag.getIntOr("x", 0);
-            int z = valueTag.getIntOr("z", 0);
-            ChunkKey key = new ChunkKey(dimensionId, x, z);
-
-            int totalValue = valueTag.getIntOr("total_value", 1);
-
-            int oreValue = valueTag.getIntOr("ore_value", 0);
-            int structureValue = valueTag.getIntOr("structure_value", 0);
-            int waterValue = valueTag.getIntOr("water_value", 0);
-            int biomeValue = valueTag.getIntOr("biome_value", 0);
-
-            int diamondCount = valueTag.getIntOr("diamond_count", 0);
-            int emeraldCount = valueTag.getIntOr("emerald_count", 0);
-            int ironCount = valueTag.getIntOr("iron_count", 0);
-            int goldCount = valueTag.getIntOr("gold_count", 0);
-            int redstoneCount = valueTag.getIntOr("redstone_count", 0);
-            int lapisCount = valueTag.getIntOr("lapis_count", 0);
-            int coalCount = valueTag.getIntOr("coal_count", 0);
-
-            boolean nearWater = valueTag.getBooleanOr("near_water", false);
-            String biomeName = valueTag.getStringOr("biome_name", "unknown");
-
-            List<String> structures = new ArrayList<>();
-            ListTag structuresTag = valueTag.getListOrEmpty("structures");
-            for (int j = 0; j < structuresTag.size(); j++) {
-                var structureTagOptional = structuresTag.getCompound(j);
-                if (structureTagOptional.isEmpty()) {
-                    continue;
-                }
-
-                String name = structureTagOptional.get().getStringOr("name", "");
-                if (!name.isEmpty()) {
-                    structures.add(name);
-                }
-            }
-
-            ChunkValueBreakdown breakdown = new ChunkValueBreakdown(
-                    oreValue,
-                    structureValue,
-                    waterValue,
-                    biomeValue,
-                    diamondCount,
-                    emeraldCount,
-                    ironCount,
-                    goldCount,
-                    redstoneCount,
-                    lapisCount,
-                    coalCount,
-                    nearWater,
-                    biomeName,
-                    structures
-            );
-
-            ChunkValueData data = new ChunkValueData(key, totalValue, breakdown);
-            chunkValueCache.put(key, data);
-        }
-    }
-
-    private static Path getSavePath(String mapId) {
-        return Minecraft.getInstance().gameDirectory.toPath()
-                .resolve("alliesandfoes")
-                .resolve("maps")
-                .resolve(mapId + ".dat");
     }
 }
