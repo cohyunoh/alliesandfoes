@@ -81,7 +81,32 @@
       "Bash(/usr/libexec/java_home *)",
       "Bash(chmod +x gradlew)",
       "Bash(./gradlew classes *)",
-      "Bash(echo \"Client starting with PID $!\")"
+      "Bash(echo \"Client starting with PID $!\")",
+      "Bash(xargs -I{} bash -c 'jar tf {} 2>/dev/null | grep -l TagParser && echo \"Found in: {}\"')",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" net.minecraft.nbt.TagParser)",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" net.minecraft.world.level.Level)",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" net.minecraft.server.level.ServerLevel)",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" net.minecraft.world.entity.EntityType)",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" net.minecraft.resources.ResourceKey)",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" net.minecraft.world.level.storage.TagValueInput)",
+      "Bash(javap -classpath \".gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-a26c9a9f3c/26.1.2/minecraft-merged-a26c9a9f3c-26.1.2.jar\" net.minecraft.world.level.storage.TagValueOutput)",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" \"net.minecraft.world.level.storage.TagValueOutput\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" \"net.minecraft.world.level.storage.TagValueInput\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" \"net.minecraft.world.entity.EntityType\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" \"net.minecraft.world.level.chunk.LevelChunk\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" -c \"net.minecraft.world.level.chunk.LevelChunk\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" \"net.minecraft.world.level.ChunkAccess\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" -c \"net.minecraft.world.level.levelgen.Heightmap\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" -p \"net.minecraft.world.level.chunk.ChunkAccess\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" -c \"net.minecraft.world.level.chunk.ChunkAccess\")",
+      "Bash(awk '/int getHeight\\\\\\(net.minecraft.world.level.levelgen.Heightmap/,/^  public/')",
+      "Bash(awk '/int getHeight\\\\\\(net.minecraft.world.level.levelgen.Heightmap/,0')",
+      "Bash(awk 'NR>=1')",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" \"net.minecraft.world.level.Explosion\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" \"net.minecraft.world.level.ServerExplosion\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" -c \"net.minecraft.world.level.ServerExplosion\")",
+      "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" -p \"net.minecraft.world.level.ServerExplosion\")",
+      "Bash(grep -v \"^Compiled\\\\|^class\\\\|  static\\\\|^$\")"
     ]
   }
 }

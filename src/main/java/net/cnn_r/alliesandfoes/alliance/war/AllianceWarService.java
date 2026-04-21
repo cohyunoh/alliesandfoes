@@ -81,6 +81,7 @@ public class AllianceWarService {
     private AllianceWarService(MinecraftServer server) {
         this.server = server;
         this.wars.addAll(AllianceWarSavedData.get(server).createLiveWars());
+        WarSnapshotSavedData.get(server).loadIntoService(WarSnapshotService.get(server));
         // Clean up any stale boss bars persisted from a previous session
         for (AllianceWar war : this.wars) {
             removeStaleBar(war.id());
@@ -262,8 +263,6 @@ public class AllianceWarService {
                     TerritoryClaim cl = tm.getClaimAt(c);
                     return cl != null && cl.getAllianceId().equals(war.defenderId());
                 }).toList();
-
-        if (eligible.isEmpty()) return;
 
         RollbackEligibleSyncPayload payload = new RollbackEligibleSyncPayload(
                 warId,

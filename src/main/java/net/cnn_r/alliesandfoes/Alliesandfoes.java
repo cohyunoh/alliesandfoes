@@ -474,10 +474,16 @@ public class Alliesandfoes implements ModInitializer {
 							? server.getPlayerList().getPlayer(pet.ownerUuid()) : null;
 					ServerPlayer spawnTarget = owner != null ? owner : player;
 					net.minecraft.server.level.ServerLevel spawnLevel = (net.minecraft.server.level.ServerLevel) spawnTarget.level();
+					net.minecraft.world.level.storage.ValueInput petInput =
+							net.minecraft.world.level.storage.TagValueInput.create(
+									net.minecraft.util.ProblemReporter.DISCARDING,
+									server.registryAccess(), pet.entityNbt());
 					net.minecraft.world.entity.EntityType.loadEntityRecursive(
-							pet.entityNbt(), spawnLevel, net.minecraft.world.entity.EntitySpawnReason.LOAD,
+							petInput, spawnLevel, net.minecraft.world.entity.EntitySpawnReason.LOAD,
 							e -> {
-								e.setPos(spawnTarget.getX(), spawnTarget.getY(), spawnTarget.getZ());
+								e.setPos(spawnTarget.getX() + 1.5, spawnTarget.getY(), spawnTarget.getZ() + 1.5);
+								if (e instanceof net.minecraft.world.entity.LivingEntity le)
+									le.setHealth(le.getMaxHealth());
 								spawnLevel.addFreshEntity(e);
 								return e;
 							});

@@ -45,7 +45,10 @@ public class WarSnapshotService {
     // warId -> list of tamed pets that died in contested territory during this war
     private final Map<UUID, List<PetDeathRecord>> petDeaths = new HashMap<>();
 
+    private final MinecraftServer server;
+
     private WarSnapshotService(MinecraftServer server) {
+        this.server = server;
     }
 
     public static WarSnapshotService get(MinecraftServer server) {
@@ -86,6 +89,7 @@ public class WarSnapshotService {
     /** Marks a chest position as raided for the given war. */
     public void markRaided(UUID warId, String posKey) {
         raidedChestKeys.computeIfAbsent(warId, k -> new HashSet<>()).add(posKey);
+        persist();
     }
 
     /**
@@ -145,18 +149,20 @@ public class WarSnapshotService {
             var ref = tamable.getOwnerReference();
             if (ref != null) ownerUuid = ref.getUUID();
         }
-        TagValueOutput output = TagValueOutput.createWithoutContext(ProblemReporter.DISCARDING);
+        TagValueOutput output = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, entity.level().registryAccess());
         entity.saveWithoutId(output);
         CompoundTag nbt = output.buildResult();
         // loadEntityRecursive requires the entity type "id" tag which saveWithoutId omits
-        nbt.putString("id", net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE
-                .getKey(entity.getType()).toString());
+        net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE
+                .getResourceKey(entity.getType())
+                .ifPresent(k -> nbt.putString("id", k.identifier().toString()));
         petDeaths.computeIfAbsent(warId, k -> new ArrayList<>())
                  .add(new PetDeathRecord(
                          entity.level().dimension().identifier().toString(),
                          entity.blockPosition(),
                          nbt,
                          ownerUuid));
+        persist();
     }
 
     /** Returns all dead pet records for a war (read-only view). */
@@ -173,6 +179,7 @@ public class WarSnapshotService {
     /** Removes all dead pet records for a war (call after reviving all). */
     public void clearPetDeaths(UUID warId) {
         petDeaths.remove(warId);
+        persist();
     }
 
     /** Replaces the dead pet list for a war with the given list (used after selective revival). */
@@ -182,6 +189,7 @@ public class WarSnapshotService {
         } else {
             petDeaths.put(warId, new ArrayList<>(remaining));
         }
+        persist();
     }
 
     /** Returns all chunk keys that have at least one snapshotted block for this war. */
@@ -242,6 +250,41 @@ public class WarSnapshotService {
         this.snapshots.remove(warId);
         this.raidedChestKeys.remove(warId);
         this.petDeaths.remove(warId);
+        persist();
+    }
+
+    /**
+     * Snapshots a block using a caller-supplied {@code beforeState} instead of querying the world.
+     * Used by the TNT/explosion mixin where the old state is provided as a parameter.
+     */
+    public void snapshotIfFirstWithState(UUID warId, ServerLevel level, BlockPos pos,
+                                          BlockState beforeState, List<ItemStack> containerContents) {
+        Map<String, BlockChangeRecord> warSnapshots = this.snapshots.computeIfAbsent(warId, id -> new HashMap<>());
+        String key = makeKey(level, pos);
+        if (warSnapshots.containsKey(key)) return;
+        warSnapshots.put(key, new BlockChangeRecord(
+                level.dimension().identifier().toString(), pos, beforeState, containerContents));
+    }
+
+    /** Exposes all pet death lists keyed by war ID, for persistence. */
+    public Map<UUID, List<PetDeathRecord>> getPetDeathsByWar() {
+        return petDeaths;
+    }
+
+    /** Exposes all raided chest key sets keyed by war ID, for persistence. */
+    public Map<UUID, Set<String>> getRaidedChestKeysByWar() {
+        return raidedChestKeys;
+    }
+
+    /** Called on startup to restore state from the saved data layer (no persist triggered). */
+    public void restoreFromSavedData(Map<UUID, List<PetDeathRecord>> loadedPetDeaths,
+                                      Map<UUID, Set<String>> loadedRaidedKeys) {
+        this.petDeaths.putAll(loadedPetDeaths);
+        this.raidedChestKeys.putAll(loadedRaidedKeys);
+    }
+
+    private void persist() {
+        WarSnapshotSavedData.get(server).saveFromService(this);
     }
 
     public static String makeKey(ServerLevel level, BlockPos pos) {

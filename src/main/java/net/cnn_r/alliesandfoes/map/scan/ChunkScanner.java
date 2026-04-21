@@ -212,7 +212,7 @@ public class ChunkScanner {
                     continue;
                 }
 
-                blockPos.set(worldX, colSurfaceY - 1, worldZ);
+                blockPos.set(worldX, colSurfaceY, worldZ);
                 BlockState state = chunk.getBlockState(blockPos);
 
                 if (!state.is(Blocks.WATER) && !state.is(Blocks.LAVA)) {
@@ -226,10 +226,8 @@ public class ChunkScanner {
                 }
 
                 int color = BlockColorResolver.getColor(state, level, blockPos);
-                int actualBlockY = blockPos.getY() + 1;
-
                 int avgNeighbor = (northSurface + southSurface + westSurface + eastSurface) / 4;
-                int shade = clamp(actualBlockY - avgNeighbor, -3, 3);
+                int shade = clamp(blockPos.getY() - avgNeighbor, -3, 3);
                 color = applyShading(color, shade * 15);
 
                 pixels[localX + localZ * 16] = color;
@@ -353,7 +351,7 @@ public class ChunkScanner {
                     continue;
                 }
 
-                bp.set(worldX, colSurface - 1, worldZ);
+                bp.set(worldX, colSurface, worldZ);
                 BlockState state = chunk.getBlockState(bp);
 
                 for (int i = 0; i < 6; i++) {
@@ -384,7 +382,7 @@ public class ChunkScanner {
                     color = blendWithColor(color, 0xFFFFFF, 0.3f);
                 } else {
                     int avgNeighbor = (nSurf + sSurf + wSurf + eSurf) / 4;
-                    int shade = clamp(bp.getY() + 1 - avgNeighbor, -3, 3);
+                    int shade = clamp(bp.getY() - avgNeighbor, -3, 3);
                     color = applyShading(color, shade * 15);
                 }
 

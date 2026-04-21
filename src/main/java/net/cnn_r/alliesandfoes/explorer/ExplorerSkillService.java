@@ -78,7 +78,9 @@ public class ExplorerSkillService {
             }
         }
 
-        this.checkInventoryDiscoveries(player);
+        if (isHoldingMonocle(player)) {
+            this.checkInventoryDiscoveries(player);
+        }
     }
 
     /**
@@ -121,13 +123,6 @@ public class ExplorerSkillService {
         Alliance alliance = AllianceManager.get(this.server).getAllianceFor(player.getUUID());
         if (alliance != null) {
             AllianceProgressionService.get(this.server).add(alliance.getId(), CHUNK_DISCOVER_REWARD);
-            player.sendSystemMessage(
-                    Component.literal("+" + CHUNK_DISCOVER_REWARD + " influence").withStyle(ChatFormatting.AQUA)
-            );
-        } else if (noAllianceHintPlayers.add(player.getUUID())) {
-            player.sendSystemMessage(
-                    Component.literal("Join an alliance to earn influence from your exploration.").withStyle(ChatFormatting.GRAY)
-            );
         }
     }
 

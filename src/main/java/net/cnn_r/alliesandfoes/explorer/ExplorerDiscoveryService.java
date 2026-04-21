@@ -61,9 +61,6 @@ public class ExplorerDiscoveryService {
             Alliance alliance = AllianceManager.get(server).getAllianceFor(uuid);
             if (alliance != null) {
                 AllianceProgressionService.get(server).add(alliance.getId(), bonus);
-                player.sendSystemMessage(
-                        Component.literal("+" + bonus + " influence (discovery)").withStyle(ChatFormatting.GREEN)
-                );
             }
         }
     }

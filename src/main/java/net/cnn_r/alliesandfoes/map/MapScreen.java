@@ -865,16 +865,7 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
-        if (super.mouseClicked(click, doubled)) {
-            return true;
-        }
-
-        // In war review mode only Accept/Deny buttons work; block all map clicks
-        if (this.warReviewMode) {
-            return true;
-        }
-
-        // Pet revive panel: clicking a row toggles selection
+        // Pet revive panel rows take priority over all widgets — prevents button-overlap issue
         if (this.petRevivePanelOpen && MapState.hasDeadPets() && click.button() == 0) {
             List<String> pets = MapState.getDeadPetDescriptions();
             for (int i = 0; i < pets.size(); i++) {
@@ -886,6 +877,15 @@ public class MapScreen extends Screen {
                     return true;
                 }
             }
+        }
+
+        if (super.mouseClicked(click, doubled)) {
+            return true;
+        }
+
+        // In war review mode only Accept/Deny buttons work; block all map clicks
+        if (this.warReviewMode) {
+            return true;
         }
 
         this.hoveredChunk = this.getChunkAtMouse((int) click.x(), (int) click.y());
@@ -1071,15 +1071,16 @@ public class MapScreen extends Screen {
             return true;
         }
 
-        // In anchor cycle mode: arrows cycle, ESC exits
+        // In anchor cycle mode: arrows cycle, ESC exits, C/U exit and fall through to claim/unclaim
         if (this.anchorCycleMode) {
-            if (key == 256) { // ESC
-                exitAnchorCycleMode();
-                return true;
+            if (key == 256) { exitAnchorCycleMode(); return true; }
+            if (key == 263) { cycleAnchor(-1); return true; }
+            if (key == 262) { cycleAnchor(1);  return true; }
+            if (key == 67 || key == 85) {
+                exitAnchorCycleMode(); // exit cycle mode, fall through to C/U handling below
+            } else {
+                return true; // block all other keys
             }
-            if (key == 263) { cycleAnchor(-1); return true; } // left
-            if (key == 262) { cycleAnchor(1);  return true; } // right
-            return true; // block all other keys
         }
 
         int panAmount = (modifiers & 1) != 0 ? 64 : 16;

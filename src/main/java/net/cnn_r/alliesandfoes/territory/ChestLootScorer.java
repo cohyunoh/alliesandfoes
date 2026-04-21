@@ -56,10 +56,10 @@ public final class ChestLootScorer {
 
     /** Maps a score to a drop tier. */
     public static DropTier tierFor(int score) {
-        if (score <= 30)   return DropTier.JUNK;
-        if (score <= 150)  return DropTier.IRON;
-        if (score <= 500)  return DropTier.EMERALD;
-        if (score <= 2000) return DropTier.DIAMOND;
+        if (score <= 2000)   return DropTier.JUNK;
+        if (score <= 20000)  return DropTier.IRON;
+        if (score <= 100000) return DropTier.EMERALD;
+        if (score <= 300000) return DropTier.DIAMOND;
         return DropTier.RICH;
     }
 
