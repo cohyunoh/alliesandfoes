@@ -150,7 +150,7 @@ public class Alliesandfoes implements ModInitializer {
 				}
 
 				context.player().sendSystemMessage(
-						Component.literal("Created alliance: " + result.alliance().getName()));
+						Component.literal("Created alliance: " + result.alliance().getName()), true);
 			});
 		});
 
@@ -352,7 +352,7 @@ public class Alliesandfoes implements ModInitializer {
 						? AllianceWarService.get(context.server()).acceptWarById(player, payload.warId())
 						: AllianceWarService.get(context.server()).declineWarById(player, payload.warId());
 				if (error != null) {
-					player.sendSystemMessage(Component.literal(error).withStyle(ChatFormatting.RED));
+					player.sendSystemMessage(Component.literal(error).withStyle(ChatFormatting.RED), true);
 				}
 			});
 		});
@@ -782,7 +782,7 @@ public class Alliesandfoes implements ModInitializer {
 			if (claim == null) return true;
 
 			if (!isAllowedBlockInteraction(server, player.getUUID(), claim)) {
-				sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED));
+				sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED), true);
 				return false;
 			}
 
@@ -799,7 +799,7 @@ public class Alliesandfoes implements ModInitializer {
 						String posKey = WarSnapshotService.makeKey(sl, pos);
 						if (WarSnapshotService.get(server).isRaided(war.id(), posKey)) {
 							sp.sendSystemMessage(Component.literal("This chest has already been raided.")
-									.withStyle(ChatFormatting.RED));
+									.withStyle(ChatFormatting.RED), true);
 						} else {
 							WarSnapshotService.get(server).markRaided(war.id(), posKey);
 							ItemStack loot = ChestLootScorer.computeDrop(container, sl.getRandom());
@@ -807,10 +807,10 @@ public class Alliesandfoes implements ModInitializer {
 								double x = pos.getX() + 0.5, y = pos.getY() + 0.5, z = pos.getZ() + 0.5;
 								sl.addFreshEntity(new ItemEntity(sl, x, y, z, loot));
 								sp.sendSystemMessage(Component.literal("You raided the chest!")
-										.withStyle(ChatFormatting.GOLD));
+										.withStyle(ChatFormatting.GOLD), true);
 							} else {
 								sp.sendSystemMessage(Component.literal("The chest was empty.")
-										.withStyle(ChatFormatting.GRAY));
+										.withStyle(ChatFormatting.GRAY), true);
 							}
 						}
 						return false; // Always cancel chest break during war
@@ -839,7 +839,7 @@ public class Alliesandfoes implements ModInitializer {
 					TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
 					if (claim != null && !isOwnTerritory(server, player.getUUID(), claim)) {
 						if (player instanceof ServerPlayer sp)
-							sp.sendSystemMessage(Component.literal("You cannot open containers in enemy territory.").withStyle(ChatFormatting.RED));
+							sp.sendSystemMessage(Component.literal("You cannot open containers in enemy territory.").withStyle(ChatFormatting.RED), true);
 						return InteractionResult.FAIL;
 					}
 				}
@@ -853,7 +853,7 @@ public class Alliesandfoes implements ModInitializer {
 
 			if (!isAllowedBlockInteraction(server, player.getUUID(), claim)) {
 				if (player instanceof ServerPlayer sp)
-					sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED));
+					sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED), true);
 				return InteractionResult.FAIL;
 			}
 

@@ -297,7 +297,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(ExplorerSkillSyncPayload.TYPE, (payload, context) -> {
             context.client().execute(() ->
-                    ExplorerSkillClientState.setExploredChunkCount(payload.exploredChunkCount()));
+                    ExplorerSkillClientState.setFromSync(payload.exploredChunkCount(), payload.explorerXp()));
         });
 
         ClientPlayNetworking.registerGlobalReceiver(ExplorerDiscoverySyncPayload.TYPE, (payload, context) -> {

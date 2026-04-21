@@ -4,6 +4,7 @@ import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryRules;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillTier;
+import net.cnn_r.alliesandfoes.explorer.ExplorerTrackingCosts;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.map.intuition.IntuitionTarget;
 import net.cnn_r.alliesandfoes.network.SetIntuitionTargetPayload;
@@ -93,6 +94,10 @@ public class JournalScreen extends Screen {
     private static final int FOLD_CORNER_W = 30;
     private static final int FOLD_CORNER_H = 20;
 
+    // Pending-selection colours (select → confirm flow)
+    private static final int C_PENDING     = 0x50DEB887;  // burlywood — lighter than active-target gold
+    private static final int C_PENDING_TXT = 0xFF996600;  // amber
+
     // Parchment colour palette
     private static final int C_COVER        = 0xFF4E2E0A;  // leather outer border (worn, darker)
     private static final int C_TITLE_BG     = 0xFF3D2208;  // dark title strip
@@ -132,6 +137,11 @@ public class JournalScreen extends Screen {
     private int biomeScrollOffset     = 0;
     private int structureScrollOffset = 0;
 
+    // Pending selection (selected but not yet confirmed for tracking)
+    private IntuitionTarget.TargetType pendingType        = null;
+    private Identifier                 pendingId          = null;
+    private String                     pendingDisplayName = null;
+
     // Hover indices for bestiary list highlight (reset each render pass)
     private int hoveredBiomeIndex     = -1;
     private int hoveredStructureIndex = -1;
@@ -153,18 +163,43 @@ public class JournalScreen extends Screen {
     protected void rebuildWidgets() {
         clearWidgets();
 
-        // Clear Target button — only relevant on Explorer bestiary page
-        if (activeTab == JournalTab.EXPLORER && explorerPage == 1
-                && !isTabLocked(JournalTab.EXPLORER)) {
-            int btnW = 82;
-            int btnH = 16;
-            int btnX = dialogX + DIALOG_W - btnW - PADDING;
-            int btnY = dialogY + DIALOG_H - FOOTER_H + (FOOTER_H - btnH) / 2;
+        if (activeTab != JournalTab.EXPLORER || explorerPage != 1 || isTabLocked(JournalTab.EXPLORER)) return;
 
+        IntuitionTarget activeTarget = ExplorerDiscoveryClientState.getActiveTarget();
+        boolean hasPending = pendingId != null;
+        boolean pendingIsActive = hasPending && activeTarget != null
+                && activeTarget.type() == pendingType && activeTarget.id().equals(pendingId);
+
+        int btnH   = 16;
+        int btnY   = dialogY + DIALOG_H - FOOTER_H + (FOOTER_H - btnH) / 2;
+        int rightX = dialogX + DIALOG_W - PADDING;
+
+        // "Track" button — visible when something is pending and it's not already the active target
+        if (hasPending && !pendingIsActive) {
+            int cost = trackingPersonalCost(pendingType);
+            String trackLabel = "Track (" + cost + " XP)";
+            int trackW = font.width(trackLabel) + 12;
+            addRenderableWidget(Button.builder(
+                    Component.literal(trackLabel),
+                    btn -> confirmTrackTarget()
+            ).pos(rightX - trackW, btnY).size(trackW, btnH).build());
+            rightX -= trackW + 4;
+
+            // "Cancel" button
+            int cancelW = font.width("Cancel") + 12;
+            addRenderableWidget(Button.builder(
+                    Component.literal("Cancel"),
+                    btn -> clearSelection()
+            ).pos(rightX - cancelW, btnY).size(cancelW, btnH).build());
+        }
+
+        // "Clear Target" button — visible when an active target is set
+        if (activeTarget != null) {
+            int clearW = 82;
             addRenderableWidget(Button.builder(
                     Component.translatable("screen.alliesandfoes.journal.clear_target"),
                     btn -> clearTarget()
-            ).pos(btnX, btnY).size(btnW, btnH).build());
+            ).pos(dialogX + PADDING, btnY).size(clearW, btnH).build());
         }
     }
 
@@ -456,6 +491,9 @@ public class JournalScreen extends Screen {
                     && activeTarget.type() == type
                     && activeTarget.id().equals(entryId);
 
+            boolean pending = discovered && !selected && pendingId != null
+                    && pendingType == type && pendingId.equals(entryId);
+
             boolean hovered = mouseX >= x - 2 && mouseX < x + w
                     && mouseY >= rowY && mouseY < rowY + ROW_H;
 
@@ -464,13 +502,15 @@ public class JournalScreen extends Screen {
 
             if (selected) {
                 g.fill(x - 2, rowY, x + w, rowY + ROW_H - 1, C_SELECTED);
+            } else if (pending) {
+                g.fill(x - 2, rowY, x + w, rowY + ROW_H - 1, C_PENDING);
             } else if (hovered && discovered) {
                 g.fill(x - 2, rowY, x + w, rowY + ROW_H - 1, C_HOVER);
             }
 
             if (discovered) {
-                g.text(font, entry.displayName(), x, rowY + 2,
-                        selected ? C_SELECTED_TXT : C_TEXT, false);
+                int txtColor = selected ? C_SELECTED_TXT : pending ? C_PENDING_TXT : C_TEXT;
+                g.text(font, entry.displayName(), x, rowY + 2, txtColor, false);
             } else {
                 String hint = entry.unlockHint().isEmpty() ? "???" : "??? (" + entry.unlockHint() + ")";
                 g.text(font, hint, x, rowY + 2, C_TEXT_DIM, false);
@@ -622,30 +662,34 @@ public class JournalScreen extends Screen {
     // -------------------------------------------------------------------------
 
     private void renderFooter(GuiGraphicsExtractor g) {
-        IntuitionTarget target = ExplorerDiscoveryClientState.getActiveTarget();
+        IntuitionTarget activeTarget = ExplorerDiscoveryClientState.getActiveTarget();
 
-        // Only show target info when on explorer bestiary page
-        boolean showTarget = activeTab == JournalTab.EXPLORER && explorerPage == 1
+        boolean showInfo = activeTab == JournalTab.EXPLORER && explorerPage == 1
                 && !isTabLocked(JournalTab.EXPLORER);
 
-        String label;
-        int    color;
-        if (!showTarget) {
-            label = "";
-            color = C_TEXT_DIM;
-        } else if (target != null) {
-            label = Component.translatable("screen.alliesandfoes.journal.searching_for",
-                    target.displayName()).getString();
-            color = C_TARGET_TXT;
-        } else {
-            label = "No active search target";
-            color = C_TEXT_DIM;
-        }
+        if (!showInfo) return;
 
         int footerTop = dialogY + DIALOG_H - FOOTER_H;
-        if (!label.isEmpty()) {
-            g.text(font, label,
-                    dialogX + PADDING, footerTop + (FOOTER_H - 8) / 2, color, false);
+        int lineY     = footerTop + (FOOTER_H - 8) / 2;
+
+        boolean hasPending = pendingId != null;
+        boolean pendingIsActive = hasPending && activeTarget != null
+                && activeTarget.type() == pendingType && activeTarget.id().equals(pendingId);
+
+        if (hasPending && !pendingIsActive) {
+            int personalCost  = trackingPersonalCost(pendingType);
+            int allianceCost  = trackingAllianceCost(pendingType);
+            int myXp          = ExplorerSkillClientState.getExplorerXp();
+            String costLine   = pendingDisplayName + " — " + personalCost + " Explorer XP + " + allianceCost + " Alliance XP";
+            String xpLine     = "Your Explorer XP: " + myXp;
+            g.text(font, costLine, dialogX + PADDING, lineY - 4, C_PENDING_TXT, false);
+            g.text(font, xpLine,   dialogX + PADDING, lineY + 6, C_TEXT_DIM,    false);
+        } else if (activeTarget != null) {
+            String label = Component.translatable("screen.alliesandfoes.journal.searching_for",
+                    activeTarget.displayName()).getString();
+            g.text(font, label, dialogX + PADDING, lineY, C_TARGET_TXT, false);
+        } else {
+            g.text(font, "No active search target", dialogX + PADDING, lineY, C_TEXT_DIM, false);
         }
     }
 
@@ -700,7 +744,7 @@ public class JournalScreen extends Screen {
             List<ExplorerDiscoveryRules.DiscoveryEntry> allBiomes     = ExplorerDiscoveryRules.ALL_BIOMES;
             List<ExplorerDiscoveryRules.DiscoveryEntry> allStructures = ExplorerDiscoveryRules.ALL_STRUCTURES;
 
-            // Biome column — only discovered entries can be selected as target
+            // Biome column — clicking a discovered entry enters pending selection
             int bLeft  = dialogX + PADDING - 2;
             int bRight = dialogX + COL_MID;
             if (mx >= bLeft && mx < bRight && my >= listTop && my < listBot) {
@@ -710,13 +754,13 @@ public class JournalScreen extends Screen {
                 if (idx >= 0 && idx < allBiomes.size()) {
                     ExplorerDiscoveryRules.DiscoveryEntry entry = allBiomes.get(idx);
                     if (ExplorerDiscoveryClientState.isDiscovered(entry.type(), entry.id())) {
-                        selectTarget(IntuitionTarget.TargetType.BIOME, Identifier.parse(entry.id()));
+                        handleEntryClick(IntuitionTarget.TargetType.BIOME, Identifier.parse(entry.id()), entry.displayName());
                     }
                     return true;
                 }
             }
 
-            // Structure column — only discovered entries can be selected as target
+            // Structure column — clicking a discovered entry enters pending selection
             int sLeft  = dialogX + COL_MID + PADDING - 2;
             int sRight = dialogX + DIALOG_W - PADDING;
             if (mx >= sLeft && mx < sRight && my >= listTop && my < listBot) {
@@ -726,7 +770,7 @@ public class JournalScreen extends Screen {
                 if (idx >= 0 && idx < allStructures.size()) {
                     ExplorerDiscoveryRules.DiscoveryEntry entry = allStructures.get(idx);
                     if (ExplorerDiscoveryClientState.isDiscovered(entry.type(), entry.id())) {
-                        selectTarget(IntuitionTarget.TargetType.STRUCTURE, Identifier.parse(entry.id()));
+                        handleEntryClick(IntuitionTarget.TargetType.STRUCTURE, Identifier.parse(entry.id()), entry.displayName());
                     }
                     return true;
                 }
@@ -792,29 +836,53 @@ public class JournalScreen extends Screen {
         rebuildWidgets();
     }
 
-    private void selectTarget(IntuitionTarget.TargetType type, Identifier id) {
-        IntuitionTarget current = ExplorerDiscoveryClientState.getActiveTarget();
-        if (current != null && current.type() == type && current.id().equals(id)) {
-            clearTarget();
+    private void handleEntryClick(IntuitionTarget.TargetType type, Identifier id, String displayName) {
+        // Second click on already-pending entry deselects it
+        if (pendingId != null && pendingType == type && pendingId.equals(id)) {
+            clearSelection();
             return;
         }
+        pendingType        = type;
+        pendingId          = id;
+        pendingDisplayName = displayName;
+        rebuildWidgets();
+    }
 
-        ExplorerDiscoveryClientState.update(
-                toStringList(ExplorerDiscoveryClientState.getDiscoveredBiomes()),
-                toStringList(ExplorerDiscoveryClientState.getDiscoveredStructures()),
-                type.name(),
-                id.toString()
-        );
-        ClientPlayNetworking.send(new SetIntuitionTargetPayload(type.name(), id.toString()));
+    private void confirmTrackTarget() {
+        if (pendingId == null) return;
+        ClientPlayNetworking.send(new SetIntuitionTargetPayload(pendingType.name(), pendingId.toString()));
+        clearSelection();
+    }
+
+    private void clearSelection() {
+        pendingType        = null;
+        pendingId          = null;
+        pendingDisplayName = null;
+        rebuildWidgets();
     }
 
     private void clearTarget() {
+        clearSelection();
         ExplorerDiscoveryClientState.update(
                 toStringList(ExplorerDiscoveryClientState.getDiscoveredBiomes()),
                 toStringList(ExplorerDiscoveryClientState.getDiscoveredStructures()),
                 "NONE", ""
         );
         ClientPlayNetworking.send(new SetIntuitionTargetPayload("NONE", ""));
+    }
+
+    private static int trackingPersonalCost(IntuitionTarget.TargetType type) {
+        return switch (type) {
+            case BIOME     -> ExplorerTrackingCosts.BIOME_PERSONAL_XP;
+            case STRUCTURE -> ExplorerTrackingCosts.STRUCTURE_PERSONAL_XP;
+        };
+    }
+
+    private static int trackingAllianceCost(IntuitionTarget.TargetType type) {
+        return switch (type) {
+            case BIOME     -> ExplorerTrackingCosts.BIOME_ALLIANCE_XP;
+            case STRUCTURE -> ExplorerTrackingCosts.STRUCTURE_ALLIANCE_XP;
+        };
     }
 
     private static List<String> toStringList(List<Identifier> ids) {

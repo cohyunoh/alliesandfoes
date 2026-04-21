@@ -6,10 +6,10 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
 /**
- * S2C payload: syncs the player's current Explorer skill chunk count.
- * Sent on login and on each new chunk discovery.
+ * S2C payload: syncs the player's current Explorer skill chunk count and personal XP.
+ * Sent on login and on each new chunk discovery or XP change.
  */
-public record ExplorerSkillSyncPayload(int exploredChunkCount) implements CustomPacketPayload {
+public record ExplorerSkillSyncPayload(int exploredChunkCount, int explorerXp) implements CustomPacketPayload {
 
     public static final Type<ExplorerSkillSyncPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath("alliesandfoes", "explorer_skill_sync"));
@@ -24,9 +24,12 @@ public record ExplorerSkillSyncPayload(int exploredChunkCount) implements Custom
 
     private static void write(FriendlyByteBuf buf, ExplorerSkillSyncPayload payload) {
         buf.writeVarInt(payload.exploredChunkCount());
+        buf.writeVarInt(payload.explorerXp());
     }
 
     private static ExplorerSkillSyncPayload read(FriendlyByteBuf buf) {
-        return new ExplorerSkillSyncPayload(buf.readVarInt());
+        int count = buf.readVarInt();
+        int xp    = buf.readVarInt();
+        return new ExplorerSkillSyncPayload(count, xp);
     }
 }

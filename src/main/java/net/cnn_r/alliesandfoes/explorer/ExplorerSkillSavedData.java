@@ -37,7 +37,8 @@ public class ExplorerSkillSavedData extends SavedData {
             RecordCodecBuilder.create(instance -> instance.group(
                     UUID_CODEC.fieldOf("player_uuid").forGetter(StoredPlayerExploration::playerUuid),
                     STORED_CHUNK_KEY_CODEC.listOf().fieldOf("explored_chunks")
-                            .forGetter(StoredPlayerExploration::exploredChunks)
+                            .forGetter(StoredPlayerExploration::exploredChunks),
+                    Codec.INT.optionalFieldOf("explorer_xp", 0).forGetter(StoredPlayerExploration::explorerXp)
             ).apply(instance, StoredPlayerExploration::new));
 
     private static final Codec<ExplorerSkillSavedData> CODEC =
@@ -90,9 +91,20 @@ public class ExplorerSkillSavedData extends SavedData {
     }
 
     /**
-     * Saves live explored chunk data back into stored format.
+     * Builds a live map of personal explorer XP per player from stored data.
      */
-    public void saveFromLiveData(Map<UUID, Set<ChunkKey>> data) {
+    public Map<UUID, Integer> createLiveExplorerXp() {
+        Map<UUID, Integer> result = new LinkedHashMap<>();
+        for (StoredPlayerExploration entry : this.storedEntries) {
+            result.put(entry.playerUuid(), entry.explorerXp());
+        }
+        return result;
+    }
+
+    /**
+     * Saves live explored chunk data and explorer XP back into stored format.
+     */
+    public void saveFromLiveData(Map<UUID, Set<ChunkKey>> data, Map<UUID, Integer> xpData) {
         List<StoredPlayerExploration> snapshot = new ArrayList<>(data.size());
 
         for (Map.Entry<UUID, Set<ChunkKey>> entry : data.entrySet()) {
@@ -112,7 +124,8 @@ public class ExplorerSkillSavedData extends SavedData {
                 ));
             }
 
-            snapshot.add(new StoredPlayerExploration(playerUuid, storedChunks));
+            int xp = xpData.getOrDefault(playerUuid, 0);
+            snapshot.add(new StoredPlayerExploration(playerUuid, storedChunks, xp));
         }
 
         this.storedEntries = snapshot;
@@ -122,6 +135,6 @@ public class ExplorerSkillSavedData extends SavedData {
     public record StoredChunkKey(String dimensionId, int chunkX, int chunkZ) {
     }
 
-    public record StoredPlayerExploration(UUID playerUuid, List<StoredChunkKey> exploredChunks) {
+    public record StoredPlayerExploration(UUID playerUuid, List<StoredChunkKey> exploredChunks, int explorerXp) {
     }
 }

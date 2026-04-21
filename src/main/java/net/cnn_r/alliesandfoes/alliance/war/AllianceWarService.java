@@ -556,7 +556,7 @@ public class AllianceWarService {
 
         killer.sendSystemMessage(Component.literal(
                 "+" + reward + " influence (war kill" + (homeTurf ? " — home turf bonus!" : "") + ")")
-                .withStyle(ChatFormatting.GOLD));
+                .withStyle(ChatFormatting.GOLD), true);
 
         // Spawn kill-loot at victim's location
         Level level = victim.level();
@@ -786,7 +786,7 @@ public class AllianceWarService {
     private void notifyAlliance(Alliance alliance, Component message) {
         for (UUID memberUuid : alliance.getMemberUuids()) {
             ServerPlayer player = server.getPlayerList().getPlayer(memberUuid);
-            if (player != null) player.sendSystemMessage(message);
+            if (player != null) player.sendSystemMessage(message, true);
         }
     }
 

@@ -6,16 +6,22 @@ package net.cnn_r.alliesandfoes.explorer;
  */
 public final class ExplorerSkillClientState {
     private static int exploredChunkCount = 0;
+    private static int explorerXp         = 0;
 
     private ExplorerSkillClientState() {
     }
 
-    public static void setExploredChunkCount(int count) {
+    public static void setFromSync(int count, int xp) {
         exploredChunkCount = Math.max(0, count);
+        explorerXp         = Math.max(0, xp);
     }
 
     public static int getExploredChunkCount() {
         return exploredChunkCount;
+    }
+
+    public static int getExplorerXp() {
+        return explorerXp;
     }
 
     public static ExplorerSkillTier getTier() {
@@ -24,5 +30,6 @@ public final class ExplorerSkillClientState {
 
     public static void reset() {
         exploredChunkCount = 0;
+        explorerXp         = 0;
     }
 }

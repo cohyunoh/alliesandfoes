@@ -16,10 +16,11 @@ import net.minecraft.world.level.ChunkPos;
 
 public final class HudIntuitionRenderer {
 
-    private static final int   GLOW_THICKNESS = 40;
-    private static final int   GLOW_RGB       = 0xCC8800;
-    private static final float MAX_GLOW_ALPHA = 0.55f;
-    private static final long  GLOW_REFRESH_MS = 2500L;
+    private static final int   GLOW_THICKNESS      = 40;
+    private static final int   GLOW_RGB            = 0xCC8800;
+    private static final float MAX_GLOW_ALPHA      = 0.55f;
+    private static final long  GLOW_REFRESH_MS     = 2500L;
+    private static final float GLOW_RENDER_THRESHOLD = 0.18f;
 
     private static final long INTUITION_EVAL_INTERVAL_MS    = 3000L;
     private static final int  INTUITION_EVAL_CHUNK_DISTANCE = 2;
@@ -129,6 +130,9 @@ public final class HudIntuitionRenderer {
         float right = cachedEdgeScores[1];
         float back  = cachedEdgeScores[2];
         float left  = cachedEdgeScores[3];
+
+        float maxScore = Math.max(Math.max(front, back), Math.max(right, left));
+        if (maxScore < GLOW_RENDER_THRESHOLD) return;
 
         // Top edge (front)
         for (int i = 0; i < GLOW_THICKNESS; i++) {

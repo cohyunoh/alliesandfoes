@@ -7,9 +7,7 @@ import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.network.ExplorerSkillSyncPayload;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -25,39 +23,31 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
 
-/**
- * Server-side service for tracking per-player Explorer skill.
- *
- * Skill is earned by walking into chunks the player has never visited before.
- * In V1 this tracks passively but does not gate any features — tiers are
- * informational and synced to the client for future use.
- */
 public class ExplorerSkillService {
     private static final Map<MinecraftServer, ExplorerSkillService> INSTANCES = new WeakHashMap<>();
 
-    private static final int CHUNK_DISCOVER_REWARD = 2;
+    private static final int CHUNK_DISCOVER_REWARD    = 2;   // alliance XP
+    private static final int CHUNK_DISCOVER_PERSONAL  = 3;   // personal explorer XP
 
     private final MinecraftServer server;
     private final Map<UUID, Set<ChunkKey>> exploredByPlayer;
-    private final Map<UUID, ChunkPos>     lastKnownChunkPos    = new HashMap<>();
-    private final Map<UUID, Set<String>>  seenItemIds          = new HashMap<>();
-    private final Map<UUID, Integer>      itemCheckCooldown    = new HashMap<>();
-    // Tracks who has already seen the "join an alliance" hint this session; not persisted.
-    private final Set<UUID>               noAllianceHintPlayers = new HashSet<>();
+    private final Map<UUID, Integer>       explorerXpByPlayer;
+    private final Map<UUID, ChunkPos>      lastKnownChunkPos   = new HashMap<>();
+    private final Map<UUID, Set<String>>   seenItemIds         = new HashMap<>();
+    private final Map<UUID, Integer>       itemCheckCooldown   = new HashMap<>();
+    private final Set<UUID>                noAllianceHintPlayers = new HashSet<>();
 
     private ExplorerSkillService(MinecraftServer server) {
         this.server = server;
-        this.exploredByPlayer = ExplorerSkillSavedData.get(server).createLiveExploredChunks();
+        ExplorerSkillSavedData saved = ExplorerSkillSavedData.get(server);
+        this.exploredByPlayer  = saved.createLiveExploredChunks();
+        this.explorerXpByPlayer = saved.createLiveExplorerXp();
     }
 
     public static ExplorerSkillService get(MinecraftServer server) {
         return INSTANCES.computeIfAbsent(server, ExplorerSkillService::new);
     }
 
-    /**
-     * Called each server tick per online player. Detects chunk transitions and
-     * awards discovery XP when the player enters a chunk they haven't visited before.
-     */
     public void onPlayerTick(ServerPlayer player) {
         ChunkPos current = player.chunkPosition();
         ChunkPos last = this.lastKnownChunkPos.get(player.getUUID());
@@ -65,7 +55,6 @@ public class ExplorerSkillService {
         if (!current.equals(last)) {
             this.lastKnownChunkPos.put(player.getUUID(), current);
 
-            // Chunk discoveries only register when the player holds the Monocle.
             if (isHoldingMonocle(player)) {
                 ChunkKey key = ChunkKey.of(player.level(), current);
                 Set<ChunkKey> explored = this.exploredByPlayer.computeIfAbsent(
@@ -83,13 +72,11 @@ public class ExplorerSkillService {
         }
     }
 
-    /**
-     * Syncs the current explored chunk count to the given player.
-     * Called on login to restore client state.
-     */
     public void syncPlayer(ServerPlayer player) {
-        int count = this.getExploredChunkCount(player.getUUID());
-        ServerPlayNetworking.send(player, new ExplorerSkillSyncPayload(count));
+        UUID uuid = player.getUUID();
+        int count = this.getExploredChunkCount(uuid);
+        int xp    = this.getExplorerXp(uuid);
+        ServerPlayNetworking.send(player, new ExplorerSkillSyncPayload(count, xp));
         ExplorerDiscoveryService.get(this.server).syncPlayer(player);
     }
 
@@ -98,11 +85,33 @@ public class ExplorerSkillService {
         return explored == null ? 0 : explored.size();
     }
 
+    public int getExplorerXp(UUID playerUuid) {
+        return this.explorerXpByPlayer.getOrDefault(playerUuid, 0);
+    }
+
+    public void addExplorerXp(UUID playerUuid, int amount) {
+        if (amount <= 0) return;
+        int current = this.explorerXpByPlayer.getOrDefault(playerUuid, 0);
+        this.explorerXpByPlayer.put(playerUuid, current + amount);
+        this.save();
+    }
+
+    /**
+     * Attempts to deduct personal explorer XP. Returns true if successful.
+     */
+    public boolean trySpendExplorerXp(UUID playerUuid, int amount) {
+        if (amount <= 0) return true;
+        int current = this.explorerXpByPlayer.getOrDefault(playerUuid, 0);
+        if (current < amount) return false;
+        this.explorerXpByPlayer.put(playerUuid, current - amount);
+        this.save();
+        return true;
+    }
+
     public ExplorerSkillTier getTier(UUID playerUuid) {
         return ExplorerSkillTier.fromChunkCount(this.getExploredChunkCount(playerUuid));
     }
 
-    /** Cleans up per-player transient state when a player disconnects. */
     public void onPlayerDisconnect(UUID uuid) {
         seenItemIds.remove(uuid);
         itemCheckCooldown.remove(uuid);
@@ -117,8 +126,13 @@ public class ExplorerSkillService {
 
     private void discoverChunk(ServerPlayer player, ChunkKey key, Set<ChunkKey> explored) {
         explored.add(key);
+
+        // Award personal explorer XP
+        addExplorerXp(player.getUUID(), CHUNK_DISCOVER_PERSONAL);
+
         this.save();
-        ServerPlayNetworking.send(player, new ExplorerSkillSyncPayload(explored.size()));
+        ServerPlayNetworking.send(player, new ExplorerSkillSyncPayload(
+                explored.size(), this.getExplorerXp(player.getUUID())));
 
         Alliance alliance = AllianceManager.get(this.server).getAllianceFor(player.getUUID());
         if (alliance != null) {
@@ -133,7 +147,7 @@ public class ExplorerSkillService {
             itemCheckCooldown.put(uuid, cd - 1);
             return;
         }
-        itemCheckCooldown.put(uuid, 20); // once per second
+        itemCheckCooldown.put(uuid, 20);
 
         Set<String> seen = seenItemIds.computeIfAbsent(uuid, k -> new HashSet<>());
         ExplorerDiscoveryService ds = ExplorerDiscoveryService.get(this.server);
@@ -155,6 +169,7 @@ public class ExplorerSkillService {
     }
 
     private void save() {
-        ExplorerSkillSavedData.get(this.server).saveFromLiveData(this.exploredByPlayer);
+        ExplorerSkillSavedData.get(this.server).saveFromLiveData(
+                this.exploredByPlayer, this.explorerXpByPlayer);
     }
 }
