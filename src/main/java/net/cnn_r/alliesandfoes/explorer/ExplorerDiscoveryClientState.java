@@ -22,6 +22,11 @@ public final class ExplorerDiscoveryClientState {
     private static boolean hasReceivedInitialSync = false;
     private static boolean hasUnreadDiscoveries = false;
 
+    // Server-located nearest instance of the active target (block coords).
+    private static int    targetLocX      = 0;
+    private static int    targetLocZ      = 0;
+    private static boolean targetLocKnown = false;
+
     private ExplorerDiscoveryClientState() {
     }
 
@@ -81,9 +86,27 @@ public final class ExplorerDiscoveryClientState {
         return activeTarget;
     }
 
+    public static void setActiveTarget(IntuitionTarget target) {
+        activeTarget = target;
+        if (target == null) targetLocKnown = false;
+    }
+
     public static boolean hasTarget() {
         return activeTarget != null;
     }
+
+    public static void setTargetLocation(int x, int z, boolean known) {
+        targetLocX     = x;
+        targetLocZ     = z;
+        targetLocKnown = known;
+    }
+
+    public static boolean isTargetLocationKnown() {
+        return targetLocKnown;
+    }
+
+    public static int getTargetLocX() { return targetLocX; }
+    public static int getTargetLocZ() { return targetLocZ; }
 
     public static boolean hasReceivedInitialSync() {
         return hasReceivedInitialSync;
@@ -107,5 +130,6 @@ public final class ExplorerDiscoveryClientState {
         activeTarget = null;
         hasReceivedInitialSync = false;
         hasUnreadDiscoveries = false;
+        targetLocKnown = false;
     }
 }

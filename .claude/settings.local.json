@@ -106,7 +106,13 @@
       "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" \"net.minecraft.world.level.ServerExplosion\")",
       "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" -c \"net.minecraft.world.level.ServerExplosion\")",
       "Bash(javap -classpath \"/c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-merged.jar\" -p \"net.minecraft.world.level.ServerExplosion\")",
-      "Bash(grep -v \"^Compiled\\\\|^class\\\\|  static\\\\|^$\")"
+      "Bash(grep -v \"^Compiled\\\\|^class\\\\|  static\\\\|^$\")",
+      "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/1.21.10/minecraft-merged.jar\" net.minecraft.server.level.ServerLevel)",
+      "Bash(javap -classpath \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-common/1.21.11-net.fabricmc.yarn.1_21_11.1.21.11+build.4-v2/minecraft-common-1.21.11-net.fabricmc.yarn.1_21_11.1.21.11+build.4-v2.jar\" net.minecraft.server.level.ServerLevel)",
+      "Bash(javap \"C:/Users/CO/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-common/1.21.11-net.fabricmc.yarn.1_21_11.1.21.11+build.4-v2/minecraft-common-1.21.11-net.fabricmc.yarn.1_21_11.1.21.11+build.4-v2.jar!/net/minecraft/server/level/ServerLevel.class\")",
+      "Bash(javap /tmp/net/minecraft/server/level/ServerLevel.class)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(ls -la /tmp/net/minecraft/server/level/)"
     ]
   }
 }

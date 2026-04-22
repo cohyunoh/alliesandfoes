@@ -5,19 +5,18 @@ package net.cnn_r.alliesandfoes.explorer;
  * Updated by {@link net.cnn_r.alliesandfoes.network.ExplorerSkillSyncPayload}.
  */
 public final class ExplorerSkillClientState {
-    private static int exploredChunkCount = 0;
-    private static int explorerXp         = 0;
+    private static int surveyData = 0;
+    private static int explorerXp = 0;
 
-    private ExplorerSkillClientState() {
+    private ExplorerSkillClientState() {}
+
+    public static void setFromSync(int survey, int xp) {
+        surveyData = Math.max(0, survey);
+        explorerXp = Math.max(0, xp);
     }
 
-    public static void setFromSync(int count, int xp) {
-        exploredChunkCount = Math.max(0, count);
-        explorerXp         = Math.max(0, xp);
-    }
-
-    public static int getExploredChunkCount() {
-        return exploredChunkCount;
+    public static int getSurveyData() {
+        return surveyData;
     }
 
     public static int getExplorerXp() {
@@ -25,11 +24,11 @@ public final class ExplorerSkillClientState {
     }
 
     public static ExplorerSkillTier getTier() {
-        return ExplorerSkillTier.fromChunkCount(exploredChunkCount);
+        return ExplorerSkillTier.fromXp(explorerXp);
     }
 
     public static void reset() {
-        exploredChunkCount = 0;
-        explorerXp         = 0;
+        surveyData = 0;
+        explorerXp = 0;
     }
 }

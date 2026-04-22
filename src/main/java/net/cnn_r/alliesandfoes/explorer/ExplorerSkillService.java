@@ -1,22 +1,15 @@
 package net.cnn_r.alliesandfoes.explorer;
 
-import net.cnn_r.alliesandfoes.alliance.Alliance;
-import net.cnn_r.alliesandfoes.alliance.AllianceManager;
-import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.network.ExplorerSkillSyncPayload;
-import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.ChunkPos;
 
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,22 +19,20 @@ import java.util.WeakHashMap;
 public class ExplorerSkillService {
     private static final Map<MinecraftServer, ExplorerSkillService> INSTANCES = new WeakHashMap<>();
 
-    private static final int CHUNK_DISCOVER_REWARD    = 2;   // alliance XP
-    private static final int CHUNK_DISCOVER_PERSONAL  = 3;   // personal explorer XP
+    private static final int SURVEY_BATCH_SIZE     = 10;   // survey data per conversion batch
+    private static final int SURVEY_INFLUENCE_GAIN = 25;   // alliance influence per batch
 
     private final MinecraftServer server;
-    private final Map<UUID, Set<ChunkKey>> exploredByPlayer;
-    private final Map<UUID, Integer>       explorerXpByPlayer;
-    private final Map<UUID, ChunkPos>      lastKnownChunkPos   = new HashMap<>();
-    private final Map<UUID, Set<String>>   seenItemIds         = new HashMap<>();
-    private final Map<UUID, Integer>       itemCheckCooldown   = new HashMap<>();
-    private final Set<UUID>                noAllianceHintPlayers = new HashSet<>();
+    private final Map<UUID, Integer> explorerXpByPlayer;
+    private final Map<UUID, Integer> surveyDataByPlayer;
+    private final Map<UUID, Set<String>> seenItemIds       = new HashMap<>();
+    private final Map<UUID, Integer>     itemCheckCooldown = new HashMap<>();
 
     private ExplorerSkillService(MinecraftServer server) {
         this.server = server;
         ExplorerSkillSavedData saved = ExplorerSkillSavedData.get(server);
-        this.exploredByPlayer  = saved.createLiveExploredChunks();
-        this.explorerXpByPlayer = saved.createLiveExplorerXp();
+        this.explorerXpByPlayer  = saved.createLiveExplorerXp();
+        this.surveyDataByPlayer  = saved.createLiveSurveyData();
     }
 
     public static ExplorerSkillService get(MinecraftServer server) {
@@ -49,41 +40,21 @@ public class ExplorerSkillService {
     }
 
     public void onPlayerTick(ServerPlayer player) {
-        ChunkPos current = player.chunkPosition();
-        ChunkPos last = this.lastKnownChunkPos.get(player.getUUID());
-
-        if (!current.equals(last)) {
-            this.lastKnownChunkPos.put(player.getUUID(), current);
-
-            if (isHoldingMonocle(player)) {
-                ChunkKey key = ChunkKey.of(player.level(), current);
-                Set<ChunkKey> explored = this.exploredByPlayer.computeIfAbsent(
-                        player.getUUID(), uuid -> new LinkedHashSet<>()
-                );
-
-                if (!explored.contains(key)) {
-                    this.discoverChunk(player, key, explored);
-                }
-            }
-        }
-
         if (isHoldingMonocle(player)) {
-            this.checkInventoryDiscoveries(player);
+            checkInventoryDiscoveries(player);
         }
     }
 
     public void syncPlayer(ServerPlayer player) {
         UUID uuid = player.getUUID();
-        int count = this.getExploredChunkCount(uuid);
-        int xp    = this.getExplorerXp(uuid);
-        ServerPlayNetworking.send(player, new ExplorerSkillSyncPayload(count, xp));
+        ServerPlayNetworking.send(player, new ExplorerSkillSyncPayload(
+                getSurveyData(uuid), getExplorerXp(uuid)));
         ExplorerDiscoveryService.get(this.server).syncPlayer(player);
     }
 
-    public int getExploredChunkCount(UUID playerUuid) {
-        Set<ChunkKey> explored = this.exploredByPlayer.get(playerUuid);
-        return explored == null ? 0 : explored.size();
-    }
+    // -------------------------------------------------------------------------
+    // Explorer XP
+    // -------------------------------------------------------------------------
 
     public int getExplorerXp(UUID playerUuid) {
         return this.explorerXpByPlayer.getOrDefault(playerUuid, 0);
@@ -96,9 +67,6 @@ public class ExplorerSkillService {
         this.save();
     }
 
-    /**
-     * Attempts to deduct personal explorer XP. Returns true if successful.
-     */
     public boolean trySpendExplorerXp(UUID playerUuid, int amount) {
         if (amount <= 0) return true;
         int current = this.explorerXpByPlayer.getOrDefault(playerUuid, 0);
@@ -109,35 +77,65 @@ public class ExplorerSkillService {
     }
 
     public ExplorerSkillTier getTier(UUID playerUuid) {
-        return ExplorerSkillTier.fromChunkCount(this.getExploredChunkCount(playerUuid));
+        return ExplorerSkillTier.fromXp(getExplorerXp(playerUuid));
     }
+
+    // -------------------------------------------------------------------------
+    // Survey Data
+    // -------------------------------------------------------------------------
+
+    public int getSurveyData(UUID playerUuid) {
+        return this.surveyDataByPlayer.getOrDefault(playerUuid, 0);
+    }
+
+    public void addSurveyData(UUID playerUuid, int amount) {
+        if (amount <= 0) return;
+        int current = this.surveyDataByPlayer.getOrDefault(playerUuid, 0);
+        this.surveyDataByPlayer.put(playerUuid, current + amount);
+        this.save();
+    }
+
+    /**
+     * Converts survey data to alliance influence. Each batch costs SURVEY_BATCH_SIZE
+     * survey data and yields SURVEY_INFLUENCE_GAIN alliance influence.
+     * Returns the number of batches successfully converted (≥ 0).
+     */
+    public int tryConvertSurveyData(UUID playerUuid, UUID allianceId, int batches) {
+        if (batches <= 0 || allianceId == null) return 0;
+        int available = getSurveyData(playerUuid);
+        int maxBatches = available / SURVEY_BATCH_SIZE;
+        int toConvert = Math.min(batches, maxBatches);
+        if (toConvert <= 0) return 0;
+
+        int cost = toConvert * SURVEY_BATCH_SIZE;
+        this.surveyDataByPlayer.put(playerUuid, available - cost);
+        this.save();
+
+        net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService.get(this.server)
+                .add(allianceId, toConvert * SURVEY_INFLUENCE_GAIN);
+
+        return toConvert;
+    }
+
+    public static int getSurveyBatchSize() { return SURVEY_BATCH_SIZE; }
+    public static int getSurveyInfluenceGain() { return SURVEY_INFLUENCE_GAIN; }
+
+    // -------------------------------------------------------------------------
+    // Lifecycle
+    // -------------------------------------------------------------------------
 
     public void onPlayerDisconnect(UUID uuid) {
         seenItemIds.remove(uuid);
         itemCheckCooldown.remove(uuid);
-        lastKnownChunkPos.remove(uuid);
-        noAllianceHintPlayers.remove(uuid);
     }
+
+    // -------------------------------------------------------------------------
+    // Inventory discovery check
+    // -------------------------------------------------------------------------
 
     private boolean isHoldingMonocle(ServerPlayer player) {
         return player.getMainHandItem().is(ModItems.MONOCLE)
                 || player.getOffhandItem().is(ModItems.MONOCLE);
-    }
-
-    private void discoverChunk(ServerPlayer player, ChunkKey key, Set<ChunkKey> explored) {
-        explored.add(key);
-
-        // Award personal explorer XP
-        addExplorerXp(player.getUUID(), CHUNK_DISCOVER_PERSONAL);
-
-        this.save();
-        ServerPlayNetworking.send(player, new ExplorerSkillSyncPayload(
-                explored.size(), this.getExplorerXp(player.getUUID())));
-
-        Alliance alliance = AllianceManager.get(this.server).getAllianceFor(player.getUUID());
-        if (alliance != null) {
-            AllianceProgressionService.get(this.server).add(alliance.getId(), CHUNK_DISCOVER_REWARD);
-        }
     }
 
     private void checkInventoryDiscoveries(ServerPlayer player) {
@@ -151,6 +149,7 @@ public class ExplorerSkillService {
 
         Set<String> seen = seenItemIds.computeIfAbsent(uuid, k -> new HashSet<>());
         ExplorerDiscoveryService ds = ExplorerDiscoveryService.get(this.server);
+        ExplorerDiscoverySavedData savedData = ExplorerDiscoverySavedData.get(this.server);
 
         net.minecraft.world.entity.player.Inventory inv = player.getInventory();
         for (int i = 0; i < inv.getContainerSize(); i++) {
@@ -161,7 +160,11 @@ public class ExplorerSkillService {
                 List<ExplorerDiscoveryRules.DiscoveryEntry> unlocks = ExplorerDiscoveryRules.BY_ITEM.get(itemId);
                 if (unlocks != null) {
                     for (ExplorerDiscoveryRules.DiscoveryEntry entry : unlocks) {
-                        ds.grantDiscovery(player, entry.type(), entry.id());
+                        boolean known = switch (entry.type()) {
+                            case BIOME     -> savedData.getBiomes(uuid).contains(entry.id());
+                            case STRUCTURE -> savedData.getStructures(uuid).contains(entry.id());
+                        };
+                        if (!known) ds.grantDiscovery(player, entry.type(), entry.id());
                     }
                 }
             }
@@ -170,6 +173,6 @@ public class ExplorerSkillService {
 
     private void save() {
         ExplorerSkillSavedData.get(this.server).saveFromLiveData(
-                this.exploredByPlayer, this.explorerXpByPlayer);
+                this.explorerXpByPlayer, this.surveyDataByPlayer);
     }
 }

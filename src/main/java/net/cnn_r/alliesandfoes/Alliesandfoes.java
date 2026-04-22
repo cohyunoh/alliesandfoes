@@ -124,6 +124,8 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(RequestRollbackChunkPayload.TYPE, RequestRollbackChunkPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(DeadPetListSyncPayload.TYPE, DeadPetListSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestPetRevivePayload.TYPE, RequestPetRevivePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(IntuitionTargetLocationPayload.TYPE, IntuitionTargetLocationPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(SpendSurveyDataPayload.TYPE, SpendSurveyDataPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -327,6 +329,20 @@ public class Alliesandfoes implements ModInitializer {
 					}
 				}
 				ExplorerDiscoveryService.get(context.server()).setActiveTarget(context.player(), target);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(SpendSurveyDataPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				ServerPlayer player = context.player();
+				UUID uuid = player.getUUID();
+				Alliance alliance = AllianceManager.get(context.server()).getAllianceFor(uuid);
+				if (alliance == null) return;
+				ExplorerSkillService skillService = ExplorerSkillService.get(context.server());
+				int converted = skillService.tryConvertSurveyData(uuid, alliance.getId(), payload.batches());
+				if (converted > 0) {
+					skillService.syncPlayer(player);
+				}
 			});
 		});
 

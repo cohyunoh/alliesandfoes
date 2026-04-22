@@ -3127,6 +3127,7 @@ public class MapScreen extends Screen {
             case QUIET -> "Quiet";
             case UNREMARKABLE -> "Unremarkable";
             case UNCERTAIN -> "Uncertain";
+            case DISTANT -> "Distant";
         };
     }
 

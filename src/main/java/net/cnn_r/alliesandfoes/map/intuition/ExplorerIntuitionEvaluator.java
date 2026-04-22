@@ -22,39 +22,22 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Evaluates soft explorer intuition using cached map data only.
+ * Evaluates explorer intuition using cached map data only.
  *
- * Important design rules:
- * - Uses cached data only
- * - Does not trigger any world scanning or value computation
- * - Does not expose raw values, structure names, or exact destinations
+ * The monocle only produces a signal when the player has an active tracking target.
+ * When a target is set, matching chunks in the scan radius receive a large score bonus,
+ * directing the glow toward that biome or structure.
  *
- * Scan radius and signal sensitivity scale with the player's Explorer tier,
- * so early explorers receive a weaker, shorter-range signal that sharpens
- * as they discover more of the world.
- *
- * Without an active target the evaluator applies novelty scoring: undiscovered
- * structures and biomes pull harder than already-familiar terrain, and chunks
- * at the edge of mapped territory receive a frontier bonus. When the player has
- * an active search target set in the Explorer Journal, matching chunks receive a
- * large score bonus instead, focusing the signal toward that feature.
+ * If no matching cached chunk is found within range but the server has located the target,
+ * the glow points toward the server-located coordinate with strength inversely proportional
+ * to distance (strong = close, faint = far).
  */
 public final class ExplorerIntuitionEvaluator {
 
     private static final int MIN_REQUIRED_SAMPLES = 6;
     private static final float DOMINANCE_RANGE_FOR_MAX_SIGNAL = 0.20f;
     private static final double TARGET_SCORE_MULTIPLIER = 6.0;
-    private static final double MAX_CHUNK_SCORE = 10.75;         // base + structure bonus
-    private static final double MAX_CHUNK_SCORE_NOVELTY = 18.75; // base + undiscovered structure bonus
-
-    // Novelty bonuses for no-target mode
-    private static final double NOVELTY_UNDISCOVERED_STRUCTURE = 8.0;
-    private static final double NOVELTY_UNDISCOVERED_BIOME     = 6.0;
-    private static final double NOVELTY_FRONTIER_MAX           = 4.0; // max frontier bonus
-    private static final double FAMILIAR_PENALTY               = 0.55;
-
-    // Edge-glow absolute weight floor — prevents near-zero signals from normalizing to full brightness
-    private static final double EDGE_GLOW_MIN_ABSOLUTE_WEIGHT = 1.0;
+    private static final double MAX_CHUNK_SCORE = 10.75;
 
     /** Per-edge glow intensities relative to the player's screen orientation. */
     public record EdgeGlowResult(float front, float right, float back, float left) {}
@@ -69,19 +52,20 @@ public final class ExplorerIntuitionEvaluator {
             ChunkPos center, float yawDeg, String dimensionId,
             ChunkValueCache chunkValueCache, ChunkStructureSyncCache structureCache) {
 
+        IntuitionTarget target = ExplorerDiscoveryClientState.getActiveTarget();
+
+        // No signal without an active target.
+        if (target == null) return new EdgeGlowResult(0, 0, 0, 0);
+
         ExplorerSkillTier personal = ExplorerSkillClientState.getTier();
         int allianceBonus = MapState.getAllianceTierBonus();
         ExplorerSkillTier[] tiers = ExplorerSkillTier.values();
         ExplorerSkillTier effective = tiers[Math.min(tiers.length - 1, personal.ordinal() + allianceBonus)];
 
         int radius = radiusForTier(effective);
-        float noiseFloor = noiseFloorForTier(effective);
-
-        IntuitionTarget target = ExplorerDiscoveryClientState.getActiveTarget();
-        boolean targetMode = (target != null);
 
         Level level = null;
-        if (targetMode && target.type() == IntuitionTarget.TargetType.BIOME) {
+        if (target.type() == IntuitionTarget.TargetType.BIOME) {
             level = Minecraft.getInstance().level;
         }
 
@@ -92,6 +76,7 @@ public final class ExplorerIntuitionEvaluator {
         double rightZ  =  Math.sin(yawRad);
 
         double frontAcc = 0, rightAcc = 0, backAcc = 0, leftAcc = 0;
+        int boostedChunkCount = 0;
 
         for (int dz = -radius; dz <= radius; dz++) {
             for (int dx = -radius; dx <= radius; dx++) {
@@ -103,19 +88,15 @@ public final class ExplorerIntuitionEvaluator {
 
                 ChunkStructureData structureData = structureCache.get(key);
                 double baseScore = ExplorerIntuitionProfile.INSTANCE.scoreChunk(valueData, structureData);
+                double boosted = applyTargetBoost(baseScore, new ChunkPos(center.x() + dx, center.z() + dz),
+                        structureData, target, level);
 
                 double score;
-                if (targetMode) {
-                    double boosted = applyTargetBoost(baseScore, new ChunkPos(center.x() + dx, center.z() + dz),
-                            structureData, target, level);
-                    score = (boosted > baseScore) ? (boosted / (MAX_CHUNK_SCORE * TARGET_SCORE_MULTIPLIER)) : 0.0;
+                if (boosted > baseScore) {
+                    score = boosted / (MAX_CHUNK_SCORE * TARGET_SCORE_MULTIPLIER);
+                    boostedChunkCount++;
                 } else {
-                    double noveltyBonus = computeNoveltyScore(valueData, structureData, key, dimensionId, chunkValueCache);
-                    boolean undiscoveredStruct = noveltyBonus >= NOVELTY_UNDISCOVERED_STRUCTURE;
-                    boolean biomeDiscovered    = isBiomeDiscovered(valueData);
-                    double adjustedBase = (biomeDiscovered && !undiscoveredStruct) ? baseScore * FAMILIAR_PENALTY : baseScore;
-                    double rawScore = adjustedBase + noveltyBonus;
-                    score = rawScore / MAX_CHUNK_SCORE_NOVELTY;
+                    score = 0.0;
                 }
                 if (score <= 0) continue;
 
@@ -133,32 +114,52 @@ public final class ExplorerIntuitionEvaluator {
             }
         }
 
-        // Absolute weight floor — prevents weak omnidirectional noise from becoming a bright glow
-        double totalAcc = frontAcc + backAcc + rightAcc + leftAcc;
-        if (totalAcc < EDGE_GLOW_MIN_ABSOLUTE_WEIGHT) return new EdgeGlowResult(0, 0, 0, 0);
+        // No matching chunks in cache — fall back to server-located coordinate.
+        if (boostedChunkCount == 0 && ExplorerDiscoveryClientState.isTargetLocationKnown()) {
+            return computeDistantTargetEdgeScores(
+                    center, yawDeg,
+                    ExplorerDiscoveryClientState.getTargetLocX(),
+                    ExplorerDiscoveryClientState.getTargetLocZ());
+        }
+
+        if (boostedChunkCount == 0) return new EdgeGlowResult(0, 0, 0, 0);
 
         double maxAcc = Math.max(Math.max(frontAcc, backAcc), Math.max(rightAcc, leftAcc));
         if (maxAcc <= 0) return new EdgeGlowResult(0, 0, 0, 0);
-        float f = (float)(frontAcc / maxAcc);
-        float r = (float)(rightAcc / maxAcc);
-        float b = (float)(backAcc  / maxAcc);
-        float l = (float)(leftAcc  / maxAcc);
 
-        if (f < noiseFloor) f = 0;
-        if (r < noiseFloor) r = 0;
-        if (b < noiseFloor) b = 0;
-        if (l < noiseFloor) l = 0;
-
-        return new EdgeGlowResult(f, r, b, l);
+        return new EdgeGlowResult(
+                (float)(frontAcc / maxAcc),
+                (float)(rightAcc / maxAcc),
+                (float)(backAcc  / maxAcc),
+                (float)(leftAcc  / maxAcc));
     }
 
-    private static float noiseFloorForTier(ExplorerSkillTier tier) {
-        return switch (tier) {
-            case NONE   -> 0.4f;
-            case TIER_1 -> 0.3f;
-            case TIER_2 -> 0.2f;
-            case TIER_3 -> 0.1f;
-        };
+    // -------------------------------------------------------------------------
+    // Public API — message evaluation
+    // -------------------------------------------------------------------------
+
+    public static IntuitionResult evaluate(
+            ChunkPos center,
+            String dimensionId,
+            ChunkValueCache chunkValueCache,
+            ChunkStructureSyncCache structureSyncCache
+    ) {
+        IntuitionTarget target = ExplorerDiscoveryClientState.getActiveTarget();
+
+        // No signal without an active target.
+        if (target == null) return new IntuitionResult(IntuitionDirection.NONE, 0.0f, IntuitionMessageType.NONE);
+
+        ExplorerSkillTier tier = ExplorerSkillClientState.getTier();
+        int radius = radiusForTier(tier);
+        float minDominance = minDominanceForTier(tier);
+
+        Level level = null;
+        if (target.type() == IntuitionTarget.TargetType.BIOME) {
+            level = Minecraft.getInstance().level;
+        }
+
+        return evaluate(center, dimensionId, radius, minDominance, chunkValueCache, structureSyncCache,
+                ExplorerIntuitionProfile.INSTANCE, target, level);
     }
 
     // -------------------------------------------------------------------------
@@ -184,53 +185,6 @@ public final class ExplorerIntuitionEvaluator {
     }
 
     // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
-
-    public static IntuitionResult evaluate(
-            ChunkPos center,
-            String dimensionId,
-            ChunkValueCache chunkValueCache,
-            ChunkStructureSyncCache structureSyncCache
-    ) {
-        ExplorerSkillTier tier = ExplorerSkillClientState.getTier();
-        int radius = radiusForTier(tier);
-        float minDominance = minDominanceForTier(tier);
-        IntuitionTarget target = ExplorerDiscoveryClientState.getActiveTarget();
-
-        Level level = null;
-        if (target != null && target.type() == IntuitionTarget.TargetType.BIOME) {
-            Minecraft mc = Minecraft.getInstance();
-            level = mc.level;
-        }
-
-        return evaluate(center, dimensionId, radius, minDominance, chunkValueCache, structureSyncCache,
-                ExplorerIntuitionProfile.INSTANCE, target, level);
-    }
-
-    public static IntuitionResult evaluate(
-            ChunkPos center,
-            String dimensionId,
-            int radius,
-            ChunkValueCache chunkValueCache,
-            ChunkStructureSyncCache structureSyncCache
-    ) {
-        return evaluate(center, dimensionId, radius, 0.16f, chunkValueCache, structureSyncCache,
-                ExplorerIntuitionProfile.INSTANCE, null, null);
-    }
-
-    public static IntuitionResult evaluate(
-            ChunkPos center,
-            String dimensionId,
-            int radius,
-            ChunkValueCache chunkValueCache,
-            ChunkStructureSyncCache structureSyncCache,
-            IntuitionProfile profile
-    ) {
-        return evaluate(center, dimensionId, radius, 0.16f, chunkValueCache, structureSyncCache, profile, null, null);
-    }
-
-    // -------------------------------------------------------------------------
     // Core evaluation
     // -------------------------------------------------------------------------
 
@@ -245,7 +199,8 @@ public final class ExplorerIntuitionEvaluator {
             IntuitionTarget target,
             Level level
     ) {
-        if (center == null || dimensionId == null || chunkValueCache == null || structureSyncCache == null || profile == null) {
+        if (center == null || dimensionId == null || chunkValueCache == null
+                || structureSyncCache == null || profile == null || target == null) {
             return new IntuitionResult(IntuitionDirection.NONE, 0.0f, IntuitionMessageType.NONE);
         }
 
@@ -253,7 +208,7 @@ public final class ExplorerIntuitionEvaluator {
         double south = 0.0, southWest = 0.0, west = 0.0, northWest = 0.0;
 
         int sampledChunkCount = 0;
-        boolean foundUnusualPotential = false;
+        int targetChunkHits = 0;
 
         for (int dz = -radius; dz <= radius; dz++) {
             for (int dx = -radius; dx <= radius; dx++) {
@@ -262,7 +217,6 @@ public final class ExplorerIntuitionEvaluator {
                 ChunkPos samplePos = new ChunkPos(center.x() + dx, center.z() + dz);
                 ChunkKey sampleKey = new ChunkKey(dimensionId, samplePos.x(), samplePos.z());
                 ChunkValueData valueData = chunkValueCache.get(sampleKey);
-
                 if (valueData == null) continue;
 
                 sampledChunkCount++;
@@ -271,22 +225,10 @@ public final class ExplorerIntuitionEvaluator {
                 if (distance <= 0.0) continue;
 
                 ChunkStructureData structureData = structureSyncCache.get(sampleKey);
-
-                double chunkScore;
-                if (target == null) {
-                    double baseScore = profile.scoreChunk(valueData, structureData);
-                    double noveltyBonus = computeNoveltyScore(valueData, structureData, sampleKey, dimensionId, chunkValueCache);
-                    boolean undiscoveredStruct = noveltyBonus >= NOVELTY_UNDISCOVERED_STRUCTURE;
-                    boolean biomeDiscovered    = isBiomeDiscovered(valueData);
-                    double adjustedBase = (biomeDiscovered && !undiscoveredStruct) ? baseScore * FAMILIAR_PENALTY : baseScore;
-                    chunkScore = adjustedBase + noveltyBonus;
-                    if (noveltyBonus >= NOVELTY_UNDISCOVERED_BIOME) foundUnusualPotential = true;
-                } else {
-                    chunkScore = profile.scoreChunk(valueData, structureData);
-                    chunkScore = applyTargetBoost(chunkScore, samplePos, structureData, target, level);
-                }
-
-                if (profile.flagsUnusualPotential(structureData)) foundUnusualPotential = true;
+                double baseScore = profile.scoreChunk(valueData, structureData);
+                double boosted = applyTargetBoost(baseScore, samplePos, structureData, target, level);
+                if (boosted > baseScore) targetChunkHits++;
+                double chunkScore = boosted;
 
                 double distanceWeight = 1.0 / (0.75 + distance);
                 double combinedWeight = chunkScore * distanceWeight;
@@ -301,9 +243,24 @@ public final class ExplorerIntuitionEvaluator {
                     case SOUTH_WEST -> southWest += combinedWeight;
                     case WEST       -> west      += combinedWeight;
                     case NORTH_WEST -> northWest += combinedWeight;
-                    default -> { }
+                    default -> {}
                 }
             }
+        }
+
+        // Target is set but nothing in the cache matched — emit a DISTANT distance message.
+        if (targetChunkHits == 0 && ExplorerDiscoveryClientState.isTargetLocationKnown()) {
+            double playerBX = center.x() * 16.0 + 8.0;
+            double playerBZ = center.z() * 16.0 + 8.0;
+            double distBlocks = Math.sqrt(
+                    Math.pow(ExplorerDiscoveryClientState.getTargetLocX() - playerBX, 2) +
+                    Math.pow(ExplorerDiscoveryClientState.getTargetLocZ() - playerBZ, 2));
+            float distStrength;
+            if (distBlocks > 3000)      distStrength = 0.10f;
+            else if (distBlocks > 1000) distStrength = 0.30f;
+            else if (distBlocks > 500)  distStrength = 0.60f;
+            else                        distStrength = 0.90f;
+            return new IntuitionResult(IntuitionDirection.NONE, distStrength, IntuitionMessageType.DISTANT);
         }
 
         if (sampledChunkCount < MIN_REQUIRED_SAMPLES) {
@@ -353,86 +310,72 @@ public final class ExplorerIntuitionEvaluator {
 
         if (sampledChunkCount < 12) strength *= 0.75f;
 
-        IntuitionMessageType messageType = classifyMessageType(strength, foundUnusualPotential, target != null);
+        IntuitionMessageType messageType = classifyMessageType(strength, false, true);
         return new IntuitionResult(bestDirection, strength, messageType);
     }
 
     // -------------------------------------------------------------------------
-    // Novelty scoring (no-target mode)
+    // Proximity strength — scales glow alpha with distance to target
     // -------------------------------------------------------------------------
 
-    private static double computeNoveltyScore(
-            ChunkValueData valueData,
-            ChunkStructureData structureData,
-            ChunkKey key,
-            String dimensionId,
-            ChunkValueCache cache
-    ) {
-        double bonus = 0.0;
-
-        if (hasUndiscoveredStructureName(structureData)) {
-            bonus += NOVELTY_UNDISCOVERED_STRUCTURE;
-        }
-
-        if (!isBiomeDiscovered(valueData)) {
-            bonus += NOVELTY_UNDISCOVERED_BIOME;
-        }
-
-        // Frontier bonus: chunks at the edge of explored territory
-        int cachedNeighbors = countCachedNeighbors(key, dimensionId, cache);
-        if (cachedNeighbors <= 5) {
-            double frontierRatio = (8.0 - cachedNeighbors) / 8.0;
-            bonus += frontierRatio * NOVELTY_FRONTIER_MAX;
-        }
-
-        return bonus;
+    /**
+     * Returns 1.0 when ≤ 200 blocks away, fading to 0.05 at 5000+ blocks.
+     * Used by HudIntuitionRenderer to scale the glow alpha.
+     */
+    public static float computeProximityStrength(double distBlocks) {
+        if (distBlocks <= 200) return 1.0f;
+        double t = Math.min(1.0, (distBlocks - 200) / 4800.0);
+        return (float)(1.0 - 0.95 * t);
     }
 
-    private static boolean isBiomeDiscovered(ChunkValueData valueData) {
-        if (valueData == null || valueData.getBreakdown() == null) return true;
-        String biomeName = valueData.getBreakdown().getBiomeName();
-        if (biomeName == null || biomeName.isEmpty()) return true;
-        try {
-            Identifier biomeId = Identifier.parse(biomeName);
-            List<Identifier> discovered = ExplorerDiscoveryClientState.getDiscoveredBiomes();
-            for (Identifier id : discovered) {
-                if (id.equals(biomeId)) return true;
-            }
-            return false;
-        } catch (Exception e) {
-            return true;
-        }
+    /**
+     * Computes the distance in blocks from the player's chunk center to the
+     * server-located target coordinate. Returns -1 if target location is unknown.
+     */
+    public static double computeDistanceToTarget(ChunkPos playerChunk) {
+        if (!ExplorerDiscoveryClientState.isTargetLocationKnown()) return -1;
+        double playerBX = playerChunk.x() * 16.0 + 8.0;
+        double playerBZ = playerChunk.z() * 16.0 + 8.0;
+        double dx = ExplorerDiscoveryClientState.getTargetLocX() - playerBX;
+        double dz = ExplorerDiscoveryClientState.getTargetLocZ() - playerBZ;
+        return Math.sqrt(dx * dx + dz * dz);
     }
 
-    private static boolean hasUndiscoveredStructureName(ChunkStructureData structureData) {
-        if (structureData == null || structureData.getStructureValue() <= 0) return false;
-        List<String> names = structureData.getStructureNames();
-        if (names == null || names.isEmpty()) return false;
-        List<Identifier> discovered = ExplorerDiscoveryClientState.getDiscoveredStructures();
-        for (String name : names) {
-            boolean found = false;
-            for (Identifier id : discovered) {
-                String path = id.getPath();
-                if (name.equals(path) || name.startsWith(path + " (")) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) return true;
-        }
-        return false;
-    }
+    // -------------------------------------------------------------------------
+    // Distant target edge glow
+    // -------------------------------------------------------------------------
 
-    private static int countCachedNeighbors(ChunkKey center, String dimensionId, ChunkValueCache cache) {
-        int count = 0;
-        for (int dz = -1; dz <= 1; dz++) {
-            for (int dx = -1; dx <= 1; dx++) {
-                if (dx == 0 && dz == 0) continue;
-                ChunkKey neighbor = new ChunkKey(dimensionId, center.getChunkX() + dx, center.getChunkZ() + dz);
-                if (cache.get(neighbor) != null) count++;
-            }
-        }
-        return count;
+    /**
+     * Computes edge glow pointing toward an absolute block coordinate when no matching
+     * cached chunks are in range. Glow intensity on each edge = cos²(angle from that edge).
+     */
+    static EdgeGlowResult computeDistantTargetEdgeScores(
+            ChunkPos playerChunk, float yawDeg, int targetX, int targetZ) {
+        double playerBlockX = playerChunk.x() * 16.0 + 8.0;
+        double playerBlockZ = playerChunk.z() * 16.0 + 8.0;
+        double dx = targetX - playerBlockX;
+        double dz = targetZ - playerBlockZ;
+        double dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < 1) return new EdgeGlowResult(0.5f, 0, 0, 0);
+
+        double ndx = dx / dist;
+        double ndz = dz / dist;
+
+        double yawRad  = Math.toRadians(yawDeg);
+        double facingX = -Math.sin(yawRad);
+        double facingZ =  Math.cos(yawRad);
+        double rightX  =  Math.cos(yawRad);
+        double rightZ  =  Math.sin(yawRad);
+
+        double fDot = ndx * facingX + ndz * facingZ;
+        double rDot = ndx * rightX  + ndz * rightZ;
+
+        float front = (float) Math.max(0, fDot);
+        float back  = (float) Math.max(0, -fDot);
+        float right = (float) Math.max(0, rDot);
+        float left  = (float) Math.max(0, -rDot);
+
+        return new EdgeGlowResult(front * front, right * right, back * back, left * left);
     }
 
     // -------------------------------------------------------------------------
@@ -493,10 +436,7 @@ public final class ExplorerIntuitionEvaluator {
     }
 
     private static IntuitionMessageType classifyMessageType(
-            float strength,
-            boolean foundUnusualPotential,
-            boolean hasTarget
-    ) {
+            float strength, boolean foundUnusualPotential, boolean hasTarget) {
         if (strength < 0.10f) return IntuitionMessageType.UNCERTAIN;
         if (hasTarget && strength >= 0.30f) return IntuitionMessageType.RICH;
         if (foundUnusualPotential && strength >= 0.45f) return IntuitionMessageType.UNUSUAL;

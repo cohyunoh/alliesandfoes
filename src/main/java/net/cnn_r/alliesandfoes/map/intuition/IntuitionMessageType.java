@@ -13,5 +13,7 @@ public enum IntuitionMessageType {
     UNUSUAL,
     QUIET,
     UNREMARKABLE,
-    UNCERTAIN
+    UNCERTAIN,
+    /** Active target exists but is beyond cached chunk radius; strength encodes distance tier. */
+    DISTANT
 }

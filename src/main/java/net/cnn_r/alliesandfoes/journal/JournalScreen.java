@@ -1,13 +1,16 @@
 package net.cnn_r.alliesandfoes.journal;
 
+import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryRules;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillClientState;
+import net.cnn_r.alliesandfoes.explorer.ExplorerSkillService;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillTier;
 import net.cnn_r.alliesandfoes.explorer.ExplorerTrackingCosts;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.map.intuition.IntuitionTarget;
 import net.cnn_r.alliesandfoes.network.SetIntuitionTargetPayload;
+import net.cnn_r.alliesandfoes.network.SpendSurveyDataPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -50,7 +53,7 @@ public class JournalScreen extends Screen {
     private static final int COL_HEADER_DY = 7;    // header y from content top
     private static final int LIST_DY       = 22;   // list y from content top
     private static final int ROW_H         = 14;
-    private static final int FOOTER_H      = 32;   // footer strip height from dialog bottom
+    private static final int FOOTER_H      = 48;   // footer strip height from dialog bottom
 
     // Left-side tab strip (tabs hang outside the dialog to the left)
     private static final int TAB_W       = 26;  // total tab width
@@ -159,30 +162,54 @@ public class JournalScreen extends Screen {
         rebuildWidgets();
     }
 
+    public void refreshWidgets() {
+        rebuildWidgets();
+    }
+
     @Override
     protected void rebuildWidgets() {
         clearWidgets();
 
-        if (activeTab != JournalTab.EXPLORER || explorerPage != 1 || isTabLocked(JournalTab.EXPLORER)) return;
+        if (activeTab != JournalTab.EXPLORER || isTabLocked(JournalTab.EXPLORER)) return;
+
+        // "Convert Survey Data" button — only on skill tree page
+        if (explorerPage == 2) {
+            int surveyData = ExplorerSkillClientState.getSurveyData();
+            boolean canConvert = surveyData >= ExplorerSkillService.getSurveyBatchSize()
+                    && AllianceClientState.isInAlliance();
+            int btnH = 16;
+            int btnY = dialogY + DIALOG_H - FOOTER_H + FOOTER_H - btnH - 4;
+            String label = "Convert Survey Data";
+            int btnW = font.width(label) + 12;
+            Button convertBtn = Button.builder(Component.literal(label), btn -> convertSurveyData())
+                    .pos(dialogX + DIALOG_W - PADDING - btnW, btnY).size(btnW, btnH).build();
+            convertBtn.active = canConvert;
+            addRenderableWidget(convertBtn);
+            return;
+        }
+
+        if (explorerPage != 1) return;
 
         IntuitionTarget activeTarget = ExplorerDiscoveryClientState.getActiveTarget();
         boolean hasPending = pendingId != null;
         boolean pendingIsActive = hasPending && activeTarget != null
                 && activeTarget.type() == pendingType && activeTarget.id().equals(pendingId);
 
-        int btnH   = 16;
-        int btnY   = dialogY + DIALOG_H - FOOTER_H + (FOOTER_H - btnH) / 2;
-        int rightX = dialogX + DIALOG_W - PADDING;
+        int btnH    = 16;
+        // Buttons sit near the bottom of the footer; text goes above them in pending state.
+        int btnY    = dialogY + DIALOG_H - FOOTER_H + FOOTER_H - btnH - 4;
+        int rightX  = dialogX + DIALOG_W - PADDING;
 
         // "Track" button — visible when something is pending and it's not already the active target
         if (hasPending && !pendingIsActive) {
             int cost = trackingPersonalCost(pendingType);
+            boolean canAfford = ExplorerSkillClientState.getExplorerXp() >= cost;
             String trackLabel = "Track (" + cost + " XP)";
             int trackW = font.width(trackLabel) + 12;
-            addRenderableWidget(Button.builder(
-                    Component.literal(trackLabel),
-                    btn -> confirmTrackTarget()
-            ).pos(rightX - trackW, btnY).size(trackW, btnH).build());
+            Button trackBtn = Button.builder(Component.literal(trackLabel), btn -> confirmTrackTarget())
+                    .pos(rightX - trackW, btnY).size(trackW, btnH).build();
+            trackBtn.active = canAfford;
+            addRenderableWidget(trackBtn);
             rightX -= trackW + 4;
 
             // "Cancel" button
@@ -193,13 +220,13 @@ public class JournalScreen extends Screen {
             ).pos(rightX - cancelW, btnY).size(cancelW, btnH).build());
         }
 
-        // "Clear Target" button — visible when an active target is set
-        if (activeTarget != null) {
+        // "Clear Target" button — right-aligned so it doesn't overlap footer text
+        if (activeTarget != null && !hasPending) {
             int clearW = 82;
             addRenderableWidget(Button.builder(
                     Component.translatable("screen.alliesandfoes.journal.clear_target"),
                     btn -> clearTarget()
-            ).pos(dialogX + PADDING, btnY).size(clearW, btnH).build());
+            ).pos(dialogX + DIALOG_W - PADDING - clearW, btnY).size(clearW, btnH).build());
         }
     }
 
@@ -286,6 +313,10 @@ public class JournalScreen extends Screen {
             g.fill(x + COL_MID, pageTop + 4, x + COL_MID + 1, pageBottom - 4, C_DIVIDER);
         }
 
+        // Footer strip drawn first so the fold corner renders on top of it
+        g.fill(x, y + h - FOOTER_H, x + w, y + h, C_FOOTER_BG);
+        g.fill(x, y + h - FOOTER_H, x + w, y + h - FOOTER_H + 1, C_DIVIDER);
+
         // Blit only the corner region of the fold texture so ruled lines outside the corner are unaffected
         if (foldRight) {
             g.blit(RenderPipelines.GUI_TEXTURED, PAGE_FOLD_RIGHT_RL,
@@ -302,11 +333,6 @@ public class JournalScreen extends Screen {
                     FOLD_CORNER_W, FOLD_CORNER_H,
                     w, 168);
         }
-
-        // Footer strip
-        g.blit(RenderPipelines.GUI_TEXTURED, JOURNAL_FOOTER_RL,
-                x, y + h - FOOTER_H, 0.0f, 0.0f, 320, 32, 320, 32, 320, 32);
-        g.fill(x, y + h - FOOTER_H, x + w, y + h - FOOTER_H + 1, C_DIVIDER);
     }
 
     // -------------------------------------------------------------------------
@@ -532,7 +558,8 @@ public class JournalScreen extends Screen {
         g.text(font, title, cx - font.width(title) / 2, pageTop + 10, C_HEADER_TXT, false);
 
         // Progress bar — aligned with tier nodes using TREE_MARGIN
-        int explored  = ExplorerSkillClientState.getExploredChunkCount();
+        int explorerXp = ExplorerSkillClientState.getExplorerXp();
+        int surveyData = ExplorerSkillClientState.getSurveyData();
         ExplorerSkillTier tier = ExplorerSkillClientState.getTier();
         ExplorerSkillTier nextTier = getNextTier(tier);
 
@@ -548,9 +575,9 @@ public class JournalScreen extends Screen {
 
         // Bar fill
         if (nextTier != null) {
-            int maxChunks = nextTier.getChunksRequired();
-            int fromChunks = tier.getChunksRequired();
-            float progress = (float)(explored - fromChunks) / Math.max(1, maxChunks - fromChunks);
+            int maxXp  = nextTier.getXpRequired();
+            int fromXp = tier.getXpRequired();
+            float progress = (float)(explorerXp - fromXp) / Math.max(1, maxXp - fromXp);
             progress = Math.min(1f, Math.max(0f, progress));
             g.fill(barX, barY, barX + (int)(barW * progress), barY + barH, 0xFFB8860B);
         } else {
@@ -561,8 +588,8 @@ public class JournalScreen extends Screen {
 
         // Progress label
         String progressLabel = nextTier != null
-                ? explored + " / " + nextTier.getChunksRequired() + " chunks"
-                : "MAX — " + explored + " chunks explored";
+                ? explorerXp + " / " + nextTier.getXpRequired() + " XP"
+                : "MAX — " + explorerXp + " Explorer XP";
         g.text(font, progressLabel, cx - font.width(progressLabel) / 2, barY + barH + 4, C_TEXT_DIM, false);
 
         // Tier nodes
@@ -576,13 +603,13 @@ public class JournalScreen extends Screen {
 
         for (int i = 0; i < tiers.length; i++) {
             int nodeX = firstNodeX + i * nodeSpacing;
-            boolean nodeUnlocked = explored >= tiers[i].getChunksRequired();
+            boolean nodeUnlocked = explorerXp >= tiers[i].getXpRequired();
             int nodeColor = nodeUnlocked ? C_SKILL_NODE : C_SKILL_LOCKED;
 
             // Connecting line to next node
             if (i < tiers.length - 1) {
                 int nextX = firstNodeX + (i + 1) * nodeSpacing;
-                boolean lineUnlocked = explored >= tiers[i + 1].getChunksRequired();
+                boolean lineUnlocked = explorerXp >= tiers[i + 1].getXpRequired();
                 g.fill(nodeX + nodeR, nodeY, nextX - nodeR, nodeY + 1,
                         lineUnlocked ? C_SKILL_NODE : C_SKILL_LOCKED);
             }
@@ -601,17 +628,23 @@ public class JournalScreen extends Screen {
                     nodeUnlocked ? C_TEXT : C_TEXT_DIM, false);
 
             // Chunk requirement below label
-            String req = tiers[i].getChunksRequired() + "";
+            String req = tiers[i].getXpRequired() + " XP";
             g.text(font, req, nodeX - font.width(req) / 2, nodeY + nodeR + 14,
                     C_TEXT_DIM, false);
         }
 
-        // Coming soon note
-        String soon = "Skill choices coming soon\u2026";
-        g.text(font, soon,
-                cx - font.width(soon) / 2,
-                pageTop + pageH - 20,
-                C_TEXT_DIM, false);
+        // Survey data section — separated from XP tree with a rule line
+        int surveyY = nodeY + nodeR + 28;
+        g.fill(dialogX + PADDING, surveyY - 7, dialogX + DIALOG_W - PADDING, surveyY - 6, C_DIVIDER);
+
+        int batchSize = ExplorerSkillService.getSurveyBatchSize();
+        int influence  = ExplorerSkillService.getSurveyInfluenceGain();
+        String surveyLabel = "Survey Data";
+        g.text(font, surveyLabel, dialogX + PADDING, surveyY, C_HEADER_TXT, false);
+        g.text(font, String.valueOf(surveyData),
+                dialogX + PADDING + font.width(surveyLabel) + 5, surveyY, C_TEXT, false);
+        g.text(font, batchSize + " Survey Data → " + influence + " Alliance Influence",
+                dialogX + PADDING, surveyY + 12, C_TEXT_DIM, false);
     }
 
     private ExplorerSkillTier getNextTier(ExplorerSkillTier current) {
@@ -670,25 +703,27 @@ public class JournalScreen extends Screen {
         if (!showInfo) return;
 
         int footerTop = dialogY + DIALOG_H - FOOTER_H;
-        int lineY     = footerTop + (FOOTER_H - 8) / 2;
 
         boolean hasPending = pendingId != null;
         boolean pendingIsActive = hasPending && activeTarget != null
                 && activeTarget.type() == pendingType && activeTarget.id().equals(pendingId);
 
         if (hasPending && !pendingIsActive) {
-            int personalCost  = trackingPersonalCost(pendingType);
-            int allianceCost  = trackingAllianceCost(pendingType);
-            int myXp          = ExplorerSkillClientState.getExplorerXp();
-            String costLine   = pendingDisplayName + " — " + personalCost + " Explorer XP + " + allianceCost + " Alliance XP";
-            String xpLine     = "Your Explorer XP: " + myXp;
-            g.text(font, costLine, dialogX + PADDING, lineY - 4, C_PENDING_TXT, false);
-            g.text(font, xpLine,   dialogX + PADDING, lineY + 6, C_TEXT_DIM,    false);
+            // Two text lines at the top of the footer; buttons are at the bottom (from rebuildWidgets).
+            int personalCost = trackingPersonalCost(pendingType);
+            boolean canAfford = ExplorerSkillClientState.getExplorerXp() >= personalCost;
+            String costLine = pendingDisplayName + " — " + personalCost + " Explorer XP";
+            String xpLine   = "Your Explorer XP: " + ExplorerSkillClientState.getExplorerXp();
+            int costColor = canAfford ? C_PENDING_TXT : 0xFFFF4444;
+            g.text(font, costLine, dialogX + PADDING, footerTop + 6,  costColor,  false);
+            g.text(font, xpLine,   dialogX + PADDING, footerTop + 17, C_TEXT_DIM, false);
         } else if (activeTarget != null) {
+            int lineY = footerTop + (FOOTER_H - 8) / 2;
             String label = Component.translatable("screen.alliesandfoes.journal.searching_for",
                     activeTarget.displayName()).getString();
             g.text(font, label, dialogX + PADDING, lineY, C_TARGET_TXT, false);
         } else {
+            int lineY = footerTop + (FOOTER_H - 8) / 2;
             g.text(font, "No active search target", dialogX + PADDING, lineY, C_TEXT_DIM, false);
         }
     }
@@ -850,6 +885,9 @@ public class JournalScreen extends Screen {
 
     private void confirmTrackTarget() {
         if (pendingId == null) return;
+        // Optimistically update client state so rebuildWidgets() immediately shows
+        // "Searching for X" and the Clear Target button without waiting for server response.
+        ExplorerDiscoveryClientState.setActiveTarget(new IntuitionTarget(pendingType, pendingId));
         ClientPlayNetworking.send(new SetIntuitionTargetPayload(pendingType.name(), pendingId.toString()));
         clearSelection();
     }
@@ -862,12 +900,13 @@ public class JournalScreen extends Screen {
     }
 
     private void clearTarget() {
-        clearSelection();
+        // Update client state BEFORE rebuildWidgets() so the button disappears immediately.
         ExplorerDiscoveryClientState.update(
                 toStringList(ExplorerDiscoveryClientState.getDiscoveredBiomes()),
                 toStringList(ExplorerDiscoveryClientState.getDiscoveredStructures()),
                 "NONE", ""
         );
+        clearSelection();
         ClientPlayNetworking.send(new SetIntuitionTargetPayload("NONE", ""));
     }
 
@@ -878,11 +917,8 @@ public class JournalScreen extends Screen {
         };
     }
 
-    private static int trackingAllianceCost(IntuitionTarget.TargetType type) {
-        return switch (type) {
-            case BIOME     -> ExplorerTrackingCosts.BIOME_ALLIANCE_XP;
-            case STRUCTURE -> ExplorerTrackingCosts.STRUCTURE_ALLIANCE_XP;
-        };
+    private void convertSurveyData() {
+        ClientPlayNetworking.send(new SpendSurveyDataPayload(1));
     }
 
     private static List<String> toStringList(List<Identifier> ids) {

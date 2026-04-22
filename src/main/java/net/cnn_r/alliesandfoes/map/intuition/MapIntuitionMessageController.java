@@ -113,6 +113,7 @@ public class MapIntuitionMessageController {
         return switch (messageType) {
             case UNUSUAL -> strength >= MIN_STRENGTH_FOR_UNUSUAL_MESSAGE;
             case RICH, PROMISING, QUIET -> strength >= MIN_STRENGTH_FOR_GENERIC_MESSAGES;
+            case DISTANT -> true;
             case UNREMARKABLE, UNCERTAIN -> false;
             case NONE -> false;
         };
@@ -144,6 +145,15 @@ public class MapIntuitionMessageController {
     private Component toComponent(IntuitionMessageType messageType, IntuitionResult result) {
         IntuitionTarget target = ExplorerDiscoveryClientState.getActiveTarget();
 
+        if (messageType == IntuitionMessageType.DISTANT && target != null) {
+            // strength encodes distance tier set by ExplorerIntuitionEvaluator
+            float s = result.getStrength();
+            if (s >= 0.90f) return Component.literal("You're closing in on " + target.displayName() + "...");
+            if (s >= 0.60f) return Component.literal("You inch closer to " + target.displayName() + "...");
+            if (s >= 0.30f) return Component.literal("Something stirs far off — " + target.displayName() + ".");
+            return Component.literal("The path to " + target.displayName() + " is long...");
+        }
+
         if (target != null) {
             String name = target.displayName();
             String dir = result.getDirection().getDisplayName();
@@ -152,7 +162,7 @@ public class MapIntuitionMessageController {
                 case PROMISING -> Component.literal("A pull toward " + name + " — " + dir + ".");
                 case UNUSUAL -> Component.literal("Something stirs. " + name + " may be near.");
                 case QUIET -> Component.literal("A faint trace of " + name + " to the " + dir + ".");
-                case UNREMARKABLE, UNCERTAIN, NONE -> null;
+                case DISTANT, UNREMARKABLE, UNCERTAIN, NONE -> null;
             };
         }
 
@@ -161,7 +171,7 @@ public class MapIntuitionMessageController {
             case PROMISING -> Component.literal("This direction feels more promising.");
             case UNUSUAL -> Component.literal("You sense unusual potential nearby.");
             case QUIET -> Component.literal("There is something faint in this direction.");
-            case UNREMARKABLE, UNCERTAIN, NONE -> null;
+            case DISTANT, UNREMARKABLE, UNCERTAIN, NONE -> null;
         };
     }
 }

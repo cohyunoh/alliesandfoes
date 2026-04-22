@@ -1,35 +1,31 @@
 package net.cnn_r.alliesandfoes.explorer;
 
 /**
- * Explorer skill tiers earned by discovering new chunks.
+ * Explorer skill tiers earned by discovering new biomes and structures.
  *
- * Tiers are unlocked by walking into a cumulative number of unique chunks.
- * In V1, tiers are tracked but do not gate any feature — the Monocle item
- * is the gate. Tier gating (better minimap, richer intuition) is Phase 2.
+ * Tiers are unlocked by accumulating personal Explorer XP from discoveries.
+ * Each tier sharpens the monocle signal (tighter noise floor, larger scan radius).
  */
 public enum ExplorerSkillTier {
     NONE(0),
-    TIER_1(50),
-    TIER_2(250),
-    TIER_3(1000);
+    TIER_1(30),
+    TIER_2(100),
+    TIER_3(300);
 
-    private final int chunksRequired;
+    private final int xpRequired;
 
-    ExplorerSkillTier(int chunksRequired) {
-        this.chunksRequired = chunksRequired;
+    ExplorerSkillTier(int xpRequired) {
+        this.xpRequired = xpRequired;
     }
 
-    public int getChunksRequired() {
-        return this.chunksRequired;
+    public int getXpRequired() {
+        return this.xpRequired;
     }
 
-    /**
-     * Returns the highest tier the given chunk count has reached.
-     */
-    public static ExplorerSkillTier fromChunkCount(int chunkCount) {
+    public static ExplorerSkillTier fromXp(int xp) {
         ExplorerSkillTier highest = NONE;
         for (ExplorerSkillTier tier : values()) {
-            if (chunkCount >= tier.chunksRequired) {
+            if (xp >= tier.xpRequired) {
                 highest = tier;
             }
         }

@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes.hud;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
+import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.intuition.ExplorerIntuitionEvaluator;
@@ -20,7 +21,7 @@ public final class HudIntuitionRenderer {
     private static final int   GLOW_RGB            = 0xCC8800;
     private static final float MAX_GLOW_ALPHA      = 0.55f;
     private static final long  GLOW_REFRESH_MS     = 2500L;
-    private static final float GLOW_RENDER_THRESHOLD = 0.18f;
+    private static final float GLOW_RENDER_THRESHOLD = 0.10f;
 
     private static final long INTUITION_EVAL_INTERVAL_MS    = 3000L;
     private static final int  INTUITION_EVAL_CHUNK_DISTANCE = 2;
@@ -41,7 +42,6 @@ public final class HudIntuitionRenderer {
 
     private HudIntuitionRenderer() {}
 
-    /** Clears all cached render state on world disconnect. */
     public static void reset() {
         cachedResult     = null;
         lastEvalChunk    = null;
@@ -53,7 +53,6 @@ public final class HudIntuitionRenderer {
         messageController.reset();
     }
 
-    /** Entry point called from HudElementRegistry every frame. */
     public static void render(GuiGraphicsExtractor context, DeltaTracker tickCounter) {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
@@ -63,13 +62,16 @@ public final class HudIntuitionRenderer {
 
         if (!isHoldingMonocle(player)) return;
 
+        // Monocle only produces a signal when a tracking target is active.
+        if (ExplorerDiscoveryClientState.getActiveTarget() == null) return;
+
         maybeRefreshIntuition(player);
         maybeEmitIntuitionMessage();
         maybeRefreshEdgeScores(player);
 
         int screenW = mc.getWindow().getGuiScaledWidth();
         int screenH = mc.getWindow().getGuiScaledHeight();
-        renderEdgeGlows(context, screenW, screenH);
+        renderEdgeGlows(context, screenW, screenH, player.chunkPosition());
         renderIntuitionMessage(context, mc);
     }
 
@@ -125,7 +127,8 @@ public final class HudIntuitionRenderer {
         lastGlowRefreshMs = now;
     }
 
-    private static void renderEdgeGlows(GuiGraphicsExtractor context, int screenW, int screenH) {
+    private static void renderEdgeGlows(GuiGraphicsExtractor context, int screenW, int screenH,
+                                        ChunkPos playerChunk) {
         float front = cachedEdgeScores[0];
         float right = cachedEdgeScores[1];
         float back  = cachedEdgeScores[2];
@@ -134,31 +137,40 @@ public final class HudIntuitionRenderer {
         float maxScore = Math.max(Math.max(front, back), Math.max(right, left));
         if (maxScore < GLOW_RENDER_THRESHOLD) return;
 
+        // Scale glow alpha by proximity to target: bright = close, faint = far.
+        float proximityScale = 1.0f;
+        double distToTarget = ExplorerIntuitionEvaluator.computeDistanceToTarget(playerChunk);
+        if (distToTarget >= 0) {
+            proximityScale = ExplorerIntuitionEvaluator.computeProximityStrength(distToTarget);
+        }
+
+        float effectiveMaxAlpha = MAX_GLOW_ALPHA * proximityScale;
+
         // Top edge (front)
         for (int i = 0; i < GLOW_THICKNESS; i++) {
             float t = (float)(GLOW_THICKNESS - i) / GLOW_THICKNESS;
-            int alpha = (int)(front * MAX_GLOW_ALPHA * t * t * 255);
+            int alpha = (int)(front * effectiveMaxAlpha * t * t * 255);
             if (alpha <= 0) continue;
             context.fill(0, i, screenW, i + 1, (alpha << 24) | GLOW_RGB);
         }
         // Bottom edge (back)
         for (int i = 0; i < GLOW_THICKNESS; i++) {
             float t = (float)(GLOW_THICKNESS - i) / GLOW_THICKNESS;
-            int alpha = (int)(back * MAX_GLOW_ALPHA * t * t * 255);
+            int alpha = (int)(back * effectiveMaxAlpha * t * t * 255);
             if (alpha <= 0) continue;
             context.fill(0, screenH - 1 - i, screenW, screenH - i, (alpha << 24) | GLOW_RGB);
         }
         // Right edge
         for (int i = 0; i < GLOW_THICKNESS; i++) {
             float t = (float)(GLOW_THICKNESS - i) / GLOW_THICKNESS;
-            int alpha = (int)(right * MAX_GLOW_ALPHA * t * t * 255);
+            int alpha = (int)(right * effectiveMaxAlpha * t * t * 255);
             if (alpha <= 0) continue;
             context.fill(screenW - 1 - i, 0, screenW - i, screenH, (alpha << 24) | GLOW_RGB);
         }
         // Left edge
         for (int i = 0; i < GLOW_THICKNESS; i++) {
             float t = (float)(GLOW_THICKNESS - i) / GLOW_THICKNESS;
-            int alpha = (int)(left * MAX_GLOW_ALPHA * t * t * 255);
+            int alpha = (int)(left * effectiveMaxAlpha * t * t * 255);
             if (alpha <= 0) continue;
             context.fill(i, 0, i + 1, screenH, (alpha << 24) | GLOW_RGB);
         }
@@ -203,7 +215,7 @@ public final class HudIntuitionRenderer {
         int bgAlpha   = (int)(50 + 60 * pulse);
 
         Font font = mc.font;
-        String msg = "\u2694 War Invite! \u2014 Press [M]";
+        String msg = "⚔ War Invite! — Press [M]";
         int textWidth = font.width(msg);
         int sw = mc.getWindow().getGuiScaledWidth();
         int sh = mc.getWindow().getGuiScaledHeight();
