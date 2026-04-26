@@ -1,14 +1,20 @@
 {
+  "itemGroup.alliesandfoes.main": "Allies & Foes",
   "key.alliesandfoes.open_map": "Open Map",
-  "key.alliesandfoes.open_journal": "Open Journal",
+  "key.alliesandfoes.use_role_item": "Use Role Item",
   "category.alliesandfoes": "Allies & Foes",
   "item.alliesandfoes.monocle": "Monocle",
+  "item.alliesandfoes.war_horn": "War Horn",
+  "item.alliesandfoes.farmers_almanac": "Farmer's Almanac",
+  "item.alliesandfoes.assay_kit": "Assay Kit",
+  "item.alliesandfoes.covenant_shard": "Covenant Shard",
   "screen.alliesandfoes.journal.title": "Journal",
   "screen.alliesandfoes.journal.tab.explorer": "Explorer",
-  "screen.alliesandfoes.journal.tab.miner": "Miner",
+  "screen.alliesandfoes.journal.tab.warrior": "Warrior",
+  "screen.alliesandfoes.journal.tab.cultivator": "Cultivator",
+  "screen.alliesandfoes.journal.tab.prospector": "Prospector",
   "screen.alliesandfoes.journal.biomes_header": "Biomes (%s)",
   "screen.alliesandfoes.journal.structures_header": "Structures (%s)",
   "screen.alliesandfoes.journal.searching_for": "Searching for: %s",
-  "screen.alliesandfoes.journal.clear_target": "Clear Target",
-  "screen.alliesandfoes.journal.miner_coming_soon": "Coming soon"
+  "screen.alliesandfoes.journal.clear_target": "Clear Target"
 }

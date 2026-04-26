@@ -1,9 +1,9 @@
 package net.cnn_r.alliesandfoes.map.intuition;
 
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
-import net.cnn_r.alliesandfoes.explorer.ExplorerSkillClientState;
-import net.cnn_r.alliesandfoes.explorer.ExplorerSkillTier;
 import net.cnn_r.alliesandfoes.map.MapState;
+import net.cnn_r.alliesandfoes.roleslot.RoleSlotClientState;
+import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
@@ -38,11 +38,21 @@ public final class ExplorerIntuitionEvaluator {
     private static final float DOMINANCE_RANGE_FOR_MAX_SIGNAL = 0.20f;
     private static final double TARGET_SCORE_MULTIPLIER = 6.0;
     private static final double MAX_CHUNK_SCORE = 10.75;
+    static final int BASE_SCAN_RADIUS = 5;
+    private static final float BASE_MIN_DOMINANCE = 0.18f;
 
     /** Per-edge glow intensities relative to the player's screen orientation. */
     public record EdgeGlowResult(float front, float right, float back, float left) {}
 
     private ExplorerIntuitionEvaluator() {}
+
+    private static int scanRadius() {
+        int idx = RoleSlotClientState.slotIndexForRole(RoleType.EXPLORER);
+        int level = idx >= 0 ? RoleSlotClientState.getSlotLevel(idx) : 0;
+        if (level >= 3) return 10;
+        if (level >= 2) return 7;
+        return BASE_SCAN_RADIUS;
+    }
 
     // -------------------------------------------------------------------------
     // Edge glow evaluation — called by HudIntuitionRenderer
@@ -57,12 +67,7 @@ public final class ExplorerIntuitionEvaluator {
         // No signal without an active target.
         if (target == null) return new EdgeGlowResult(0, 0, 0, 0);
 
-        ExplorerSkillTier personal = ExplorerSkillClientState.getTier();
-        int allianceBonus = MapState.getAllianceTierBonus();
-        ExplorerSkillTier[] tiers = ExplorerSkillTier.values();
-        ExplorerSkillTier effective = tiers[Math.min(tiers.length - 1, personal.ordinal() + allianceBonus)];
-
-        int radius = radiusForTier(effective);
+        int radius = scanRadius();
 
         Level level = null;
         if (target.type() == IntuitionTarget.TargetType.BIOME) {
@@ -149,9 +154,8 @@ public final class ExplorerIntuitionEvaluator {
         // No signal without an active target.
         if (target == null) return new IntuitionResult(IntuitionDirection.NONE, 0.0f, IntuitionMessageType.NONE);
 
-        ExplorerSkillTier tier = ExplorerSkillClientState.getTier();
-        int radius = radiusForTier(tier);
-        float minDominance = minDominanceForTier(tier);
+        int radius = scanRadius();
+        float minDominance = BASE_MIN_DOMINANCE;
 
         Level level = null;
         if (target.type() == IntuitionTarget.TargetType.BIOME) {
@@ -160,28 +164,6 @@ public final class ExplorerIntuitionEvaluator {
 
         return evaluate(center, dimensionId, radius, minDominance, chunkValueCache, structureSyncCache,
                 ExplorerIntuitionProfile.INSTANCE, target, level);
-    }
-
-    // -------------------------------------------------------------------------
-    // Tier-based parameters
-    // -------------------------------------------------------------------------
-
-    private static int radiusForTier(ExplorerSkillTier tier) {
-        return switch (tier) {
-            case NONE   -> 3;
-            case TIER_1 -> 5;
-            case TIER_2 -> 7;
-            case TIER_3 -> 10;
-        };
-    }
-
-    private static float minDominanceForTier(ExplorerSkillTier tier) {
-        return switch (tier) {
-            case NONE   -> 0.22f;
-            case TIER_1 -> 0.18f;
-            case TIER_2 -> 0.15f;
-            case TIER_3 -> 0.12f;
-        };
     }
 
     // -------------------------------------------------------------------------

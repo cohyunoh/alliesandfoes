@@ -4,6 +4,8 @@ import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.map.MapState;
+import net.cnn_r.alliesandfoes.roleslot.RoleSlotClientState;
+import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.cnn_r.alliesandfoes.map.intuition.ExplorerIntuitionEvaluator;
 import net.cnn_r.alliesandfoes.map.intuition.IntuitionResult;
 import net.cnn_r.alliesandfoes.map.intuition.MapIntuitionMessageController;
@@ -60,7 +62,7 @@ public final class HudIntuitionRenderer {
 
         renderWarInviteNotification(context, mc);
 
-        if (!isHoldingMonocle(player)) return;
+        if (!hasMonocle(player)) return;
 
         // Monocle only produces a signal when a tracking target is active.
         if (ExplorerDiscoveryClientState.getActiveTarget() == null) return;
@@ -75,9 +77,10 @@ public final class HudIntuitionRenderer {
         renderIntuitionMessage(context, mc);
     }
 
-    private static boolean isHoldingMonocle(LocalPlayer player) {
+    private static boolean hasMonocle(LocalPlayer player) {
         return player.getMainHandItem().is(ModItems.MONOCLE)
-                || player.getOffhandItem().is(ModItems.MONOCLE);
+                || player.getOffhandItem().is(ModItems.MONOCLE)
+                || RoleSlotClientState.hasRoleItem(RoleType.EXPLORER);
     }
 
     // -------------------------------------------------------------------------

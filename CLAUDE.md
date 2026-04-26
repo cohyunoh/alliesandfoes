@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-**alliesandfoes** is a Fabric Minecraft mod (1.21.11, Java 21) that adds player alliances, chunk-based territory claiming, and a client-side strategic map to survival multiplayer. Players form alliances, earn progression points, and spend them to found territory anchors and claim nearby chunks.
+**alliesandfoes** is a Fabric Minecraft mod (26.1.2, Java 25) that adds player alliances, chunk-based territory claiming, and a client-side strategic map to survival multiplayer. Players form alliances, earn progression points, and spend them to found territory anchors and claim nearby chunks.
 
 ## Build and run commands
 

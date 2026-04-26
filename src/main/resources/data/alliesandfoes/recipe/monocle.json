@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " G ",
+    "GPG",
+    "GG "
+  ],
+  "key": {
+    "G": {"item": "minecraft:gold_ingot"},
+    "P": {"item": "minecraft:glass_pane"}
+  },
+  "result": {
+    "id": "alliesandfoes:monocle",
+    "count": 1
+  }
+}

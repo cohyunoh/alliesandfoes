@@ -1,0 +1,10 @@
+name: Minecraft Modding MCP
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: mcmodding-mcp
+    type: stdio
+    command: npx
+    args:
+      - -y
+      - mcmodding-mcp

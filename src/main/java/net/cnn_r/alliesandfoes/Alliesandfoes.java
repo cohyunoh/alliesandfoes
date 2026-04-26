@@ -16,6 +16,21 @@ import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
 import net.cnn_r.alliesandfoes.alliance.war.WarSnapshotService;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryService;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillService;
+import net.cnn_r.alliesandfoes.covenantforge.CovenantForgeService;
+import net.cnn_r.alliesandfoes.cultivator.CultivatorSkillService;
+import net.cnn_r.alliesandfoes.item.ModBlocks;
+import net.cnn_r.alliesandfoes.item.ModCreativeTab;
+import net.cnn_r.alliesandfoes.prospector.ProspectorSkillService;
+import net.cnn_r.alliesandfoes.warrior.WarriorSkillService;
+import net.cnn_r.alliesandfoes.item.ModComponents;
+import net.cnn_r.alliesandfoes.network.CovenantForgeUpgradePayload;
+import net.cnn_r.alliesandfoes.network.RoleSlotSetPayload;
+import net.cnn_r.alliesandfoes.network.RoleSlotSyncPayload;
+import net.cnn_r.alliesandfoes.network.TributeConvertPayload;
+import net.cnn_r.alliesandfoes.roleslot.RoleSlotSavedData;
+import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
+import net.cnn_r.alliesandfoes.tributealtar.TributeAltarService;
+import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.map.intuition.IntuitionTarget;
 import net.cnn_r.alliesandfoes.network.*;
@@ -77,7 +92,10 @@ public class Alliesandfoes implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		net.cnn_r.alliesandfoes.config.ModConfig.load();
+		ModComponents.register();
+		ModBlocks.register();
 		ModItems.register();
+		ModCreativeTab.register();
 		TerritoryCommands.register();
 		AllianceProgressionCommands.register();
 		AllianceWarCommands.register();
@@ -107,7 +125,6 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(RespondAllianceJoinRequestPayload.TYPE, RespondAllianceJoinRequestPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestInviteAllianceManagementScreenPayload.TYPE, RequestInviteAllianceManagementScreenPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SendAllianceInvitesPayload.TYPE, SendAllianceInvitesPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(ExplorerSkillSyncPayload.TYPE, ExplorerSkillSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(TerritoryChunkBatchPayload.TYPE, TerritoryChunkBatchPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(TerritoryPreviewBatchPayload.TYPE, TerritoryPreviewBatchPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestTerritoryPreviewPayload.TYPE, RequestTerritoryPreviewPayload.STREAM_CODEC);
@@ -125,7 +142,17 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.clientboundPlay().register(DeadPetListSyncPayload.TYPE, DeadPetListSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestPetRevivePayload.TYPE, RequestPetRevivePayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(IntuitionTargetLocationPayload.TYPE, IntuitionTargetLocationPayload.STREAM_CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(SpendSurveyDataPayload.TYPE, SpendSurveyDataPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(RoleSlotSyncPayload.TYPE, RoleSlotSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RoleSlotSetPayload.TYPE, RoleSlotSetPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(TributeConvertPayload.TYPE, TributeConvertPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(CovenantForgeUpgradePayload.TYPE, CovenantForgeUpgradePayload.STREAM_CODEC);
+
+		ServerPlayNetworking.registerGlobalReceiver(RoleSlotSetPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				var stack = RoleSlotSavedData.buildStack(payload.itemId(), payload.currency(), payload.level());
+				RoleSlotService.get(context.server()).onRoleSlotChanged(context.player(), stack);
+			});
+		});
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -332,17 +359,19 @@ public class Alliesandfoes implements ModInitializer {
 			});
 		});
 
-		ServerPlayNetworking.registerGlobalReceiver(SpendSurveyDataPayload.TYPE, (payload, context) -> {
+		ServerPlayNetworking.registerGlobalReceiver(TributeConvertPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
-				ServerPlayer player = context.player();
-				UUID uuid = player.getUUID();
-				Alliance alliance = AllianceManager.get(context.server()).getAllianceFor(uuid);
-				if (alliance == null) return;
-				ExplorerSkillService skillService = ExplorerSkillService.get(context.server());
-				int converted = skillService.tryConvertSurveyData(uuid, alliance.getId(), payload.batches());
-				if (converted > 0) {
-					skillService.syncPlayer(player);
-				}
+				RoleType[] values = RoleType.values();
+				if (payload.roleOrdinal() < 0 || payload.roleOrdinal() >= values.length) return;
+				TributeAltarService.get(context.server()).convert(context.player(), values[payload.roleOrdinal()]);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(CovenantForgeUpgradePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				RoleType[] values = RoleType.values();
+				if (payload.roleOrdinal() < 0 || payload.roleOrdinal() >= values.length) return;
+				CovenantForgeService.get(context.server()).upgrade(context.player(), values[payload.roleOrdinal()]);
 			});
 		});
 
@@ -534,16 +563,34 @@ public class Alliesandfoes implements ModInitializer {
 		});
 
 
-		// Inject the Monocle into ruined portal chest loot tables (~10% chance)
+		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+			int shards = 0;
+			if (entity instanceof net.minecraft.world.entity.monster.warden.Warden) shards = 1;
+			else if (entity instanceof net.minecraft.world.entity.monster.ElderGuardian) shards = 1;
+			else if (entity instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon) shards = 2;
+			else if (entity instanceof net.minecraft.world.entity.boss.wither.WitherBoss) shards = 2;
+			if (shards == 0) return;
+
+			net.minecraft.world.entity.Entity killer = source.getEntity();
+			if (!(killer instanceof ServerPlayer killerPlayer)) return;
+
+			ItemStack shardStack = new ItemStack(ModItems.COVENANT_SHARD, shards);
+			if (!killerPlayer.getInventory().add(shardStack)) {
+				killerPlayer.drop(shardStack, false);
+			}
+		});
+
 		LootTableEvents.MODIFY.register((key, tableBuilder, source, registries) -> {
-			Identifier ruinedPortal = Identifier.fromNamespaceAndPath("minecraft", "chests/ruined_portal");
-			if (ruinedPortal.equals(key.identifier())) {
-				tableBuilder.withPool(
-						LootPool.lootPool()
-								.setRolls(ConstantValue.exactly(1))
-								.when(LootItemRandomChanceCondition.randomChance(0.1f))
-								.add(LootItem.lootTableItem(ModItems.MONOCLE))
-				);
+			String id = key.identifier().toString();
+			switch (id) {
+				case "minecraft:chests/ruined_portal",
+					 "minecraft:chests/stronghold_library",
+					 "minecraft:chests/jungle_temple",
+					 "minecraft:chests/abandoned_mineshaft" ->
+					tableBuilder.withPool(LootPool.lootPool()
+							.setRolls(ConstantValue.exactly(1))
+							.when(LootItemRandomChanceCondition.randomChance(0.12f))
+							.add(LootItem.lootTableItem(ModItems.MONOCLE)));
 			}
 		});
 
@@ -682,6 +729,9 @@ public class Alliesandfoes implements ModInitializer {
 			AllianceManager.get(server).syncPlayer(player);
 			ExplorerSkillService.get(server).syncPlayer(player);
 			ExplorerDiscoveryService.get(server).syncPlayer(player);
+			RoleSlotService roleService = RoleSlotService.get(server);
+			roleService.initPlayerMenu(player);
+			roleService.syncPlayer(player);
 
 			// Add player to any ongoing war boss bars for their alliance
 			AllianceWarService.get(server).onPlayerJoin(player);
@@ -741,10 +791,35 @@ public class Alliesandfoes implements ModInitializer {
 
 		});
 
+		// Ore/crop block break → Prospector and Cultivator services
+		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
+			if (!(player instanceof ServerPlayer sp)) return;
+			MinecraftServer srv = ((ServerLevel) level).getServer();
+			ProspectorSkillService.get(srv).onBlockBreak(sp, state);
+			CultivatorSkillService.get(srv).onBlockBreak(sp, state);
+		});
+
+		// Kill → Warrior service
+		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+			if (!(source.getEntity() instanceof ServerPlayer killer)) return;
+			MinecraftServer killSrv = entity.level() instanceof ServerLevel sl ? sl.getServer() : null;
+			if (killSrv == null) return;
+			// Only hostile mobs or players
+			if (entity instanceof net.minecraft.world.entity.monster.Monster
+					|| entity instanceof ServerPlayer) {
+				WarriorSkillService.get(killSrv).onKill(killer);
+			}
+		});
+
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-			playerLastChunkKey.remove(handler.player.getUUID());
-			playerLastTerritoryKey.remove(handler.player.getUUID());
-			ExplorerSkillService.get(server).onPlayerDisconnect(handler.player.getUUID());
+			UUID uuid = handler.player.getUUID();
+			playerLastChunkKey.remove(uuid);
+			playerLastTerritoryKey.remove(uuid);
+			ExplorerSkillService.get(server).onPlayerDisconnect(uuid);
+			RoleSlotService.get(server).onPlayerDisconnect(uuid);
+			WarriorSkillService.get(server).onPlayerDisconnect(uuid);
+			ProspectorSkillService.get(server).onPlayerDisconnect(uuid);
+			CultivatorSkillService.get(server).onPlayerDisconnect(uuid);
 		});
 	}
 

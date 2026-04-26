@@ -5,8 +5,9 @@ import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteManagementScreen;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryRules;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillClientState;
+import net.cnn_r.alliesandfoes.roleslot.RoleSlotClientState;
+import net.cnn_r.alliesandfoes.roleslot.RoleSlotRenderer;
 import net.cnn_r.alliesandfoes.hud.HudIntuitionRenderer;
-import net.cnn_r.alliesandfoes.journal.JournalScreen;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
@@ -296,12 +297,11 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
-        ClientPlayNetworking.registerGlobalReceiver(ExplorerSkillSyncPayload.TYPE, (payload, context) -> {
+        ClientPlayNetworking.registerGlobalReceiver(net.cnn_r.alliesandfoes.network.RoleSlotSyncPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
-                ExplorerSkillClientState.setFromSync(payload.surveyData(), payload.explorerXp());
-                if (context.client().screen instanceof JournalScreen js) {
-                    js.refreshWidgets();
-                }
+                RoleSlotClientState.setFromSync(
+                        payload.slot0Id(), payload.slot0Currency(), payload.slot0Level()
+                );
             });
         });
 
@@ -480,6 +480,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
             AllianceClientState.clearPendingWarInvites();
             ExplorerSkillClientState.reset();
             ExplorerDiscoveryClientState.reset();
+            RoleSlotClientState.reset();
+            RoleSlotRenderer.reset();
             HudIntuitionRenderer.reset();
             lastNetherPlayerY = Integer.MIN_VALUE;
         });
@@ -494,6 +496,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
             MapState.setCurrentWorldId(WorldIdentity.current(client));
             ExplorerSkillClientState.reset();
             ExplorerDiscoveryClientState.reset();
+            RoleSlotClientState.reset();
+            RoleSlotRenderer.reset();
             HudIntuitionRenderer.reset();
         });
 
