@@ -38,10 +38,10 @@ public class RoleSlotClientState {
 
     public static boolean hasRoleItem(RoleType role) {
         Item expected = switch (role) {
-            case EXPLORER   -> ModItems.MONOCLE;
+            case EXPLORER   -> ModItems.CARTOGRAPHERS_JOURNAL;
             case WARRIOR    -> ModItems.WAR_HORN;
             case CULTIVATOR -> ModItems.FARMERS_ALMANAC;
-            case PROSPECTOR -> ModItems.ASSAY_KIT;
+            case PROSPECTOR -> ModItems.DOWSING_ROD;
         };
         for (ItemStack s : slots) {
             if (s != null && !s.isEmpty() && s.getItem() == expected) return true;
@@ -52,10 +52,10 @@ public class RoleSlotClientState {
     /** Returns the slot index holding the given role item, or -1 if not equipped. */
     public static int slotIndexForRole(RoleType role) {
         Item expected = switch (role) {
-            case EXPLORER   -> ModItems.MONOCLE;
+            case EXPLORER   -> ModItems.CARTOGRAPHERS_JOURNAL;
             case WARRIOR    -> ModItems.WAR_HORN;
             case CULTIVATOR -> ModItems.FARMERS_ALMANAC;
-            case PROSPECTOR -> ModItems.ASSAY_KIT;
+            case PROSPECTOR -> ModItems.DOWSING_ROD;
         };
         for (int i = 0; i < slots.length; i++) {
             ItemStack s = slots[i];

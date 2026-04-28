@@ -9,32 +9,32 @@ import net.minecraft.world.item.Item;
 
 public final class ModItems {
 
-    public static final MonocleItem MONOCLE = new MonocleItem(
+    public static final CartographerJournalItem CARTOGRAPHERS_JOURNAL = new CartographerJournalItem(
             new Item.Properties()
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM,
-                            Identifier.fromNamespaceAndPath("alliesandfoes", "monocle")))
+                            Identifier.fromNamespaceAndPath("alliesandfoes", "cartographers_journal")))
     );
 
-    public static final Item WAR_HORN = new Item(
+    public static final WarHornItem WAR_HORN = new WarHornItem(
             new Item.Properties()
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM,
                             Identifier.fromNamespaceAndPath("alliesandfoes", "war_horn")))
     );
 
-    public static final Item FARMERS_ALMANAC = new Item(
+    public static final FarmersAlmanacItem FARMERS_ALMANAC = new FarmersAlmanacItem(
             new Item.Properties()
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM,
                             Identifier.fromNamespaceAndPath("alliesandfoes", "farmers_almanac")))
     );
 
-    public static final Item ASSAY_KIT = new Item(
+    public static final DowsingRodItem DOWSING_ROD = new DowsingRodItem(
             new Item.Properties()
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM,
-                            Identifier.fromNamespaceAndPath("alliesandfoes", "assay_kit")))
+                            Identifier.fromNamespaceAndPath("alliesandfoes", "dowsing_rod")))
     );
 
     public static final Item COVENANT_SHARD = new Item(
@@ -61,10 +61,10 @@ public final class ModItems {
     }
 
     public static void register() {
-        register("monocle", MONOCLE);
+        register("cartographers_journal", CARTOGRAPHERS_JOURNAL);
         register("war_horn", WAR_HORN);
         register("farmers_almanac", FARMERS_ALMANAC);
-        register("assay_kit", ASSAY_KIT);
+        register("dowsing_rod", DOWSING_ROD);
         register("covenant_shard", COVENANT_SHARD);
         register("tribute_altar", TRIBUTE_ALTAR);
         register("covenant_forge", COVENANT_FORGE);

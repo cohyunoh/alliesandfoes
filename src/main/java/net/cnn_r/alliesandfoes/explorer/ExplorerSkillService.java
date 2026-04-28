@@ -3,10 +3,14 @@ package net.cnn_r.alliesandfoes.explorer;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
+import net.cnn_r.alliesandfoes.alliance.survey.AllianceSurveyService;
+import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
@@ -29,6 +33,7 @@ public class ExplorerSkillService {
     private final Map<UUID, Set<Long>> visitedRegionsByPlayer;
     private final Map<UUID, Set<String>> seenItemIds       = new HashMap<>();
     private final Map<UUID, Integer>     itemCheckCooldown = new HashMap<>();
+    private final Map<UUID, Long>        lastSurveyChunk   = new HashMap<>();
 
     private ExplorerSkillService(MinecraftServer server) {
         this.server = server;
@@ -40,8 +45,10 @@ public class ExplorerSkillService {
     }
 
     public void onPlayerTick(ServerPlayer player) {
-        UUID uuid = player.getUUID();
+        // Journal survey runs every tick; chunk-change check is internal
+        checkJournalSurvey(player);
 
+        UUID uuid = player.getUUID();
         int cd = itemCheckCooldown.getOrDefault(uuid, 0);
         if (cd > 0) {
             itemCheckCooldown.put(uuid, cd - 1);
@@ -64,6 +71,7 @@ public class ExplorerSkillService {
     public void onPlayerDisconnect(UUID uuid) {
         seenItemIds.remove(uuid);
         itemCheckCooldown.remove(uuid);
+        lastSurveyChunk.remove(uuid);
     }
 
     // -------------------------------------------------------------------------
@@ -92,6 +100,43 @@ public class ExplorerSkillService {
             if (alliance != null) {
                 AllianceProgressionService.get(server).add(alliance.getId(), 1);
             }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Journal survey mechanic
+    // -------------------------------------------------------------------------
+
+    private void checkJournalSurvey(ServerPlayer player) {
+        if (!player.getMainHandItem().is(ModItems.CARTOGRAPHERS_JOURNAL)) return;
+
+        UUID uuid = player.getUUID();
+        Alliance alliance = AllianceManager.get(server).getAllianceFor(uuid);
+        if (alliance == null) return;
+
+        int chunkX = player.blockPosition().getX() >> 4;
+        int chunkZ = player.blockPosition().getZ() >> 4;
+        long currentChunk = ((long) chunkX << 32) | Integer.toUnsignedLong(chunkZ);
+
+        Long last = lastSurveyChunk.get(uuid);
+        if (last != null && last == currentChunk) return;
+        lastSurveyChunk.put(uuid, currentChunk);
+
+        int level = RoleSlotService.get(server).getRoleItemLevel(uuid, RoleType.EXPLORER);
+        int radius = 1 + level;
+        String dimId = ((ServerLevel) player.level()).dimension().identifier().toString();
+
+        Set<ChunkKey> toSurvey = new HashSet<>();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                toSurvey.add(new ChunkKey(dimId, chunkX + dx, chunkZ + dz));
+            }
+        }
+
+        int newCount = AllianceSurveyService.get(server).markSurveyed(alliance.getId(), toSurvey);
+        if (newCount > 0 && RoleSlotService.get(server).isRoleActive(uuid, RoleType.EXPLORER)) {
+            RoleSlotService.get(server).addRoleCurrency(uuid, RoleType.EXPLORER, newCount);
+            RoleSlotService.get(server).syncPlayer(player);
         }
     }
 

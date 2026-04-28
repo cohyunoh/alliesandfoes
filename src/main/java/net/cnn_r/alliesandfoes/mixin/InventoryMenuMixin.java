@@ -54,8 +54,8 @@ public abstract class InventoryMenuMixin implements HasRoleSlot {
 
             @Override
             public boolean mayPlace(ItemStack stack) {
-                return stack.is(ModItems.MONOCLE) || stack.is(ModItems.WAR_HORN)
-                        || stack.is(ModItems.FARMERS_ALMANAC) || stack.is(ModItems.ASSAY_KIT);
+                return stack.is(ModItems.CARTOGRAPHERS_JOURNAL) || stack.is(ModItems.WAR_HORN)
+                        || stack.is(ModItems.FARMERS_ALMANAC) || stack.is(ModItems.DOWSING_ROD);
             }
 
             @Override
@@ -99,8 +99,8 @@ public abstract class InventoryMenuMixin implements HasRoleSlot {
             Slot slot = slots.get(index);
             if (!slot.hasItem()) return;
             ItemStack item = slot.getItem();
-            boolean isRole = item.is(ModItems.MONOCLE) || item.is(ModItems.WAR_HORN)
-                    || item.is(ModItems.FARMERS_ALMANAC) || item.is(ModItems.ASSAY_KIT);
+            boolean isRole = item.is(ModItems.CARTOGRAPHERS_JOURNAL) || item.is(ModItems.WAR_HORN)
+                    || item.is(ModItems.FARMERS_ALMANAC) || item.is(ModItems.DOWSING_ROD);
             if (!isRole) return;
             Slot roleSlot = slots.get(46);
             if (roleSlot.hasItem()) return; // role slot occupied — let vanilla move normally

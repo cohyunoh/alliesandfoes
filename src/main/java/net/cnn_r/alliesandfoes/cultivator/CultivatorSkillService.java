@@ -2,44 +2,30 @@ package net.cnn_r.alliesandfoes.cultivator;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
-import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
+import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
+import net.cnn_r.alliesandfoes.territory.ChunkKey;
+import net.cnn_r.alliesandfoes.territory.TerritoryClaim;
+import net.cnn_r.alliesandfoes.territory.TerritoryManager;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
 
 /**
- * Awards yield tallies to Farmer's Almanac or baseline influence on crop/animal events.
- *
- * Without Almanac: every 50 harvests → +1 alliance influence.
- * With Almanac: each harvest → currency (scales with upgrade level).
+ * Cultivator role: hold the Farmer's Almanac while walking through claimed alliance territory
+ * to refresh patrol timestamps and earn currency.
  */
 public class CultivatorSkillService {
     private static final Map<MinecraftServer, CultivatorSkillService> INSTANCES = new WeakHashMap<>();
 
-    private static final int BASELINE_ACTIONS_PER_INFLUENCE = 50;
-
-    /** Crop block path suffixes that count as harvestable. */
-    private static final Set<String> CROP_BLOCKS = Set.of(
-            "wheat", "carrots", "potatoes", "beetroots",
-            "nether_wart", "cocoa", "sweet_berry_bush",
-            "cave_vines_plant", "cave_vines",
-            "melon", "pumpkin",
-            "sugar_cane", "bamboo",
-            "kelp_plant"
-    );
-
-    private final Map<UUID, Integer> baselineActions = new HashMap<>();
     private final MinecraftServer server;
+    private final Map<UUID, Long> lastPatrolChunk = new HashMap<>();
 
     private CultivatorSkillService(MinecraftServer server) {
         this.server = server;
@@ -49,47 +35,37 @@ public class CultivatorSkillService {
         return INSTANCES.computeIfAbsent(server, CultivatorSkillService::new);
     }
 
-    /** Called when a player breaks a block (crop harvest detection). */
-    public void onBlockBreak(ServerPlayer player, BlockState state) {
-        if (!isCrop(state)) return;
-        recordAction(player, 1);
-    }
+    /** Called every server tick for each player. */
+    public void onPlayerTick(ServerPlayer player) {
+        if (!player.getMainHandItem().is(ModItems.FARMERS_ALMANAC)) return;
 
-    /** Called when a player breeds an animal (via ServerLivingEntityEvents or similar). */
-    public void onAnimalBreed(ServerPlayer player) {
-        recordAction(player, 3); // breeding is worth more
-    }
-
-    private void recordAction(ServerPlayer player, int weight) {
         UUID uuid = player.getUUID();
-        RoleSlotService slots = RoleSlotService.get(server);
+        Alliance alliance = AllianceManager.get(server).getAllianceFor(uuid);
+        if (alliance == null) return;
 
-        if (slots.isRoleActive(uuid, RoleType.CULTIVATOR)) {
-            int level  = slots.getRoleItemLevel(uuid, RoleType.CULTIVATOR);
-            int earned = weight + level;
-            slots.addRoleCurrency(uuid, RoleType.CULTIVATOR, earned);
-            slots.syncPlayer(player);
-        } else {
-            int actions = baselineActions.getOrDefault(uuid, 0) + weight;
-            if (actions >= BASELINE_ACTIONS_PER_INFLUENCE) {
-                Alliance alliance = AllianceManager.get(server).getAllianceFor(uuid);
-                if (alliance != null) {
-                    AllianceProgressionService.get(server).add(alliance.getId(), 1);
-                }
-                baselineActions.put(uuid, actions % BASELINE_ACTIONS_PER_INFLUENCE);
-            } else {
-                baselineActions.put(uuid, actions);
-            }
+        int chunkX = player.blockPosition().getX() >> 4;
+        int chunkZ = player.blockPosition().getZ() >> 4;
+        long packedChunk = ((long) chunkX << 32) | Integer.toUnsignedLong(chunkZ);
+
+        Long lastKey = lastPatrolChunk.get(uuid);
+        if (lastKey != null && lastKey == packedChunk) return;
+        lastPatrolChunk.put(uuid, packedChunk);
+
+        String dimId = ((ServerLevel) player.level()).dimension().identifier().toString();
+        ChunkKey key = new ChunkKey(dimId, chunkX, chunkZ);
+        TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(key);
+        if (claim == null || !claim.getAllianceId().equals(alliance.getId())) return;
+
+        long gameTick = server.overworld().getGameTime();
+        boolean updated = PatrolDataService.get(server).markPatrolled(alliance.getId(), key, gameTick);
+
+        if (updated && RoleSlotService.get(server).isRoleActive(uuid, RoleType.CULTIVATOR)) {
+            RoleSlotService.get(server).addRoleCurrency(uuid, RoleType.CULTIVATOR, 1);
+            RoleSlotService.get(server).syncPlayer(player);
         }
     }
 
     public void onPlayerDisconnect(UUID uuid) {
-        baselineActions.remove(uuid);
-    }
-
-    private static boolean isCrop(BlockState state) {
-        Identifier id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-        if (id == null) return false;
-        return CROP_BLOCKS.contains(id.getPath());
+        lastPatrolChunk.remove(uuid);
     }
 }

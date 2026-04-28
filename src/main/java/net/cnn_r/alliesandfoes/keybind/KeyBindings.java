@@ -50,7 +50,7 @@ public class KeyBindings {
             while (USE_ROLE_ITEM.consumeClick()) {
                 if (client.player != null && client.level != null && client.screen == null) {
                     ItemStack role = RoleSlotClientState.getSlot(0);
-                    if (role.is(ModItems.MONOCLE)) {
+                    if (role.is(ModItems.CARTOGRAPHERS_JOURNAL)) {
                         client.setScreen(new MonocleScreen());
                     }
                 }

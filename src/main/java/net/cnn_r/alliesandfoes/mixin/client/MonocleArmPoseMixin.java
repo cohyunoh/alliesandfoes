@@ -29,10 +29,10 @@ public class MonocleArmPoseMixin {
         ItemStack right = state.rightHandItemStack;
         ItemStack left  = state.leftHandItemStack;
 
-        if (right != null && right.is(ModItems.MONOCLE)) {
+        if (right != null && right.is(ModItems.CARTOGRAPHERS_JOURNAL)) {
             state.rightArmPose = HumanoidModel.ArmPose.SPYGLASS;
         }
-        if (left != null && left.is(ModItems.MONOCLE)) {
+        if (left != null && left.is(ModItems.CARTOGRAPHERS_JOURNAL)) {
             state.leftArmPose = HumanoidModel.ArmPose.SPYGLASS;
         }
     }

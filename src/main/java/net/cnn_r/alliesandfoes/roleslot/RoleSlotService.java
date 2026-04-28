@@ -167,15 +167,15 @@ public class RoleSlotService {
 
     private static Item roleItem(RoleType role) {
         return switch (role) {
-            case EXPLORER   -> ModItems.MONOCLE;
+            case EXPLORER   -> ModItems.CARTOGRAPHERS_JOURNAL;
             case WARRIOR    -> ModItems.WAR_HORN;
             case CULTIVATOR -> ModItems.FARMERS_ALMANAC;
-            case PROSPECTOR -> ModItems.ASSAY_KIT;
+            case PROSPECTOR -> ModItems.DOWSING_ROD;
         };
     }
 
     private static boolean isRoleItem(Item item) {
-        return item == ModItems.MONOCLE || item == ModItems.WAR_HORN
-                || item == ModItems.FARMERS_ALMANAC || item == ModItems.ASSAY_KIT;
+        return item == ModItems.CARTOGRAPHERS_JOURNAL || item == ModItems.WAR_HORN
+                || item == ModItems.FARMERS_ALMANAC || item == ModItems.DOWSING_ROD;
     }
 }

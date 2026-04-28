@@ -13,6 +13,7 @@ import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapPersistence;
+import net.cnn_r.alliesandfoes.prospector.DowsingRodVfxController;
 import net.cnn_r.alliesandfoes.map.MapRenderMode;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.ModeResolver;
@@ -394,6 +395,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 }
 
                 MapState.flushBlockDirtyChunks();
+                DowsingRodVfxController.onClientTick(client);
             }
         });
 
@@ -456,6 +458,61 @@ public class AlliesandfoesClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(AllianceInfluenceSyncPayload.TYPE, (payload, context) ->
             context.client().execute(() -> MapState.setAllianceInfluenceBalance(payload.balance())));
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceSurveySyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> {
+                var cache = MapState.getAllianceSurveySyncCache();
+                for (int i = 0; i < payload.dimensionIds().size(); i++) {
+                    cache.addSurveyed(new ChunkKey(
+                            payload.dimensionIds().get(i),
+                            payload.chunkXs().get(i),
+                            payload.chunkZs().get(i)
+                    ));
+                }
+                MapState.markMapDirty();
+            }));
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceAssessmentSyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> {
+                var cache = MapState.getAllianceAssessmentSyncCache();
+                for (int i = 0; i < payload.dimensionIds().size(); i++) {
+                    cache.addAssessed(new ChunkKey(
+                            payload.dimensionIds().get(i),
+                            payload.chunkXs().get(i),
+                            payload.chunkZs().get(i)
+                    ));
+                }
+                MapState.markMapDirty();
+            }));
+
+        ClientPlayNetworking.registerGlobalReceiver(PatrolSyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> {
+                var cache = MapState.getPatrolSyncCache();
+                for (int i = 0; i < payload.dimensionIds().size(); i++) {
+                    cache.putPatrol(
+                            new ChunkKey(payload.dimensionIds().get(i),
+                                    payload.chunkXs().get(i),
+                                    payload.chunkZs().get(i)),
+                            payload.lastPatrolTicks().get(i)
+                    );
+                }
+            }));
+
+        ClientPlayNetworking.registerGlobalReceiver(RallySyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> {
+                var entries = new java.util.ArrayList<net.cnn_r.alliesandfoes.map.cache.RallyMarkerCache.Entry>();
+                for (int i = 0; i < payload.warriorNames().size(); i++) {
+                    entries.add(new net.cnn_r.alliesandfoes.map.cache.RallyMarkerCache.Entry(
+                            payload.warriorNames().get(i),
+                            payload.chunkXs().get(i),
+                            payload.chunkZs().get(i),
+                            payload.dimensionIds().get(i),
+                            payload.expiryTicks().get(i)
+                    ));
+                }
+                MapState.getRallyMarkerCache().update(entries);
+                MapState.markMapDirty();
+            }));
 
         ClientPlayNetworking.registerGlobalReceiver(RollbackEligibleSyncPayload.TYPE, (payload, context) ->
             context.client().execute(() -> {

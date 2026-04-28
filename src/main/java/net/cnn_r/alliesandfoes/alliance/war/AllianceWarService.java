@@ -2,6 +2,8 @@ package net.cnn_r.alliesandfoes.alliance.war;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
+import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.cnn_r.alliesandfoes.territory.TerritoryClaim;
@@ -320,6 +322,11 @@ public class AllianceWarService {
         Alliance actorAlliance = AllianceManager.get(server).getAllianceFor(actor.getUUID());
         if (actorAlliance == null) return "You must be in an alliance to declare war.";
         if (!actorAlliance.getOwnerUuid().equals(actor.getUUID())) return "Only the Founder can declare war.";
+
+        RoleSlotService roleSlots = RoleSlotService.get(server);
+        boolean hasWarrior = actorAlliance.getMemberUuids().stream()
+                .anyMatch(id -> roleSlots.isRoleActive(id, RoleType.WARRIOR));
+        if (!hasWarrior) return "Your alliance needs an active Warrior to formally declare war.";
 
         UUID actorAllianceId = actorAlliance.getId();
         if (actorAllianceId.equals(targetAllianceId)) return "You cannot declare war on your own alliance.";

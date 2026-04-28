@@ -2,6 +2,9 @@ package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.alliance.survey.AllianceAssessmentService;
+import net.cnn_r.alliesandfoes.alliance.survey.AllianceSurveyService;
+import net.cnn_r.alliesandfoes.warrior.RallyService;
 import net.cnn_r.alliesandfoes.network.DeadPetListSyncPayload;
 import net.cnn_r.alliesandfoes.network.RequestPetRevivePayload;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
@@ -18,11 +21,14 @@ import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryService;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillService;
 import net.cnn_r.alliesandfoes.covenantforge.CovenantForgeService;
 import net.cnn_r.alliesandfoes.cultivator.CultivatorSkillService;
+import net.cnn_r.alliesandfoes.cultivator.PatrolDataService;
 import net.cnn_r.alliesandfoes.item.ModBlocks;
 import net.cnn_r.alliesandfoes.item.ModCreativeTab;
 import net.cnn_r.alliesandfoes.prospector.ProspectorSkillService;
 import net.cnn_r.alliesandfoes.warrior.WarriorSkillService;
 import net.cnn_r.alliesandfoes.item.ModComponents;
+import net.cnn_r.alliesandfoes.network.CovenantForgeClaimPayload;
+import net.cnn_r.alliesandfoes.network.CovenantForgeReturnPayload;
 import net.cnn_r.alliesandfoes.network.CovenantForgeUpgradePayload;
 import net.cnn_r.alliesandfoes.network.RoleSlotSetPayload;
 import net.cnn_r.alliesandfoes.network.RoleSlotSyncPayload;
@@ -144,8 +150,14 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.clientboundPlay().register(IntuitionTargetLocationPayload.TYPE, IntuitionTargetLocationPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(RoleSlotSyncPayload.TYPE, RoleSlotSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RoleSlotSetPayload.TYPE, RoleSlotSetPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceSurveySyncPayload.TYPE, AllianceSurveySyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceAssessmentSyncPayload.TYPE, AllianceAssessmentSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(RallySyncPayload.TYPE, RallySyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(TributeConvertPayload.TYPE, TributeConvertPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(CovenantForgeUpgradePayload.TYPE, CovenantForgeUpgradePayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(CovenantForgeClaimPayload.TYPE, CovenantForgeClaimPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(CovenantForgeReturnPayload.TYPE, CovenantForgeReturnPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(PatrolSyncPayload.TYPE, PatrolSyncPayload.STREAM_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(RoleSlotSetPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -375,6 +387,22 @@ public class Alliesandfoes implements ModInitializer {
 			});
 		});
 
+		ServerPlayNetworking.registerGlobalReceiver(CovenantForgeClaimPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				RoleType[] values = RoleType.values();
+				if (payload.roleOrdinal() < 0 || payload.roleOrdinal() >= values.length) return;
+				CovenantForgeService.get(context.server()).forge(context.player(), values[payload.roleOrdinal()]);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(CovenantForgeReturnPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				RoleType[] values = RoleType.values();
+				if (payload.roleOrdinal() < 0 || payload.roleOrdinal() >= values.length) return;
+				CovenantForgeService.get(context.server()).returnRole(context.player(), values[payload.roleOrdinal()]);
+			});
+		});
+
 		ServerPlayNetworking.registerGlobalReceiver(DeclareWarRequestPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
 				ServerPlayer player = context.player();
@@ -590,7 +618,7 @@ public class Alliesandfoes implements ModInitializer {
 					tableBuilder.withPool(LootPool.lootPool()
 							.setRolls(ConstantValue.exactly(1))
 							.when(LootItemRandomChanceCondition.randomChance(0.12f))
-							.add(LootItem.lootTableItem(ModItems.MONOCLE)));
+							.add(LootItem.lootTableItem(ModItems.CARTOGRAPHERS_JOURNAL)));
 			}
 		});
 
@@ -605,10 +633,14 @@ public class Alliesandfoes implements ModInitializer {
 			AllianceWarService.get(server).tickWars();
 
 			ExplorerSkillService explorerSkillService = ExplorerSkillService.get(server);
+			ProspectorSkillService prospectorSkillService = ProspectorSkillService.get(server);
+			CultivatorSkillService cultivatorSkillService = CultivatorSkillService.get(server);
 			List<PlayerPositionsPayload.Entry> entries = new ArrayList<>();
 
 			for (ServerPlayer player : players) {
 				explorerSkillService.onPlayerTick(player);
+				prospectorSkillService.onPlayerTick(player);
+				cultivatorSkillService.onPlayerTick(player);
 				entries.add(new PlayerPositionsPayload.Entry(
 						player.getUUID(),
 						player.getName().getString(),
@@ -732,6 +764,10 @@ public class Alliesandfoes implements ModInitializer {
 			RoleSlotService roleService = RoleSlotService.get(server);
 			roleService.initPlayerMenu(player);
 			roleService.syncPlayer(player);
+			AllianceSurveyService.get(server).syncPlayerOnJoin(player);
+			AllianceAssessmentService.get(server).syncPlayerOnJoin(player);
+			RallyService.get(server).syncPlayerOnJoin(player);
+			PatrolDataService.get(server).syncPlayerOnJoin(player);
 
 			// Add player to any ongoing war boss bars for their alliance
 			AllianceWarService.get(server).onPlayerJoin(player);
@@ -791,12 +827,11 @@ public class Alliesandfoes implements ModInitializer {
 
 		});
 
-		// Ore/crop block break → Prospector and Cultivator services
+		// Ore block break → Prospector service (baseline influence for non-role players)
 		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
 			if (!(player instanceof ServerPlayer sp)) return;
 			MinecraftServer srv = ((ServerLevel) level).getServer();
 			ProspectorSkillService.get(srv).onBlockBreak(sp, state);
-			CultivatorSkillService.get(srv).onBlockBreak(sp, state);
 		});
 
 		// Kill → Warrior service

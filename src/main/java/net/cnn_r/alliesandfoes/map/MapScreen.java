@@ -6,7 +6,9 @@ import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinRequestScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.WarInviteScreen;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
+import net.cnn_r.alliesandfoes.map.cache.AllianceSurveySyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
+import net.cnn_r.alliesandfoes.map.cache.RallyMarkerCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
 import net.cnn_r.alliesandfoes.map.data.ChunkValueBreakdown;
@@ -627,6 +629,7 @@ public class MapScreen extends Screen {
         this.renderChunkOverlays(context);
         this.renderRollbackOverlay(context);
         this.renderVisiblePlayers(context, level);
+        this.renderRallyMarkers(context);
 
         super.extractRenderState(context, mouseX, mouseY, delta);
         renderTopButtonGlows(context, delta);
@@ -1344,11 +1347,11 @@ public class MapScreen extends Screen {
         int texCx = this.mapTexture.getSize() / 2;
         int texCz = this.mapTexture.getSize() / 2;
         MapRenderMode mode = MapState.getCurrentMode();
+        AllianceSurveySyncCache surveyCache = MapState.getAllianceSurveySyncCache();
         boolean anyWritten = false;
 
         for (ChunkKey key : keys) {
             if (!key.getDimensionId().equals(this.dimensionId)) continue;
-            if (!MapState.isCurrentlyLoaded(key)) continue;
 
             int[] pixels = switch (mode) {
                 case NETHER -> this.netherCache.get(key);
@@ -1358,6 +1361,7 @@ public class MapScreen extends Screen {
             if (pixels == null) pixels = this.cache.get(key);
             if (pixels == null) continue;
 
+            boolean surveyed = surveyCache.isSurveyed(key);
             int chunkMinX = key.getChunkX() * 16;
             int chunkMinZ = key.getChunkZ() * 16;
 
@@ -1368,7 +1372,7 @@ public class MapScreen extends Screen {
                     if (texX < 0 || texZ < 0 || texX >= this.mapTexture.getSize()
                             || texZ >= this.mapTexture.getSize()) continue;
                     int color = pixels[lx + lz * 16];
-                    if (color != 0) this.mapTexture.setPixel(texX, texZ, color);
+                    if (color != 0) this.mapTexture.setPixel(texX, texZ, surveyed ? color : toSilhouette(color));
                 }
             }
             anyWritten = true;
@@ -1378,7 +1382,7 @@ public class MapScreen extends Screen {
     }
 
     private void rebuildVisibleTexture() {
-        this.mapTexture.clear(0xFF101010);
+        this.mapTexture.clear(0xFF2A1F14);
 
         int centerWorldX = (int) Math.floor(this.cameraBlockX);
         int centerWorldZ = (int) Math.floor(this.cameraBlockZ);
@@ -1392,11 +1396,11 @@ public class MapScreen extends Screen {
         int maxChunkZ = (centerWorldZ + textureCenterY) >> 4;
 
         MapRenderMode mode = MapState.getCurrentMode();
+        AllianceSurveySyncCache surveyCache = MapState.getAllianceSurveySyncCache();
 
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 ChunkKey key = new ChunkKey(this.dimensionId, chunkX, chunkZ);
-                if (!MapState.isCurrentlyLoaded(key)) continue;
                 long packedKey = ((long) chunkX << 32) | (chunkZ & 0xFFFFFFFFL);
 
                 int[] surfaceColors = this.cache.get(key);
@@ -1417,6 +1421,8 @@ public class MapScreen extends Screen {
                 }
 
                 if (primaryColors == null) continue;
+
+                boolean surveyed = surveyCache.isSurveyed(key);
 
                 ChunkPos pos = new ChunkPos(chunkX, chunkZ);
                 int chunkMinWorldX = pos.getMinBlockX();
@@ -1441,13 +1447,25 @@ public class MapScreen extends Screen {
                         int color = primaryColors[blockIdx];
                         if (color == 0) continue;
 
-                        this.mapTexture.setPixel(texX, texY, color);
+                        this.mapTexture.setPixel(texX, texY, surveyed ? color : toSilhouette(color));
                     }
                 }
             }
         }
 
         this.mapTexture.upload();
+    }
+
+    /** Blends terrain color at 15% opacity over the parchment background (0xFF2A1F14). */
+    private static int toSilhouette(int color) {
+        int pR = 0x2A, pG = 0x1F, pB = 0x14;
+        int cR = (color >> 16) & 0xFF;
+        int cG = (color >> 8) & 0xFF;
+        int cB = color & 0xFF;
+        int r = (int)(cR * 0.15f + pR * 0.85f);
+        int g = (int)(cG * 0.15f + pG * 0.85f);
+        int b = (int)(cB * 0.15f + pB * 0.85f);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
 
@@ -1626,7 +1644,8 @@ public class MapScreen extends Screen {
             borderColor = territoryData.anchorChunk()
                     ? (myAlliance ? ANCHOR_CHUNK_BORDER_COLOR : ENEMY_ANCHOR_BORDER_COLOR)
                     : (myAlliance ? CLAIMED_CHUNK_BORDER_COLOR : ENEMY_CLAIMED_BORDER_COLOR);
-        } else if (valueData != null && showValueColors) {
+        } else if (valueData != null && showValueColors
+                && MapState.getAllianceAssessmentSyncCache().isAssessed(key)) {
             borderColor = hovered
                     ? getOverallValueColor(valueData.getTotalValue())
                     : getOverallValueBorderColorSoft(valueData.getTotalValue());
@@ -1645,7 +1664,8 @@ public class MapScreen extends Screen {
                 fillColor = territoryData.anchorChunk()
                         ? (myAlliance ? ANCHOR_CHUNK_FILL_COLOR : ENEMY_ANCHOR_FILL_COLOR)
                         : (myAlliance ? CLAIMED_CHUNK_FILL_COLOR : ENEMY_CLAIMED_FILL_COLOR);
-            } else if (valueData != null && showValueColors) {
+            } else if (valueData != null && showValueColors
+                    && MapState.getAllianceAssessmentSyncCache().isAssessed(key)) {
                 fillColor = getOverallValueFillColor(valueData.getTotalValue());
             } else {
                 fillColor = HOVERED_CHUNK_FILL_COLOR;
@@ -1714,6 +1734,46 @@ public class MapScreen extends Screen {
                     textColor
             );
         }
+    }
+
+    private void renderRallyMarkers(GuiGraphicsExtractor context) {
+        if (this.minecraft.level == null) return;
+        long now = this.minecraft.level.getGameTime();
+
+        int textureCenter = this.mapTexture.getSize() / 2;
+        double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
+        int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int drawWidth = this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE);
+        int drawHeight = this.renderer.getDrawHeight(BLOCK_PIXEL_SIZE);
+
+        context.enableScissor(mapLeft, mapTop, mapLeft + drawWidth, mapTop + drawHeight);
+
+        for (RallyMarkerCache.Entry marker : MapState.getRallyMarkerCache().getAll()) {
+            if (marker.expiryTick() <= now) continue;
+            if (!marker.dimensionId().equals(this.dimensionId)) continue;
+
+            double blockX = marker.chunkX() * 16.0 + 8.0;
+            double blockZ = marker.chunkZ() * 16.0 + 8.0;
+            double texX = textureCenter + (blockX - this.cameraBlockX);
+            double texY = textureCenter + (blockZ - this.cameraBlockZ);
+            int screenX = mapLeft + (int) Math.round(texX * scale);
+            int screenY = mapTop + (int) Math.round(texY * scale);
+
+            // Gold diamond marker (5×5 cross)
+            context.fill(screenX - 1, screenY - 3, screenX + 1, screenY + 3, 0xFFFFAA00);
+            context.fill(screenX - 3, screenY - 1, screenX + 3, screenY + 1, 0xFFFFAA00);
+
+            // Name label above marker
+            String label = "⚔ " + marker.warriorName();
+            int textWidth = this.font.width(label);
+            int textX = screenX - textWidth / 2;
+            int textY = screenY - 12;
+            context.fill(textX - 2, textY - 1, textX + textWidth + 2, textY + 9, 0x80000000);
+            context.text(this.font, label, textX, textY, 0xFFFFAA00);
+        }
+
+        context.disableScissor();
     }
 
     private void renderVisiblePlayers(GuiGraphicsExtractor context, ClientLevel level) {

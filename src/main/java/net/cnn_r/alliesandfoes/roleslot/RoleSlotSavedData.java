@@ -89,10 +89,10 @@ public class RoleSlotSavedData extends SavedData {
     public static ItemStack buildStack(String id, int currency, int level) {
         if (id == null || id.isEmpty()) return ItemStack.EMPTY;
         Item item = switch (id) {
-            case "alliesandfoes:monocle"          -> ModItems.MONOCLE;
-            case "alliesandfoes:war_horn"          -> ModItems.WAR_HORN;
-            case "alliesandfoes:farmers_almanac"   -> ModItems.FARMERS_ALMANAC;
-            case "alliesandfoes:assay_kit"         -> ModItems.ASSAY_KIT;
+            case "alliesandfoes:cartographers_journal" -> ModItems.CARTOGRAPHERS_JOURNAL;
+            case "alliesandfoes:war_horn"              -> ModItems.WAR_HORN;
+            case "alliesandfoes:farmers_almanac"       -> ModItems.FARMERS_ALMANAC;
+            case "alliesandfoes:dowsing_rod"           -> ModItems.DOWSING_ROD;
             default -> null;
         };
         if (item == null) return ItemStack.EMPTY;
@@ -104,10 +104,10 @@ public class RoleSlotSavedData extends SavedData {
 
     public static String idFromStack(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "";
-        if (stack.getItem() == ModItems.MONOCLE)          return "alliesandfoes:monocle";
-        if (stack.getItem() == ModItems.WAR_HORN)          return "alliesandfoes:war_horn";
-        if (stack.getItem() == ModItems.FARMERS_ALMANAC)   return "alliesandfoes:farmers_almanac";
-        if (stack.getItem() == ModItems.ASSAY_KIT)         return "alliesandfoes:assay_kit";
+        if (stack.getItem() == ModItems.CARTOGRAPHERS_JOURNAL) return "alliesandfoes:cartographers_journal";
+        if (stack.getItem() == ModItems.WAR_HORN)              return "alliesandfoes:war_horn";
+        if (stack.getItem() == ModItems.FARMERS_ALMANAC)       return "alliesandfoes:farmers_almanac";
+        if (stack.getItem() == ModItems.DOWSING_ROD)           return "alliesandfoes:dowsing_rod";
         return "";
     }
 

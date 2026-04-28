@@ -1,5 +1,7 @@
 package net.cnn_r.alliesandfoes.covenantforge;
 
+import net.cnn_r.alliesandfoes.network.CovenantForgeClaimPayload;
+import net.cnn_r.alliesandfoes.network.CovenantForgeReturnPayload;
 import net.cnn_r.alliesandfoes.network.CovenantForgeUpgradePayload;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotClientState;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
@@ -10,18 +12,22 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public class CovenantForgeScreen extends Screen {
 
-    private static final int PANEL_W = 320;
-    private static final int PANEL_H = 180;
-    private static final int ROW_H   = 32;
-    private static final int MAX_LEVEL = 3;
+    private static final int PANEL_W       = 400;
+    private static final int ROW_H         = 36;
+    private static final int ROW_GAP       = 4;
+    private static final int ROWS_TOP      = 44;
+    private static final int FOOTER_H      = 30;
+    private static final int MAX_LEVEL     = CovenantForgeService.MAX_LEVEL;
+    private static final int FORGE_SHARDS  = CovenantForgeService.FORGE_SHARD_COST;
+    private static final int FORGE_INF     = CovenantForgeService.FORGE_INFLUENCE_COST;
+    private static final int RETURN_BASE   = CovenantForgeService.RETURN_BASE;
+    private static final int RETURN_PER_LV = CovenantForgeService.RETURN_PER_LEVEL;
 
-    private final List<RoleEntry> equippedRoles = new ArrayList<>();
-    private record RoleEntry(RoleType role, int slotIndex) {}
+    private static final int ROLES = RoleType.values().length;
+    private static final int PANEL_H =
+            ROWS_TOP + ROLES * ROW_H + (ROLES - 1) * ROW_GAP + 8 + FOOTER_H;
 
     public CovenantForgeScreen() {
         super(Component.literal("Covenant Forge"));
@@ -30,41 +36,56 @@ public class CovenantForgeScreen extends Screen {
     @Override
     protected void init() {
         this.clearWidgets();
-        equippedRoles.clear();
-
-        for (RoleType role : RoleType.values()) {
-            int idx = RoleSlotClientState.slotIndexForRole(role);
-            if (idx >= 0) equippedRoles.add(new RoleEntry(role, idx));
-        }
 
         int left = (this.width - PANEL_W) / 2;
         int top  = (this.height - PANEL_H) / 2;
-        int rowsTop = top + 44;
 
-        for (int i = 0; i < equippedRoles.size(); i++) {
-            RoleEntry entry = equippedRoles.get(i);
-            int rowY = rowsTop + i * ROW_H;
-            int level = RoleSlotClientState.getSlotLevel(entry.slotIndex());
-            int cost  = level + 1;
-            int btnX  = left + PANEL_W - 12 - 80;
-            final int ordinal = entry.role().ordinal();
-            Button upgradeBtn = Button.builder(
-                    Component.literal("Upgrade (" + cost + " shards)"),
-                    btn -> {
-                        ClientPlayNetworking.send(new CovenantForgeUpgradePayload(ordinal));
-                        this.onClose();
-                    }
-            ).bounds(btnX, rowY + 6, 90, 20).build();
-            upgradeBtn.active = level < MAX_LEVEL;
-            this.addRenderableWidget(upgradeBtn);
+        RoleType[] roles = RoleType.values();
+        for (int i = 0; i < roles.length; i++) {
+            RoleType role = roles[i];
+            int rowY = top + ROWS_TOP + i * (ROW_H + ROW_GAP);
+            int slotIdx = RoleSlotClientState.slotIndexForRole(role);
+            boolean equipped = slotIdx >= 0;
+
+            if (!equipped) {
+                final int ord = role.ordinal();
+                this.addRenderableWidget(
+                        Button.builder(Component.literal("Forge"),
+                                btn -> {
+                                    ClientPlayNetworking.send(new CovenantForgeClaimPayload(ord));
+                                    this.onClose();
+                                })
+                                .bounds(left + PANEL_W - 12 - 64, rowY + 8, 64, 20)
+                                .build());
+            } else {
+                int level = RoleSlotClientState.getSlotLevel(slotIdx);
+                final int ord = role.ordinal();
+
+                Button upgradeBtn = Button.builder(Component.literal("Upgrade"),
+                        btn -> {
+                            ClientPlayNetworking.send(new CovenantForgeUpgradePayload(ord));
+                            this.onClose();
+                        })
+                        .bounds(left + PANEL_W - 12 - 64 - 4 - 68, rowY + 8, 68, 20)
+                        .build();
+                upgradeBtn.active = level < MAX_LEVEL;
+                this.addRenderableWidget(upgradeBtn);
+
+                this.addRenderableWidget(
+                        Button.builder(Component.literal("Return"),
+                                btn -> {
+                                    ClientPlayNetworking.send(new CovenantForgeReturnPayload(ord));
+                                    this.onClose();
+                                })
+                                .bounds(left + PANEL_W - 12 - 64, rowY + 8, 64, 20)
+                                .build());
+            }
         }
 
-        int closeY = top + PANEL_H - 28;
         this.addRenderableWidget(
                 Button.builder(Component.literal("Close"), btn -> this.onClose())
-                        .bounds((this.width - 80) / 2, closeY, 80, 20)
-                        .build()
-        );
+                        .bounds((this.width - 80) / 2, top + PANEL_H - 24, 80, 20)
+                        .build());
     }
 
     @Override
@@ -85,39 +106,52 @@ public class CovenantForgeScreen extends Screen {
                 left + (PANEL_W - this.font.width(titleStr)) / 2, top + 8,
                 0xFFD0B0FF, false);
 
-        // Separator
         ctx.fill(left + 10, top + 20, left + PANEL_W - 10, top + 21, 0xFF7050B0);
 
-        // Cost note
-        ctx.text(this.font, "+0→+1: 1 shard  |  +1→+2: 2 shards  |  +2→+3: 3 shards",
+        ctx.text(this.font,
+                "Forge: " + FORGE_SHARDS + " shards + " + FORGE_INF + " inf  |  "
+                        + "Upgrade: (level+1) shards  |  Return: " + RETURN_BASE + " + " + RETURN_PER_LV + "/lv inf",
                 left + 12, top + 26, 0xFF9070D0, false);
 
-        // Separator 2
         ctx.fill(left + 10, top + 37, left + PANEL_W - 10, top + 38, 0xFF5040A0);
 
-        int rowsTop = top + 44;
-        if (equippedRoles.isEmpty()) {
-            ctx.text(this.font, "No role items equipped.",
-                    left + 12, rowsTop + 8, 0xFF8070A0, false);
-        } else {
-            for (int i = 0; i < equippedRoles.size(); i++) {
-                RoleEntry entry = equippedRoles.get(i);
-                int rowY = rowsTop + i * ROW_H;
-                int level = RoleSlotClientState.getSlotLevel(entry.slotIndex());
-                ItemStack stack = RoleSlotClientState.getSlot(entry.slotIndex());
+        RoleType[] roles = RoleType.values();
+        for (int i = 0; i < roles.length; i++) {
+            RoleType role = roles[i];
+            int rowY = top + ROWS_TOP + i * (ROW_H + ROW_GAP);
+            int slotIdx = RoleSlotClientState.slotIndexForRole(role);
+            boolean equipped = slotIdx >= 0;
+            int level = equipped ? RoleSlotClientState.getSlotLevel(slotIdx) : 0;
 
-                if (!stack.isEmpty()) {
-                    ctx.fakeItem(stack, left + 12, rowY + 6, i);
-                }
+            // Row background + left stripe
+            ctx.fill(left + 10, rowY, left + PANEL_W - 10, rowY + ROW_H, 0x22FFFFFF);
+            ctx.fill(left + 10, rowY, left + 13, rowY + ROW_H,
+                    equipped ? 0xFF9070D0 : 0xFF504060);
 
-                String name = roleName(entry.role()) + " +" + level;
-                ctx.text(this.font, name, left + 32, rowY + 6, 0xFFE0D0FF, false);
-
-                String statusStr = level >= MAX_LEVEL
-                        ? "Max level reached"
-                        : "Upgrade to +" + (level + 1) + " costs " + (level + 1) + " shard(s)";
-                ctx.text(this.font, statusStr, left + 32, rowY + 16, 0xFFB090E0, false);
+            // Role item icon
+            if (equipped) {
+                ItemStack stack = RoleSlotClientState.getSlot(slotIdx);
+                if (!stack.isEmpty()) ctx.fakeItem(stack, left + 16, rowY + 10, i);
             }
+
+            // Name
+            String nameStr = equipped
+                    ? CovenantForgeService.roleName(role) + " +" + level
+                    : CovenantForgeService.roleName(role);
+            ctx.text(this.font, nameStr, left + 36, rowY + 6,
+                    equipped ? 0xFFE0D0FF : 0xFF9080B0, false);
+
+            // Sub-line cost info
+            String sub;
+            if (!equipped) {
+                sub = "Forge: " + FORGE_SHARDS + " shards + " + FORGE_INF + " inf";
+            } else if (level >= MAX_LEVEL) {
+                sub = "Max level  •  Return: " + (RETURN_BASE + RETURN_PER_LV * level) + " inf";
+            } else {
+                sub = "Upgrade: " + (level + 1) + " shard(s)  •  Return: "
+                        + (RETURN_BASE + RETURN_PER_LV * level) + " inf";
+            }
+            ctx.text(this.font, sub, left + 36, rowY + 18, 0xFF8070A0, false);
         }
 
         super.extractRenderState(ctx, mouseX, mouseY, delta);
@@ -126,14 +160,5 @@ public class CovenantForgeScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
-    }
-
-    private static String roleName(RoleType role) {
-        return switch (role) {
-            case EXPLORER   -> "Monocle";
-            case WARRIOR    -> "War Horn";
-            case CULTIVATOR -> "Farmer's Almanac";
-            case PROSPECTOR -> "Assay Kit";
-        };
     }
 }

@@ -1,6 +1,10 @@
 package net.cnn_r.alliesandfoes.map;
 
+import net.cnn_r.alliesandfoes.map.cache.AllianceAssessmentSyncCache;
+import net.cnn_r.alliesandfoes.map.cache.AllianceSurveySyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
+import net.cnn_r.alliesandfoes.map.cache.PatrolSyncCache;
+import net.cnn_r.alliesandfoes.map.cache.RallyMarkerCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
@@ -38,6 +42,10 @@ public class MapState {
     private static TerritoryChunkSyncCache territoryChunkSyncCache;
     private static TerritoryPreviewSyncCache territoryPreviewSyncCache;
     private static WarSyncCache warSyncCache;
+    private static AllianceSurveySyncCache allianceSurveySyncCache;
+    private static AllianceAssessmentSyncCache allianceAssessmentSyncCache;
+    private static RallyMarkerCache rallyMarkerCache;
+    private static PatrolSyncCache patrolSyncCache;
 
     /** Y level used as the ceiling cap for chunk scanning. Updated each client tick. */
     private static volatile int playerScanY = 64;
@@ -96,6 +104,26 @@ public class MapState {
     public static PlayerMarkerCache getPlayerMarkerCache() {
         if (playerMarkerCache == null) playerMarkerCache = new PlayerMarkerCache();
         return playerMarkerCache;
+    }
+
+    public static AllianceSurveySyncCache getAllianceSurveySyncCache() {
+        if (allianceSurveySyncCache == null) allianceSurveySyncCache = new AllianceSurveySyncCache();
+        return allianceSurveySyncCache;
+    }
+
+    public static AllianceAssessmentSyncCache getAllianceAssessmentSyncCache() {
+        if (allianceAssessmentSyncCache == null) allianceAssessmentSyncCache = new AllianceAssessmentSyncCache();
+        return allianceAssessmentSyncCache;
+    }
+
+    public static RallyMarkerCache getRallyMarkerCache() {
+        if (rallyMarkerCache == null) rallyMarkerCache = new RallyMarkerCache();
+        return rallyMarkerCache;
+    }
+
+    public static PatrolSyncCache getPatrolSyncCache() {
+        if (patrolSyncCache == null) patrolSyncCache = new PatrolSyncCache();
+        return patrolSyncCache;
     }
 
     public static ChunkScanner getScanner() {
@@ -440,6 +468,10 @@ public class MapState {
         if (territoryPreviewSyncCache != null) territoryPreviewSyncCache.clear();
         if (warSyncCache != null) warSyncCache.clear();
         warSyncCache = null;
+        if (allianceSurveySyncCache != null) allianceSurveySyncCache.clear();
+        if (allianceAssessmentSyncCache != null) allianceAssessmentSyncCache.clear();
+        if (rallyMarkerCache != null) rallyMarkerCache.clear();
+        if (patrolSyncCache != null) patrolSyncCache.clear();
         loadedChunks.clear();
         pendingBlockDirty.clear();
         mapDirty = false;

@@ -78,8 +78,8 @@ public final class HudIntuitionRenderer {
     }
 
     private static boolean hasMonocle(LocalPlayer player) {
-        return player.getMainHandItem().is(ModItems.MONOCLE)
-                || player.getOffhandItem().is(ModItems.MONOCLE)
+        return player.getMainHandItem().is(ModItems.CARTOGRAPHERS_JOURNAL)
+                || player.getOffhandItem().is(ModItems.CARTOGRAPHERS_JOURNAL)
                 || RoleSlotClientState.hasRoleItem(RoleType.EXPLORER);
     }
 

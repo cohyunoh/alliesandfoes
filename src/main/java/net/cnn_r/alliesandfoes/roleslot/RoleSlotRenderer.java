@@ -32,9 +32,9 @@ public class RoleSlotRenderer {
     /** Client-side check used by KeyBindings to determine if this stack is a role item. */
     public static boolean isRoleItem(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
-        return stack.is(ModItems.MONOCLE)
+        return stack.is(ModItems.CARTOGRAPHERS_JOURNAL)
                 || stack.is(ModItems.WAR_HORN)
                 || stack.is(ModItems.FARMERS_ALMANAC)
-                || stack.is(ModItems.ASSAY_KIT);
+                || stack.is(ModItems.DOWSING_ROD);
     }
 }

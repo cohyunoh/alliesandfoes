@@ -6,6 +6,8 @@ import net.cnn_r.alliesandfoes.structure.StructureChunkValueResolver;
 import net.cnn_r.alliesandfoes.territory.TerritoryPaymentService.PaymentResult;
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.alliance.survey.AllianceAssessmentService;
+import net.cnn_r.alliesandfoes.alliance.survey.AllianceSurveyService;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -91,6 +93,18 @@ public class TerritoryManager {
         AnchorTier resolvedTier = tier == null ? AnchorTier.getDefault() : tier;
         int foundingChunkValue = this.valueService.getOrCreateChunkValue(targetChunk);
         int foundingCost = this.costService.getFoundingCost(foundingChunkValue);
+
+        // Tiered intel surcharge — Explorer survey and Prospector assessment reduce founding cost
+        if (allianceId != null) {
+            boolean surveyed = AllianceSurveyService.get(this.server).isSurveyed(allianceId, targetChunk);
+            boolean assessed = AllianceAssessmentService.get(this.server).isAssessed(allianceId, targetChunk);
+            if (!surveyed) {
+                foundingCost = (int) Math.ceil(foundingCost * 1.5);   // unsurveyed: +50%
+            } else if (!assessed) {
+                foundingCost = (int) Math.ceil(foundingCost * 1.25);  // surveyed but unassessed: +25%
+            }
+            // assessed: no surcharge
+        }
 
         PaymentResult affordabilityResult = this.paymentService.canPayFoundingCost(
                 playerUuid,

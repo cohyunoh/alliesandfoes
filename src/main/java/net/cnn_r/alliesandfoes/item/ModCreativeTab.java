@@ -14,12 +14,12 @@ public class ModCreativeTab {
                 Identifier.fromNamespaceAndPath("alliesandfoes", "main"),
                 CreativeModeTab.builder(CreativeModeTab.Row.TOP, 0)
                         .title(Component.translatable("itemGroup.alliesandfoes.main"))
-                        .icon(() -> new ItemStack(ModItems.MONOCLE))
+                        .icon(() -> new ItemStack(ModItems.CARTOGRAPHERS_JOURNAL))
                         .displayItems((params, output) -> {
-                            output.accept(ModItems.MONOCLE);
+                            output.accept(ModItems.CARTOGRAPHERS_JOURNAL);
                             output.accept(ModItems.WAR_HORN);
                             output.accept(ModItems.FARMERS_ALMANAC);
-                            output.accept(ModItems.ASSAY_KIT);
+                            output.accept(ModItems.DOWSING_ROD);
                             output.accept(ModItems.COVENANT_SHARD);
                             output.accept(ModItems.TRIBUTE_ALTAR);
                             output.accept(ModItems.COVENANT_FORGE);
