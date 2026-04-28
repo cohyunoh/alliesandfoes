@@ -5,7 +5,9 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
+import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.players.NameAndId;
@@ -17,6 +19,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.List;
+import java.util.Optional; // used by wartest forceactive
 import java.util.UUID;
 
 public final class AllianceWarCommands {
@@ -31,6 +34,29 @@ public final class AllianceWarCommands {
             CommandBuildContext context,
             Commands.CommandSelection selection
     ) {
+        // /rolecurrency add <WARRIOR|EXPLORER|CULTIVATOR|PROSPECTOR> <amount>
+        dispatcher.register(
+                Commands.literal("rolecurrency")
+                        .requires(source -> source.getEntity() instanceof ServerPlayer)
+                        .then(Commands.literal("add")
+                                .then(Commands.argument("role", StringArgumentType.word())
+                                        .then(Commands.argument("amount", IntegerArgumentType.integer(1, 9999))
+                                                .executes(ctx -> addRoleCurrency(ctx.getSource(),
+                                                        StringArgumentType.getString(ctx, "role"),
+                                                        IntegerArgumentType.getInteger(ctx, "amount")))))));
+
+        // /wartest forceactive  — advance PREPARATION → ACTIVE immediately
+        // /wartest capturehold <ticks>  — set capture point hold requirement
+        dispatcher.register(
+                Commands.literal("wartest")
+                        .requires(source -> source.getEntity() instanceof ServerPlayer)
+                        .then(Commands.literal("forceactive")
+                                .executes(ctx -> forceActive(ctx.getSource())))
+                        .then(Commands.literal("capturehold")
+                                .then(Commands.argument("ticks", IntegerArgumentType.integer(1, 72000))
+                                        .executes(ctx -> setCaptureHold(ctx.getSource(),
+                                                IntegerArgumentType.getInteger(ctx, "ticks"))))));
+
         dispatcher.register(
                 Commands.literal("alliance")
                         .requires(source -> source.getEntity() instanceof ServerPlayer)
@@ -188,6 +214,61 @@ public final class AllianceWarCommands {
         AllianceWarService.get(server).setPrepTicks(ticks);
         source.sendSuccess(() -> Component.literal(
                 "War preparation time set to " + seconds + "s (" + ticks + " ticks)."), true);
+        return 1;
+    }
+
+    private static int addRoleCurrency(CommandSourceStack source, String roleName, int amount) {
+        ServerPlayer player = getPlayer(source);
+        if (player == null) return 0;
+        RoleType role;
+        try {
+            role = RoleType.valueOf(roleName.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            source.sendFailure(Component.literal("Unknown role: " + roleName
+                    + ". Use WARRIOR, EXPLORER, CULTIVATOR, or PROSPECTOR."));
+            return 0;
+        }
+        RoleSlotService slots = RoleSlotService.get(player.level().getServer());
+        if (!slots.isRoleActive(player.getUUID(), role)) {
+            source.sendFailure(Component.literal("You don't have the " + roleName + " role equipped."));
+            return 0;
+        }
+        slots.addRoleCurrency(player.getUUID(), role, amount);
+        slots.syncPlayer(player);
+        source.sendSuccess(() -> Component.literal("+" + amount + " " + roleName + " currency added."), false);
+        return 1;
+    }
+
+    private static int forceActive(CommandSourceStack source) {
+        ServerPlayer player = getPlayer(source);
+        if (player == null) return 0;
+        MinecraftServer server = player.level().getServer();
+        Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+        if (alliance == null) {
+            source.sendFailure(Component.literal("You are not in an alliance."));
+            return 0;
+        }
+        AllianceWarService warService = AllianceWarService.get(server);
+        Optional<AllianceWar> prep = warService.getWarsForAlliance(alliance.getId()).stream()
+                .filter(w -> w.status() == WarStatus.PREPARATION)
+                .findFirst();
+        if (prep.isEmpty()) {
+            source.sendFailure(Component.literal("No PREPARATION war found for your alliance."));
+            return 0;
+        }
+        AllianceWar war = prep.get();
+        // Override prep timer so tickWars() transitions it immediately on next tick
+        warService.setPrepTicks(0);
+        source.sendSuccess(() -> Component.literal(
+                "[DEBUG] Prep timer zeroed — war will go ACTIVE on next tick."), false);
+        return 1;
+    }
+
+    private static int setCaptureHold(CommandSourceStack source, int ticks) {
+        CapturePointService.get(source.getServer()).setHoldTicks(ticks);
+        source.sendSuccess(() -> Component.literal(
+                "[DEBUG] Capture hold time set to " + ticks + " ticks ("
+                        + (ticks / 20) + "s)."), false);
         return 1;
     }
 

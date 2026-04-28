@@ -119,6 +119,8 @@ public class AllianceWarService {
                     updateWar(war, active);
                     needsSave = true;
 
+                    CapturePointService.get(server).spawnPoints(active);
+
                     CustomBossEvent bar = getOrCreateBossBar(active);
                     bar.setColor(BossEvent.BossBarColor.RED);
                     bar.setOverlay(BossEvent.BossBarOverlay.NOTCHED_20);
@@ -136,10 +138,18 @@ public class AllianceWarService {
                 long remaining = activeTicks - elapsed;
 
                 if (remaining <= 0) {
-                    endWar(war);
+                    endWar(war, false);
                     needsSave = true;
-                } else if (currentTick % 20 == 0) {
-                    updateBossBar(war, remaining);
+                } else {
+                    // Check capture-point decisive win
+                    if (CapturePointService.get(server).tick(war)) {
+                        notifyBothAlliances(war,
+                                "[WAR] All capture points seized! Decisive attacker victory!", ChatFormatting.RED);
+                        endWar(war, true);
+                        needsSave = true;
+                    } else if (currentTick % 20 == 0) {
+                        updateBossBar(war, remaining);
+                    }
                 }
             }
         }
@@ -498,6 +508,13 @@ public class AllianceWarService {
         }
         if (ongoingWar == null) return "You have no active war with that alliance.";
 
+        if (ongoingWar.status() == WarStatus.ACTIVE) {
+            long elapsed = server.getTickCount() - ongoingWar.statusChangedAtTick();
+            if (elapsed < 6000) {
+                return "Peace cannot be proposed until 5 minutes into active war.";
+            }
+        }
+
         Alliance enemyAlliance = AllianceManager.get(server).getAllianceById(enemyAllianceId);
         String enemyName = enemyAlliance != null ? enemyAlliance.getName() : "Unknown";
         String proposalKey = ongoingWar.id() + ":" + actorAlliance.getId();
@@ -506,6 +523,7 @@ public class AllianceWarService {
         if (this.peaceProposals.contains(enemyProposalKey)) {
             this.peaceProposals.remove(enemyProposalKey);
             // Both agreed — end the war without transfers (voluntary peace)
+            CapturePointService.get(server).clear(ongoingWar.id());
             AllianceWar ended = ongoingWar.withStatus(WarStatus.ENDED, server.getTickCount());
             updateWar(ongoingWar, ended);
             removeBossBar(ongoingWar.id());
@@ -639,10 +657,11 @@ public class AllianceWarService {
     // Internal helpers
     // =========================================================================
 
-    private void endWar(AllianceWar war) {
+    private void endWar(AllianceWar war, boolean forceAttackerWin) {
+        CapturePointService.get(server).clear(war.id());
         int attackerKills = war.getKills(war.attackerId());
         int defenderKills = war.getKills(war.defenderId());
-        boolean attackerWins = attackerKills > defenderKills;
+        boolean attackerWins = forceAttackerWin || attackerKills > defenderKills;
 
         Alliance attackerAlliance = AllianceManager.get(server).getAllianceById(war.attackerId());
         Alliance defenderAlliance = AllianceManager.get(server).getAllianceById(war.defenderId());
@@ -667,9 +686,13 @@ public class AllianceWarService {
                     ServerPlayNetworking.send(p, payload);
                 }
             }
-            notifyBothAlliances(war,
-                    "[WAR] " + aName + " wins! " + affected.size() + " contested chunk(s) transferred to " + aName + ".",
-                    ChatFormatting.RED);
+            Component attackerWinMsg = Component.literal(
+                    "[War] " + aName + " has defeated " + dName + " in open conflict! "
+                            + affected.size() + " contested chunk(s) transferred.")
+                    .withStyle(ChatFormatting.RED);
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                p.sendSystemMessage(attackerWinMsg);
+            }
         } else {
             // Defender wins: influence payout + emerald loot
             AllianceProgressionService.get(server).add(war.defenderId(), DEFENDER_WIN_BONUS);
@@ -685,10 +708,13 @@ public class AllianceWarService {
                     }
                 }
             }
-            notifyBothAlliances(war,
-                    "[WAR] " + dName + " successfully defended! Defenders rewarded with +"
-                            + DEFENDER_WIN_BONUS + " influence and emeralds.",
-                    ChatFormatting.GREEN);
+            Component defenderWinMsg = Component.literal(
+                    "[War] " + dName + " successfully defended against " + aName + "! +"
+                            + DEFENDER_WIN_BONUS + " influence and emerald rewards.")
+                    .withStyle(ChatFormatting.GREEN);
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                p.sendSystemMessage(defenderWinMsg);
+            }
         }
 
         AllianceWar ended = war.withStatus(WarStatus.ENDED, server.getTickCount());

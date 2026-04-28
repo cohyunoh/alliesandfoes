@@ -124,6 +124,10 @@ public class ProspectorSkillService {
         lastAssessChunk.remove(uuid);
     }
 
+    public static boolean isOre(BlockState state) {
+        return oreTier(state) > 0;
+    }
+
     private static int oreTier(BlockState state) {
         Identifier id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
         if (id == null) return 0;

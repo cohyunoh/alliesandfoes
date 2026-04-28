@@ -453,6 +453,10 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(CapturePointSyncPayload.TYPE, (payload, context) -> {
+            // Capture point state received — client rendering not yet implemented
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(MapScreenMessagePayload.TYPE, (payload, context) ->
             context.client().execute(() -> MapState.setPendingMapMessage(payload.message())));
 

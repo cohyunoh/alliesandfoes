@@ -25,7 +25,8 @@ public class WarriorSkillService {
     private static final int BASELINE_KILLS_PER_INFLUENCE = 25;
 
     /** Session-only kill counts (baseline path — resets on restart). */
-    private final Map<UUID, Integer> baselineKills = new HashMap<>();
+    private final Map<UUID, Integer> baselineKills  = new HashMap<>();
+    private final Map<UUID, Long>    lastWarCryTick = new HashMap<>();
 
     private final MinecraftServer server;
 
@@ -61,7 +62,16 @@ public class WarriorSkillService {
         }
     }
 
+    public long getLastWarCryTick(UUID uuid) {
+        return lastWarCryTick.getOrDefault(uuid, -10000L);
+    }
+
+    public void setLastWarCryTick(UUID uuid, long tick) {
+        lastWarCryTick.put(uuid, tick);
+    }
+
     public void onPlayerDisconnect(UUID uuid) {
         baselineKills.remove(uuid);
+        lastWarCryTick.remove(uuid);
     }
 }

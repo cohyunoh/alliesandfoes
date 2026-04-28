@@ -2,6 +2,7 @@ package net.cnn_r.alliesandfoes.item;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.alliance.war.AllianceWar;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
 import net.cnn_r.alliesandfoes.network.MapScreenMessagePayload;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
@@ -10,6 +11,7 @@ import net.cnn_r.alliesandfoes.territory.TerritoryClaim;
 import net.cnn_r.alliesandfoes.territory.TerritoryManager;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.cnn_r.alliesandfoes.warrior.RallyService;
+import net.cnn_r.alliesandfoes.warrior.WarriorSkillService;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -20,6 +22,8 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -27,11 +31,16 @@ import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public class WarHornItem extends Item {
 
-    private static final int COOLDOWN_TICKS = 100; // 5 seconds
+    private static final int COOLDOWN_TICKS    = 100;  // 5 seconds (rally / declaration)
+    private static final int WAR_CRY_COOLDOWN  = 1200; // 60 seconds
+    private static final int WAR_CRY_COST      = 20;
+    private static final int WAR_CRY_RADIUS    = 48;
+    private static final int WAR_CRY_DURATION  = 600;  // 30 seconds
     private static final int BORDER_SCAN_RADIUS = 3;
 
     public WarHornItem(Properties properties) {
@@ -67,6 +76,14 @@ public class WarHornItem extends Item {
             return;
         }
 
+        // During an active war: War Cry instead of rally/declaration
+        Optional<AllianceWar> activeWar =
+                AllianceWarService.get(server).getActiveWarInvolving(alliance.getId());
+        if (activeWar.isPresent()) {
+            triggerWarCry(level, player, alliance, activeWar.get(), roles, stack);
+            return;
+        }
+
         player.getCooldowns().addCooldown(stack, COOLDOWN_TICKS);
 
         UUID enemyAllianceId = findNearbyEnemyAlliance(level, player, alliance.getId());
@@ -74,6 +91,48 @@ public class WarHornItem extends Item {
             triggerDeclaration(level, player, alliance, enemyAllianceId);
         } else {
             triggerRally(level, player, alliance, roles);
+        }
+    }
+
+    private void triggerWarCry(ServerLevel level, ServerPlayer player, Alliance alliance,
+                                AllianceWar war, RoleSlotService roles, ItemStack stack) {
+        MinecraftServer server = level.getServer();
+        WarriorSkillService warriorService = WarriorSkillService.get(server);
+
+        long now = server.overworld().getGameTime();
+        if (now - warriorService.getLastWarCryTick(player.getUUID()) < WAR_CRY_COOLDOWN) {
+            player.sendSystemMessage(Component.literal("War Cry is still on cooldown."), true);
+            return;
+        }
+
+        int currency = roles.getRoleCurrency(player.getUUID(), RoleType.WARRIOR);
+        if (currency < WAR_CRY_COST) {
+            player.sendSystemMessage(Component.literal(
+                    "War Cry requires " + WAR_CRY_COST + " Warrior currency. You have " + currency + "."), true);
+            return;
+        }
+
+        roles.consumeRoleCurrency(player.getUUID(), RoleType.WARRIOR, WAR_CRY_COST);
+        roles.syncPlayer(player);
+        warriorService.setLastWarCryTick(player.getUUID(), now);
+        player.getCooldowns().addCooldown(stack, WAR_CRY_COOLDOWN);
+
+        // Apply Speed II + Strength I to nearby alliance members
+        for (UUID memberId : alliance.getMemberUuids()) {
+            ServerPlayer ally = server.getPlayerList().getPlayer(memberId);
+            if (ally != null && ally.distanceTo(player) <= WAR_CRY_RADIUS) {
+                ally.addEffect(new MobEffectInstance(MobEffects.SPEED,    WAR_CRY_DURATION, 1));
+                ally.addEffect(new MobEffectInstance(MobEffects.STRENGTH, WAR_CRY_DURATION, 0));
+            }
+        }
+
+        level.playSound(null, player.getX(), player.getY(), player.getZ(),
+                SoundEvents.RAID_HORN.value(), SoundSource.PLAYERS, 3.0f, 1.2f);
+
+        String msg = "§c⚔ " + player.getName().getString() + " unleashes a War Cry!";
+        for (UUID memberId : alliance.getMemberUuids()) {
+            ServerPlayer member = server.getPlayerList().getPlayer(memberId);
+            if (member != null) ServerPlayNetworking.send(member, new MapScreenMessagePayload(msg));
         }
     }
 

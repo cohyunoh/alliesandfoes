@@ -140,6 +140,7 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(DeclareWarRequestPayload.TYPE, DeclareWarRequestPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(WarStateSyncPayload.TYPE, WarStateSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(WarInvitePayload.TYPE, WarInvitePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(CapturePointSyncPayload.TYPE, CapturePointSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RespondWarInvitePayload.TYPE, RespondWarInvitePayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(MapScreenMessagePayload.TYPE, MapScreenMessagePayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(AllianceInfluenceSyncPayload.TYPE, AllianceInfluenceSyncPayload.STREAM_CODEC);
@@ -635,6 +636,8 @@ public class Alliesandfoes implements ModInitializer {
 			ExplorerSkillService explorerSkillService = ExplorerSkillService.get(server);
 			ProspectorSkillService prospectorSkillService = ProspectorSkillService.get(server);
 			CultivatorSkillService cultivatorSkillService = CultivatorSkillService.get(server);
+			AllianceWarService warService = AllianceWarService.get(server);
+			RoleSlotService roleSlots = RoleSlotService.get(server);
 			List<PlayerPositionsPayload.Entry> entries = new ArrayList<>();
 
 			for (ServerPlayer player : players) {
@@ -649,10 +652,32 @@ public class Alliesandfoes implements ModInitializer {
 						player.getYRot()
 				));
 			}
-			PlayerPositionsPayload payload = new PlayerPositionsPayload(entries);
 
+			// Send per-receiver payload — during war, hide enemy positions unless receiver has Explorer
 			for (ServerPlayer receiver : players) {
-				ServerPlayNetworking.send(receiver, payload);
+				net.cnn_r.alliesandfoes.alliance.Alliance receiverAlliance =
+						AllianceManager.get(server).getAllianceFor(receiver.getUUID());
+				List<PlayerPositionsPayload.Entry> filtered = new ArrayList<>(entries.size());
+				for (PlayerPositionsPayload.Entry entry : entries) {
+					if (receiverAlliance == null || entry.uuid().equals(receiver.getUUID())) {
+						filtered.add(entry);
+						continue;
+					}
+					net.cnn_r.alliesandfoes.alliance.Alliance trackedAlliance =
+							AllianceManager.get(server).getAllianceFor(entry.uuid());
+					if (trackedAlliance == null || trackedAlliance.getId().equals(receiverAlliance.getId())) {
+						filtered.add(entry);
+						continue;
+					}
+					// Different alliance — hide if at war and receiver lacks an Explorer
+					if (warService.getActiveWarBetween(receiverAlliance.getId(), trackedAlliance.getId()).isPresent()) {
+						boolean hasExplorer = receiverAlliance.getMemberUuids().stream()
+								.anyMatch(id -> roleSlots.isRoleActive(id, RoleType.EXPLORER));
+						if (!hasExplorer) continue;
+					}
+					filtered.add(entry);
+				}
+				ServerPlayNetworking.send(receiver, new PlayerPositionsPayload(filtered));
 			}
 
 			// Territory border action bar notifications — fires only when territory owner changes
@@ -832,6 +857,24 @@ public class Alliesandfoes implements ModInitializer {
 			if (!(player instanceof ServerPlayer sp)) return;
 			MinecraftServer srv = ((ServerLevel) level).getServer();
 			ProspectorSkillService.get(srv).onBlockBreak(sp, state);
+
+			// Prospector: +5 influence for ore breaks in contested war chunks
+			if (ProspectorSkillService.isOre(state)
+					&& RoleSlotService.get(srv).isRoleActive(sp.getUUID(), RoleType.PROSPECTOR)) {
+				net.cnn_r.alliesandfoes.alliance.Alliance alliance =
+						AllianceManager.get(srv).getAllianceFor(sp.getUUID());
+				if (alliance != null) {
+					String dimId = ((ServerLevel) level).dimension().identifier().toString();
+					ChunkKey chunk = new ChunkKey(dimId, pos.getX() >> 4, pos.getZ() >> 4);
+					AllianceWarService.get(srv).getActiveWarInvolving(alliance.getId()).ifPresent(war -> {
+						if (war.contestedChunks().contains(chunk)) {
+							AllianceProgressionService.get(srv).add(alliance.getId(), 5);
+							sp.sendSystemMessage(
+									Component.literal("+5 influence (contested ore)"), true);
+						}
+					});
+				}
+			}
 		});
 
 		// Kill → Warrior service
