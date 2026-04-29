@@ -5,9 +5,12 @@ import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteManagementScreen;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryClientState;
 import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryRules;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillClientState;
+import net.cnn_r.alliesandfoes.roleslot.RoleCurrencyClientState;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotClientState;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotRenderer;
+import net.cnn_r.alliesandfoes.hud.CultivatorTrackingHudRenderer;
 import net.cnn_r.alliesandfoes.hud.HudIntuitionRenderer;
+import net.cnn_r.alliesandfoes.territory.TerritoryFlagScreen;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
@@ -351,6 +354,9 @@ public class AlliesandfoesClient implements ClientModInitializer {
         HudElementRegistry.addLast(net.minecraft.resources.Identifier.parse("alliesandfoes:minimap"),
                 (drawContext, tickCounter) -> HudIntuitionRenderer.render(drawContext, tickCounter));
 
+        HudElementRegistry.addLast(net.minecraft.resources.Identifier.parse("alliesandfoes:cultivator_tracker"),
+                (drawContext, tickCounter) -> CultivatorTrackingHudRenderer.render(drawContext, tickCounter));
+
         // Update the Y level and render mode used for chunk scanning each tick.
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             LocalPlayer player = client.player;
@@ -453,12 +459,38 @@ public class AlliesandfoesClient implements ClientModInitializer {
             });
         });
 
-        ClientPlayNetworking.registerGlobalReceiver(CapturePointSyncPayload.TYPE, (payload, context) -> {
-            // Capture point state received — client rendering not yet implemented
-        });
+        ClientPlayNetworking.registerGlobalReceiver(CapturePointSyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() ->
+                net.cnn_r.alliesandfoes.alliance.war.CapturePointClientState.update(payload.warId(), payload.points())));
+
+        ClientPlayNetworking.registerGlobalReceiver(RoleCurrencySyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> RoleCurrencyClientState.set(payload.balances())));
+
+        ClientPlayNetworking.registerGlobalReceiver(net.cnn_r.alliesandfoes.network.FlagScreenDataPayload.TYPE,
+                (payload, context) -> context.client().execute(() -> {
+                    if (context.client().screen instanceof TerritoryFlagScreen existing) {
+                        existing.refreshData(payload);
+                    } else {
+                        context.client().setScreen(new TerritoryFlagScreen(payload));
+                    }
+                }));
+
+        ClientPlayNetworking.registerGlobalReceiver(net.cnn_r.alliesandfoes.network.CultivatorTrackingPayload.TYPE,
+                (payload, context) -> context.client().execute(() ->
+                        CultivatorTrackingHudRenderer.update(
+                                payload.active(), payload.targetName(),
+                                payload.yawDeg(), payload.distanceBlocks())));
 
         ClientPlayNetworking.registerGlobalReceiver(MapScreenMessagePayload.TYPE, (payload, context) ->
-            context.client().execute(() -> MapState.setPendingMapMessage(payload.message())));
+            context.client().execute(() -> {
+                MapState.setPendingMapMessage(payload.message());
+                SystemToast.add(
+                    context.client().getToastManager(),
+                    SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                    Component.literal("Alliance"),
+                    Component.literal(payload.message())
+                );
+            }));
 
         ClientPlayNetworking.registerGlobalReceiver(AllianceInfluenceSyncPayload.TYPE, (payload, context) ->
             context.client().execute(() -> MapState.setAllianceInfluenceBalance(payload.balance())));
@@ -542,8 +574,11 @@ public class AlliesandfoesClient implements ClientModInitializer {
             ExplorerSkillClientState.reset();
             ExplorerDiscoveryClientState.reset();
             RoleSlotClientState.reset();
+            RoleCurrencyClientState.reset();
             RoleSlotRenderer.reset();
             HudIntuitionRenderer.reset();
+            CultivatorTrackingHudRenderer.reset();
+            net.cnn_r.alliesandfoes.alliance.war.CapturePointClientState.clear();
             lastNetherPlayerY = Integer.MIN_VALUE;
         });
 
@@ -558,8 +593,11 @@ public class AlliesandfoesClient implements ClientModInitializer {
             ExplorerSkillClientState.reset();
             ExplorerDiscoveryClientState.reset();
             RoleSlotClientState.reset();
+            RoleCurrencyClientState.reset();
             RoleSlotRenderer.reset();
             HudIntuitionRenderer.reset();
+            CultivatorTrackingHudRenderer.reset();
+            net.cnn_r.alliesandfoes.alliance.war.CapturePointClientState.clear();
         });
 
         // Pre-load the disk cache as soon as the player enters the world so that

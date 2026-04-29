@@ -2,6 +2,7 @@ package net.cnn_r.alliesandfoes.alliance.progression;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.feedback.FeedbackService;
 import net.cnn_r.alliesandfoes.network.AllianceInfluenceSyncPayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
@@ -89,9 +90,11 @@ public class AllianceProgressionService {
         }
 
         int current = this.getBalance(allianceId);
-        this.balances.put(allianceId, current + amount);
+        int updated = current + amount;
+        this.balances.put(allianceId, updated);
         this.save();
         this.broadcastBalanceToAlliance(allianceId);
+        FeedbackService.checkInfluenceMilestone(this.server, allianceId, current, updated);
     }
 
     /**

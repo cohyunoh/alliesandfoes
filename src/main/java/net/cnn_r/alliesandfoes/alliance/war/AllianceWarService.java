@@ -5,6 +5,7 @@ import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
+import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.cnn_r.alliesandfoes.territory.TerritoryClaim;
 import net.cnn_r.alliesandfoes.territory.TerritoryManager;
@@ -66,6 +67,7 @@ public class AllianceWarService {
     private final MinecraftServer server;
     private final List<AllianceWar> wars = new ArrayList<>();
     private final Set<String> peaceProposals = new HashSet<>();
+    private final Map<UUID, UUID> activeBounties = new HashMap<>(); // targetUuid → placingAllianceId
 
     // Overridable timers (in ticks); default to the constants above
     private int prepTicks   = PREPARATION_TICKS;
@@ -333,10 +335,11 @@ public class AllianceWarService {
         if (actorAlliance == null) return "You must be in an alliance to declare war.";
         if (!actorAlliance.getOwnerUuid().equals(actor.getUUID())) return "Only the Founder can declare war.";
 
-        RoleSlotService roleSlots = RoleSlotService.get(server);
         boolean hasWarrior = actorAlliance.getMemberUuids().stream()
-                .anyMatch(id -> roleSlots.isRoleActive(id, RoleType.WARRIOR));
-        if (!hasWarrior) return "Your alliance needs an active Warrior to formally declare war.";
+                .map(id -> server.getPlayerList().getPlayer(id))
+                .filter(p -> p != null)
+                .anyMatch(p -> RoleSlotService.hasRoleInHand(p, RoleType.WARRIOR));
+        if (!hasWarrior) return "Your alliance needs a Warrior (holding War Horn) online to declare war.";
 
         UUID actorAllianceId = actorAlliance.getId();
         if (actorAllianceId.equals(targetAllianceId)) return "You cannot declare war on your own alliance.";
@@ -550,6 +553,22 @@ public class AllianceWarService {
     }
 
     // =========================================================================
+    // Bounty board
+    // =========================================================================
+
+    public String placeBounty(ServerPlayer actor, UUID targetUuid) {
+        Alliance actorAlliance = AllianceManager.get(server).getAllianceFor(actor.getUUID());
+        if (actorAlliance == null) return "You must be in an alliance.";
+        if (!actorAlliance.getOwnerUuid().equals(actor.getUUID())) return "Only the Founder can place bounties.";
+        AllianceProgressionService prog = AllianceProgressionService.get(server);
+        if (!prog.canAfford(actorAlliance.getId(), 50))
+            return "Bounties cost 50 influence. You have " + prog.getBalance(actorAlliance.getId()) + ".";
+        prog.trySpend(actorAlliance.getId(), 50);
+        activeBounties.put(targetUuid, actorAlliance.getId());
+        return null;
+    }
+
+    // =========================================================================
     // Kill tracking and inventory management
     // =========================================================================
 
@@ -572,10 +591,11 @@ public class AllianceWarService {
         addStat(warId, killer.getUUID(), 0, 1); // kill
         addStat(warId, victim.getUUID(), 1, 1); // death
 
-        // Check home-turf bonus (kill inside defender's claimed territory)
-        ChunkKey victimChunk = ChunkKey.of((net.minecraft.server.level.ServerLevel) victim.level(), victim.chunkPosition());
-        TerritoryClaim victimClaim = TerritoryManager.get(server).getClaimAt(victimChunk);
-        boolean homeTurf = victimClaim != null && victimClaim.getAllianceId().equals(war.defenderId());
+        // Check home-turf bonus: defender gets bonus for kills inside their own territory
+        ChunkKey killerChunk = ChunkKey.of((net.minecraft.server.level.ServerLevel) killer.level(), killer.chunkPosition());
+        TerritoryClaim killerClaim = TerritoryManager.get(server).getClaimAt(killerChunk);
+        boolean homeTurf = killerClaim != null && killerClaim.getAllianceId().equals(killerAlliance.getId())
+                && killerAlliance.getId().equals(war.defenderId());
         int reward = homeTurf ? KILL_INFLUENCE_HOME_TURF : KILL_INFLUENCE_BASE;
         AllianceProgressionService.get(server).add(killerAlliance.getId(), reward);
 
@@ -589,6 +609,17 @@ public class AllianceWarService {
         level.addFreshEntity(new ItemEntity(level,
                 victim.getX(), victim.getY(), victim.getZ(),
                 new ItemStack(Items.GOLD_INGOT, goldCount)));
+
+        // Bounty: if the victim had a bounty placed by the killer's alliance, reward a Covenant Shard
+        UUID bountiedBy = activeBounties.get(victim.getUUID());
+        if (bountiedBy != null && bountiedBy.equals(killerAlliance.getId())) {
+            activeBounties.remove(victim.getUUID());
+            ItemStack shard = new ItemStack(ModItems.COVENANT_SHARD, 1);
+            if (!killer.getInventory().add(shard)) {
+                killer.drop(shard, false);
+            }
+            killer.sendSystemMessage(Component.literal("§6Bounty claimed! +1 Covenant Shard."), true);
+        }
 
         save();
 

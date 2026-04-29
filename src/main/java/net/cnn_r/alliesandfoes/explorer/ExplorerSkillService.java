@@ -5,6 +5,7 @@ import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.alliance.survey.AllianceSurveyService;
 import net.cnn_r.alliesandfoes.item.ModItems;
+import net.cnn_r.alliesandfoes.roleslot.RoleCurrencyService;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
@@ -12,6 +13,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.HashMap;
@@ -45,10 +48,18 @@ public class ExplorerSkillService {
     }
 
     public void onPlayerTick(ServerPlayer player) {
+        UUID uuid = player.getUUID();
+
+        // Night Vision while holding Journal (refreshed every 20 ticks)
+        if (server.getTickCount() % 20 == 0
+                && RoleSlotService.hasRoleInHand(player, RoleType.EXPLORER)
+                && player.getMainHandItem().is(ModItems.CARTOGRAPHERS_JOURNAL)) {
+            player.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, 40, 0, false, false));
+        }
+
         // Journal survey runs every tick; chunk-change check is internal
         checkJournalSurvey(player);
 
-        UUID uuid = player.getUUID();
         int cd = itemCheckCooldown.getOrDefault(uuid, 0);
         if (cd > 0) {
             itemCheckCooldown.put(uuid, cd - 1);
@@ -89,13 +100,13 @@ public class ExplorerSkillService {
 
         save();
 
-        RoleSlotService roleSlotService = RoleSlotService.get(server);
-        if (roleSlotService.isRoleActive(uuid, RoleType.EXPLORER)) {
-            int level  = roleSlotService.getRoleItemLevel(uuid, RoleType.EXPLORER);
-            int earned = SURVEY_PER_REGION + level;
-            roleSlotService.addRoleCurrency(uuid, RoleType.EXPLORER, earned);
-            roleSlotService.syncPlayer(player);
-        } else {
+        RoleCurrencyService currencyService = RoleCurrencyService.get(server);
+        boolean hasJournal = RoleSlotService.hasRoleInHand(player, RoleType.EXPLORER);
+        int earned = hasJournal ? SURVEY_PER_REGION + RoleSlotService.get(server).getRoleItemLevel(uuid, RoleType.EXPLORER) : 1;
+        currencyService.add(uuid, RoleType.EXPLORER, earned);
+        currencyService.sync(player);
+
+        if (hasJournal) {
             Alliance alliance = AllianceManager.get(server).getAllianceFor(uuid);
             if (alliance != null) {
                 AllianceProgressionService.get(server).add(alliance.getId(), 1);
@@ -134,9 +145,9 @@ public class ExplorerSkillService {
         }
 
         int newCount = AllianceSurveyService.get(server).markSurveyed(alliance.getId(), toSurvey);
-        if (newCount > 0 && RoleSlotService.get(server).isRoleActive(uuid, RoleType.EXPLORER)) {
-            RoleSlotService.get(server).addRoleCurrency(uuid, RoleType.EXPLORER, newCount);
-            RoleSlotService.get(server).syncPlayer(player);
+        if (newCount > 0 && RoleSlotService.hasRoleInHand(player, RoleType.EXPLORER)) {
+            RoleCurrencyService.get(server).add(uuid, RoleType.EXPLORER, newCount);
+            RoleCurrencyService.get(server).sync(player);
         }
     }
 

@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
+import net.cnn_r.alliesandfoes.alliance.AllianceAuraService;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.alliance.survey.AllianceAssessmentService;
 import net.cnn_r.alliesandfoes.alliance.survey.AllianceSurveyService;
@@ -21,6 +22,7 @@ import net.cnn_r.alliesandfoes.explorer.ExplorerDiscoveryService;
 import net.cnn_r.alliesandfoes.explorer.ExplorerSkillService;
 import net.cnn_r.alliesandfoes.covenantforge.CovenantForgeService;
 import net.cnn_r.alliesandfoes.cultivator.CultivatorSkillService;
+import net.cnn_r.alliesandfoes.cultivator.CultivatorTrackingService;
 import net.cnn_r.alliesandfoes.cultivator.PatrolDataService;
 import net.cnn_r.alliesandfoes.item.ModBlocks;
 import net.cnn_r.alliesandfoes.item.ModCreativeTab;
@@ -33,6 +35,7 @@ import net.cnn_r.alliesandfoes.network.CovenantForgeUpgradePayload;
 import net.cnn_r.alliesandfoes.network.RoleSlotSetPayload;
 import net.cnn_r.alliesandfoes.network.RoleSlotSyncPayload;
 import net.cnn_r.alliesandfoes.network.TributeConvertPayload;
+import net.cnn_r.alliesandfoes.roleslot.RoleCurrencyService;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotSavedData;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
 import net.cnn_r.alliesandfoes.tributealtar.TributeAltarService;
@@ -84,6 +87,7 @@ import net.minecraft.world.entity.TamableAnimal;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -94,6 +98,8 @@ public class Alliesandfoes implements ModInitializer {
 	private static final Map<UUID, String> playerLastChunkKey = new HashMap<>();
 	// Tracks last territory owner per player — message only fires on owner change
 	private static final Map<UUID, String> playerLastTerritoryKey = new HashMap<>();
+	// Solo player tip: shown once per session when a non-alliance player enters claimed territory
+	private static final java.util.Set<UUID> hasSeenAllianceTip = new HashSet<>();
 
 	@Override
 	public void onInitialize() {
@@ -159,6 +165,28 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(CovenantForgeClaimPayload.TYPE, CovenantForgeClaimPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(CovenantForgeReturnPayload.TYPE, CovenantForgeReturnPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(PatrolSyncPayload.TYPE, PatrolSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(FlagScreenDataPayload.TYPE, FlagScreenDataPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(UpgradeFlagPayload.TYPE, UpgradeFlagPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(CultivatorTrackingPayload.TYPE, CultivatorTrackingPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RenameTerritoryPayload.TYPE, RenameTerritoryPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(SetBeaconPayload.TYPE, SetBeaconPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(ClearBeaconPayload.TYPE, ClearBeaconPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(RoleCurrencySyncPayload.TYPE, RoleCurrencySyncPayload.STREAM_CODEC);
+
+		ServerPlayNetworking.registerGlobalReceiver(RenameTerritoryPayload.TYPE, (payload, context) ->
+			context.server().execute(() -> handleRenameTerritory(context.server(), context.player(), payload)));
+
+		ServerPlayNetworking.registerGlobalReceiver(SetBeaconPayload.TYPE, (payload, context) ->
+			context.server().execute(() -> handleSetBeacon(context.server(), context.player(), payload)));
+
+		ServerPlayNetworking.registerGlobalReceiver(ClearBeaconPayload.TYPE, (payload, context) ->
+			context.server().execute(() -> handleClearBeacon(context.server(), context.player(), payload)));
+
+		ServerPlayNetworking.registerGlobalReceiver(UpgradeFlagPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				handleFlagUpgrade(context.server(), context.player(), payload);
+			});
+		});
 
 		ServerPlayNetworking.registerGlobalReceiver(RoleSlotSetPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -632,6 +660,9 @@ public class Alliesandfoes implements ModInitializer {
 
 			// Tick war timers and transitions
 			AllianceWarService.get(server).tickWars();
+			AllianceAuraService.get(server).tick(server);
+			BeaconService.get(server).tick(players, server);
+			CultivatorTrackingService.get(server).tick();
 
 			ExplorerSkillService explorerSkillService = ExplorerSkillService.get(server);
 			ProspectorSkillService prospectorSkillService = ProspectorSkillService.get(server);
@@ -671,13 +702,31 @@ public class Alliesandfoes implements ModInitializer {
 					}
 					// Different alliance — hide if at war and receiver lacks an Explorer
 					if (warService.getActiveWarBetween(receiverAlliance.getId(), trackedAlliance.getId()).isPresent()) {
-						boolean hasExplorer = receiverAlliance.getMemberUuids().stream()
-								.anyMatch(id -> roleSlots.isRoleActive(id, RoleType.EXPLORER));
+						boolean hasExplorer = server.getPlayerList().getPlayers().stream()
+								.filter(p -> receiverAlliance.getMemberUuids().contains(p.getUUID()))
+								.anyMatch(p -> RoleSlotService.hasRoleInHand(p, RoleType.EXPLORER));
 						if (!hasExplorer) continue;
 					}
 					filtered.add(entry);
 				}
 				ServerPlayNetworking.send(receiver, new PlayerPositionsPayload(filtered));
+			}
+
+			// Territory Passive Regen: alliance members in own territory get Regen I every 5s
+			if (server.getTickCount() % 100 == 0) {
+				for (ServerPlayer player : players) {
+					net.cnn_r.alliesandfoes.alliance.Alliance regenAlliance =
+							AllianceManager.get(server).getAllianceFor(player.getUUID());
+					if (regenAlliance == null) continue;
+					String regenDim = ((ServerLevel) player.level()).dimension().identifier().toString();
+					ChunkKey regenChunk = new ChunkKey(regenDim,
+							player.blockPosition().getX() >> 4, player.blockPosition().getZ() >> 4);
+					TerritoryClaim regenClaim = TerritoryManager.get(server).getClaimAt(regenChunk);
+					if (regenClaim != null && regenClaim.getAllianceId().equals(regenAlliance.getId())) {
+						player.addEffect(new net.minecraft.world.effect.MobEffectInstance(
+								net.minecraft.world.effect.MobEffects.REGENERATION, 200, 0, false, false));
+					}
+				}
 			}
 
 			// Territory border action bar notifications — fires only when territory owner changes
@@ -791,6 +840,7 @@ public class Alliesandfoes implements ModInitializer {
 			roleService.syncPlayer(player);
 			AllianceSurveyService.get(server).syncPlayerOnJoin(player);
 			AllianceAssessmentService.get(server).syncPlayerOnJoin(player);
+			RoleCurrencyService.get(server).sync(player);
 			RallyService.get(server).syncPlayerOnJoin(player);
 			PatrolDataService.get(server).syncPlayerOnJoin(player);
 
@@ -860,7 +910,7 @@ public class Alliesandfoes implements ModInitializer {
 
 			// Prospector: +5 influence for ore breaks in contested war chunks
 			if (ProspectorSkillService.isOre(state)
-					&& RoleSlotService.get(srv).isRoleActive(sp.getUUID(), RoleType.PROSPECTOR)) {
+					&& RoleSlotService.hasRoleInHand(sp, RoleType.PROSPECTOR)) {
 				net.cnn_r.alliesandfoes.alliance.Alliance alliance =
 						AllianceManager.get(srv).getAllianceFor(sp.getUUID());
 				if (alliance != null) {
@@ -893,6 +943,7 @@ public class Alliesandfoes implements ModInitializer {
 			UUID uuid = handler.player.getUUID();
 			playerLastChunkKey.remove(uuid);
 			playerLastTerritoryKey.remove(uuid);
+			hasSeenAllianceTip.remove(uuid);
 			ExplorerSkillService.get(server).onPlayerDisconnect(uuid);
 			RoleSlotService.get(server).onPlayerDisconnect(uuid);
 			WarriorSkillService.get(server).onPlayerDisconnect(uuid);
@@ -908,6 +959,18 @@ public class Alliesandfoes implements ModInitializer {
 		if (claim == null) {
 			player.sendSystemMessage(
 					Component.literal("Unclaimed Territory").withStyle(ChatFormatting.GRAY), true);
+			return;
+		}
+
+		// Solo player tip — shown once per session when entering any claimed territory
+		Alliance playerAllianceCheck = AllianceManager.get(server).getAllianceFor(player.getUUID());
+		if (playerAllianceCheck == null && !hasSeenAllianceTip.contains(player.getUUID())) {
+			hasSeenAllianceTip.add(player.getUUID());
+			Alliance claimAlliance = AllianceManager.get(server).getAllianceById(claim.getAllianceId());
+			String claimAllianceName = claimAlliance != null ? claimAlliance.getName() : "an alliance";
+			player.sendSystemMessage(Component.literal(
+					"§e[Tip] This territory is claimed by " + claimAllianceName
+							+ ". Join an alliance to claim your own land."), true);
 			return;
 		}
 
@@ -1046,5 +1109,140 @@ public class Alliesandfoes implements ModInitializer {
 		if (isOwnTerritory(server, playerUuid, claim)) return true;
 		Alliance a = AllianceManager.get(server).getAllianceFor(playerUuid);
 		return a != null && AllianceWarService.get(server).areAtWar(claim.getAllianceId(), a.getId());
+	}
+
+	private static void handleFlagUpgrade(MinecraftServer server, ServerPlayer player, UpgradeFlagPayload payload) {
+		TerritoryManager tm = TerritoryManager.get(server);
+		TerritoryAnchor anchor = tm.getAnchorById(payload.anchorId());
+		if (anchor == null) { player.sendSystemMessage(Component.literal("Anchor not found.")); return; }
+
+		Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+		if (alliance == null || !alliance.getId().equals(anchor.getAllianceId())) {
+			player.sendSystemMessage(Component.literal("You don't own this territory.")); return;
+		}
+
+		AnchorTier currentTier = anchor.getTier();
+		AnchorTier nextTier = currentTier.next();
+		if (nextTier == null) { player.sendSystemMessage(Component.literal("This flag is already at maximum tier.")); return; }
+
+		int influenceCost = switch (nextTier) {
+			case STANDARD -> 150; case ADVANCED -> 300; case ELITE -> 600; default -> 0;
+		};
+		net.minecraft.world.item.Item materialItem = switch (nextTier) {
+			case STANDARD -> net.minecraft.world.item.Items.IRON_INGOT;
+			case ADVANCED -> net.minecraft.world.item.Items.GOLD_INGOT;
+			case ELITE    -> net.minecraft.world.item.Items.DIAMOND;
+			default       -> net.minecraft.world.item.Items.AIR;
+		};
+		int materialCount = 4;
+
+		AllianceProgressionService prog = AllianceProgressionService.get(server);
+		if (!prog.canAfford(alliance.getId(), influenceCost)) {
+			player.sendSystemMessage(Component.literal("Need " + influenceCost + " influence. Have: " + prog.getBalance(alliance.getId()) + ".")); return;
+		}
+		int held = 0;
+		var inv = player.getInventory();
+		for (int i = 0; i < inv.getContainerSize(); i++) {
+			var s = inv.getItem(i);
+			if (!s.isEmpty() && s.getItem() == materialItem) held += s.getCount();
+		}
+		if (held < materialCount) {
+			String matName = switch (nextTier) {
+				case STANDARD -> "Iron Ingot"; case ADVANCED -> "Gold Ingot"; case ELITE -> "Diamond"; default -> "material";
+			};
+			player.sendSystemMessage(Component.literal("Need " + materialCount + "x " + matName + ". Have: " + held + ".")); return;
+		}
+
+		prog.trySpend(alliance.getId(), influenceCost);
+		int remaining = materialCount;
+		for (int i = 0; i < inv.getContainerSize() && remaining > 0; i++) {
+			var s = inv.getItem(i);
+			if (!s.isEmpty() && s.getItem() == materialItem) {
+				int take = Math.min(s.getCount(), remaining);
+				s.shrink(take); remaining -= take;
+			}
+		}
+
+		tm.updateAnchorTier(payload.anchorId(), nextTier);
+
+		// Replace block at flag position with the same block (visual appearance driven by tier — no blockstate variant needed yet)
+		net.minecraft.core.BlockPos flagPos = new net.minecraft.core.BlockPos(payload.blockX(), payload.blockY(), payload.blockZ());
+		ServerLevel flagLevel = (ServerLevel) player.level();
+		// Play an upgrade sound at the flag location
+		flagLevel.playSound(null, flagPos, net.minecraft.sounds.SoundEvents.ANVIL_USE, net.minecraft.sounds.SoundSource.BLOCKS, 1.0f, 1.2f);
+		flagLevel.sendParticles(net.minecraft.core.particles.ParticleTypes.TOTEM_OF_UNDYING,
+				flagPos.getX() + 0.5, flagPos.getY() + 1.0, flagPos.getZ() + 0.5, 30, 1.0, 1.5, 1.0, 0.1);
+
+		player.sendSystemMessage(Component.literal("Flag upgraded to " + nextTier.getId() + " tier! Capacity: " + nextTier.getMaxClaimValue() + "."));
+
+		// Re-send the flag screen with updated data
+		int usedValue = tm.getTotalClaimValueForAnchor(payload.anchorId());
+		AnchorTier afterNextTier = nextTier.next();
+		int nextInfCost = 0; String nextMatId = ""; int nextMatCount = 0;
+		if (afterNextTier != null) {
+			nextInfCost = switch (afterNextTier) { case STANDARD -> 150; case ADVANCED -> 300; case ELITE -> 600; default -> 0; };
+			nextMatId = switch (afterNextTier) { case STANDARD -> "minecraft:iron_ingot"; case ADVANCED -> "minecraft:gold_ingot"; case ELITE -> "minecraft:diamond"; default -> ""; };
+			nextMatCount = 4;
+		}
+		TerritoryAnchor updatedAnchor = tm.getAnchorById(payload.anchorId());
+		String anchorName = updatedAnchor != null ? updatedAnchor.getName() : "";
+		BeaconService beaconService = BeaconService.get(server);
+		boolean beaconActive = beaconService.isBeaconActive(alliance.getId());
+		int beaconCount = beaconActive ? 1 : 0;
+		boolean beaconHere = beaconActive;
+		ServerPlayNetworking.send(player, new FlagScreenDataPayload(
+				nextTier.getId(), usedValue, nextTier.getMaxClaimValue(),
+				payload.anchorId(), payload.blockX(), payload.blockY(), payload.blockZ(),
+				nextInfCost, nextMatId, nextMatCount,
+				anchorName, beaconCount, BeaconService.MAX_BEACONS, beaconHere));
+	}
+
+	private static void handleRenameTerritory(MinecraftServer server, ServerPlayer player, RenameTerritoryPayload payload) {
+		TerritoryManager tm = TerritoryManager.get(server);
+		TerritoryAnchor anchor = tm.getAnchorById(payload.anchorId());
+		if (anchor == null) { player.sendSystemMessage(Component.literal("Anchor not found.")); return; }
+
+		Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+		if (alliance == null || !alliance.getId().equals(anchor.getAllianceId())) {
+			player.sendSystemMessage(Component.literal("You don't own this territory.")); return;
+		}
+
+		String name = payload.newName().strip();
+		if (name.isEmpty() || name.length() > 32) {
+			player.sendSystemMessage(Component.literal("Name must be 1-32 characters.")); return;
+		}
+
+		tm.updateAnchorName(payload.anchorId(), name);
+		player.sendSystemMessage(Component.literal("Territory renamed to \"" + name + "\"."));
+	}
+
+	private static void handleSetBeacon(MinecraftServer server, ServerPlayer player, SetBeaconPayload payload) {
+		TerritoryAnchor anchor = TerritoryManager.get(server).getAnchorById(payload.anchorId());
+		if (anchor == null) { player.sendSystemMessage(Component.literal("Anchor not found.")); return; }
+
+		Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+		if (alliance == null || !alliance.getId().equals(anchor.getAllianceId())) {
+			player.sendSystemMessage(Component.literal("You don't own this territory.")); return;
+		}
+
+		boolean placed = BeaconService.get(server).setBeacon(alliance.getId(), null);
+		if (placed) {
+			player.sendSystemMessage(Component.literal("Beacon activated. All members in claimed territory gain Resistance I."));
+		} else {
+			player.sendSystemMessage(Component.literal("Beacon is already active."));
+		}
+	}
+
+	private static void handleClearBeacon(MinecraftServer server, ServerPlayer player, ClearBeaconPayload payload) {
+		TerritoryAnchor anchor = TerritoryManager.get(server).getAnchorById(payload.anchorId());
+		if (anchor == null) { player.sendSystemMessage(Component.literal("Anchor not found.")); return; }
+
+		Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+		if (alliance == null || !alliance.getId().equals(anchor.getAllianceId())) {
+			player.sendSystemMessage(Component.literal("You don't own this territory.")); return;
+		}
+
+		BeaconService.get(server).clearBeacon(alliance.getId(), null);
+		player.sendSystemMessage(Component.literal("Beacon deactivated."));
 	}
 }

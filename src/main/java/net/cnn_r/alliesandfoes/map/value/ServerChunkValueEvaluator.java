@@ -36,6 +36,28 @@ public class ServerChunkValueEvaluator implements ChunkValueEvaluator {
     }
 
     @Override
+    public int[] evaluateComponents(String dimensionId, int chunkX, int chunkZ) {
+        if (dimensionId == null || dimensionId.isBlank()) return new int[]{0, 0, 0, 0};
+        ServerLevel level = this.levelResolver.apply(dimensionId);
+        if (level == null) return new int[]{0, 0, 0, 0};
+
+        ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+        LevelChunk chunk = level.getChunk(chunkX, chunkZ);
+        OreCounts oreCounts = this.countValuableOres(chunk);
+
+        int biomeValue = BiomeValueRules.getBiomeScore(this.getRepresentativeBiomeName(level, pos));
+        int oreValue = OreValueRules.getOreScore(
+                oreCounts.diamondCount, oreCounts.emeraldCount, oreCounts.ironCount,
+                oreCounts.goldCount, oreCounts.redstoneCount, oreCounts.lapisCount, oreCounts.coalCount);
+        WaterStats waterStats = this.getWaterStats(level, pos);
+        int waterValue = WaterValueRules.getWaterScore(
+                waterStats.waterColumnsInChunk, waterStats.sampledColumnsInChunk, waterStats.nearbyWaterChunkCount);
+        int structureValue = this.getStructureData(dimensionId, pos).getStructureValue();
+
+        return new int[]{biomeValue, oreValue, waterValue, structureValue};
+    }
+
+    @Override
     public int evaluate(String dimensionId, int chunkX, int chunkZ) {
         if (dimensionId == null || dimensionId.isBlank()) {
             return ChunkValueScoring.MIN_TOTAL_VALUE;

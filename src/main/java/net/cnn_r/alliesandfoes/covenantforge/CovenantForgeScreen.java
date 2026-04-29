@@ -158,6 +158,16 @@ public class CovenantForgeScreen extends Screen {
     }
 
     @Override
+    public boolean keyPressed(net.minecraft.client.input.KeyEvent input) {
+        int key = input.key();
+        if (key == 256 || key == 69) { // ESC or E
+            this.onClose();
+            return true;
+        }
+        return super.keyPressed(input);
+    }
+
+    @Override
     public boolean isPauseScreen() {
         return false;
     }

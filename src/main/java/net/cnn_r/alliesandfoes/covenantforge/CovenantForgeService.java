@@ -40,8 +40,14 @@ public class CovenantForgeService {
      */
     public boolean forge(ServerPlayer player, RoleType role) {
         RoleSlotService slots = RoleSlotService.get(server);
-        if (slots.isRoleActive(player.getUUID(), role)) {
-            player.sendSystemMessage(Component.literal("You already have " + roleName(role) + " equipped."));
+        Item item = roleItem(role);
+        boolean alreadyHasItem = false;
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            if (!inv.getItem(i).isEmpty() && inv.getItem(i).is(item)) { alreadyHasItem = true; break; }
+        }
+        if (alreadyHasItem) {
+            player.sendSystemMessage(Component.literal("You already have " + roleName(role) + " in your inventory."));
             return false;
         }
 
@@ -68,8 +74,12 @@ public class CovenantForgeService {
 
         consumeShards(player, FORGE_SHARD_COST);
         prog.trySpend(alliance.getId(), FORGE_INFLUENCE_COST);
-        slots.onRoleSlotChanged(player, new ItemStack(roleItem(role)));
-        player.sendSystemMessage(Component.literal(roleName(role) + " forged and equipped!"));
+        ItemStack forged = new ItemStack(roleItem(role));
+        slots.onRoleSlotChanged(player, forged);
+        if (!player.getInventory().add(forged.copy())) {
+            player.drop(forged.copy(), false);
+        }
+        player.sendSystemMessage(Component.literal(roleName(role) + " forged! Check your inventory."));
         return true;
     }
 

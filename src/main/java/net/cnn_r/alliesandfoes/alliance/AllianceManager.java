@@ -53,6 +53,10 @@ public class AllianceManager {
         return this.alliancesById.get(allianceId);
     }
 
+    public java.util.Collection<Alliance> getAlliances() {
+        return java.util.Collections.unmodifiableCollection(alliancesById.values());
+    }
+
     public Alliance getAllianceByName(String name) {
         if (name == null) return null;
         UUID id = this.allianceNameToId.get(name.toLowerCase(Locale.ROOT));

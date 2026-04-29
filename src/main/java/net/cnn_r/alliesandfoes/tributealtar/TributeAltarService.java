@@ -4,7 +4,7 @@ import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.item.ModItems;
-import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
+import net.cnn_r.alliesandfoes.roleslot.RoleCurrencyService;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -39,28 +39,27 @@ public class TributeAltarService {
      * Returns false if the item is not equipped or has no currency.
      */
     public boolean convert(ServerPlayer player, RoleType role) {
-        RoleSlotService slots = RoleSlotService.get(server);
-        int currency = slots.getRoleCurrency(player.getUUID(), role);
+        RoleCurrencyService currencyService = RoleCurrencyService.get(server);
+        UUID uuid = player.getUUID();
+        int currency = currencyService.get(uuid, role);
         int batches = currency / CURRENCY_PER_BATCH;
         if (batches <= 0) return false;
 
         int toConsume = batches * CURRENCY_PER_BATCH;
-        int consumed = slots.consumeRoleCurrency(player.getUUID(), role, toConsume);
-        if (consumed <= 0) return false;
+        boolean ok = currencyService.consume(uuid, role, toConsume);
+        if (!ok) return false;
 
-        int actualBatches = consumed / CURRENCY_PER_BATCH;
-        int influence = actualBatches * INFLUENCE_PER_BATCH;
+        int influence = batches * INFLUENCE_PER_BATCH;
 
-        Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+        Alliance alliance = AllianceManager.get(server).getAllianceFor(uuid);
         if (alliance != null) {
             AllianceProgressionService.get(server).add(alliance.getId(), influence);
         }
 
-        slots.syncPlayer(player);
+        currencyService.sync(player);
 
         // Milestone: every CONVERSIONS_PER_SHARD cumulative conversions → 1 Covenant Shard
-        UUID uuid = player.getUUID();
-        int count = conversionCount.getOrDefault(uuid, 0) + actualBatches;
+        int count = conversionCount.getOrDefault(uuid, 0) + batches;
         int shardsEarned = count / CONVERSIONS_PER_SHARD;
         conversionCount.put(uuid, count % CONVERSIONS_PER_SHARD);
         if (shardsEarned > 0) {
@@ -73,7 +72,7 @@ public class TributeAltarService {
         }
 
         player.sendSystemMessage(Component.literal(
-                "Converted " + consumed + " tribute → +" + influence + " alliance influence."));
+                "Converted " + toConsume + " tribute → +" + influence + " alliance influence."));
         return true;
     }
 }

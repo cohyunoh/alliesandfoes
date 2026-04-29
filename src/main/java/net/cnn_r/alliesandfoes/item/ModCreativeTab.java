@@ -21,6 +21,8 @@ public class ModCreativeTab {
                             output.accept(ModItems.FARMERS_ALMANAC);
                             output.accept(ModItems.DOWSING_ROD);
                             output.accept(ModItems.COVENANT_SHARD);
+                            output.accept(ModItems.CRUDE_COVENANT_SHARD);
+                            output.accept(ModItems.TERRITORY_FLAG);
                             output.accept(ModItems.TRIBUTE_ALTAR);
                             output.accept(ModItems.COVENANT_FORGE);
                         })

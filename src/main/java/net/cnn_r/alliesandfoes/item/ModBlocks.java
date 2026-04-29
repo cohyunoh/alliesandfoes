@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes.item;
 
 import net.cnn_r.alliesandfoes.covenantforge.CovenantForgeBlock;
+import net.cnn_r.alliesandfoes.territory.TerritoryFlagBlock;
 import net.cnn_r.alliesandfoes.tributealtar.TributeAltarBlock;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -31,9 +32,18 @@ public final class ModBlocks {
                             Identifier.fromNamespaceAndPath("alliesandfoes", "covenant_forge")))
     );
 
+    public static final TerritoryFlagBlock TERRITORY_FLAG = new TerritoryFlagBlock(
+            BlockBehaviour.Properties.of()
+                    .strength(2.0f, 6.0f)
+                    .sound(SoundType.WOOD)
+                    .setId(ResourceKey.create(Registries.BLOCK,
+                            Identifier.fromNamespaceAndPath("alliesandfoes", "territory_flag")))
+    );
+
     public static void register() {
         register("tribute_altar", TRIBUTE_ALTAR);
         register("covenant_forge", COVENANT_FORGE);
+        register("territory_flag", TERRITORY_FLAG);
     }
 
     private static <T extends Block> T register(String name, T block) {

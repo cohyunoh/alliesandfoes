@@ -2,12 +2,16 @@ package net.cnn_r.alliesandfoes.prospector;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
-import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.alliance.survey.AllianceAssessmentService;
 import net.cnn_r.alliesandfoes.item.ModItems;
+import net.cnn_r.alliesandfoes.network.IntuitionTargetLocationPayload;
+import net.cnn_r.alliesandfoes.roleslot.RoleCurrencyService;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
+import net.cnn_r.alliesandfoes.territory.TerritoryManager;
+import net.cnn_r.alliesandfoes.territory.TerritoryValueService;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -70,6 +74,12 @@ public class ProspectorSkillService {
         int chunkZ = player.blockPosition().getZ() >> 4;
         long currentChunk = ((long) chunkX << 32) | Integer.toUnsignedLong(chunkZ);
 
+        // HUD hint: every 40 ticks when role is active, point toward nearest unassessed high-value chunk
+        if (server.getTickCount() % 40 == 0
+                && RoleSlotService.hasRoleInHand(player, RoleType.PROSPECTOR)) {
+            sendProspectorHint(player, alliance);
+        }
+
         Long last = lastAssessChunk.get(uuid);
         if (last != null && last == currentChunk) return;
         lastAssessChunk.put(uuid, currentChunk);
@@ -86,9 +96,38 @@ public class ProspectorSkillService {
         }
 
         int newCount = AllianceAssessmentService.get(server).markAssessed(alliance.getId(), toAssess);
-        if (newCount > 0 && RoleSlotService.get(server).isRoleActive(uuid, RoleType.PROSPECTOR)) {
-            RoleSlotService.get(server).addRoleCurrency(uuid, RoleType.PROSPECTOR, newCount);
-            RoleSlotService.get(server).syncPlayer(player);
+        if (newCount > 0 && RoleSlotService.hasRoleInHand(player, RoleType.PROSPECTOR)) {
+            RoleCurrencyService.get(server).add(uuid, RoleType.PROSPECTOR, newCount);
+            RoleCurrencyService.get(server).sync(player);
+        }
+    }
+
+    private void sendProspectorHint(ServerPlayer player, Alliance alliance) {
+        int cx = player.blockPosition().getX() >> 4;
+        int cz = player.blockPosition().getZ() >> 4;
+        String dimId = ((ServerLevel) player.level()).dimension().identifier().toString();
+        AllianceAssessmentService assessment = AllianceAssessmentService.get(server);
+        TerritoryValueService valueService = TerritoryManager.get(server).getValueService();
+
+        ChunkKey best = null;
+        int bestScore = -1;
+        for (int dx = -16; dx <= 16; dx++) {
+            for (int dz = -16; dz <= 16; dz++) {
+                ChunkKey key = new ChunkKey(dimId, cx + dx, cz + dz);
+                if (assessment.isAssessed(alliance.getId(), key)) continue;
+                Integer score = valueService.getCachedChunkValue(key);
+                if (score != null && score > bestScore) {
+                    bestScore = score;
+                    best = key;
+                }
+            }
+        }
+
+        if (best != null) {
+            ServerPlayNetworking.send(player, new IntuitionTargetLocationPayload(
+                    best.getChunkX() * 16 + 8, best.getChunkZ() * 16 + 8, true));
+        } else {
+            ServerPlayNetworking.send(player, new IntuitionTargetLocationPayload(0, 0, false));
         }
     }
 
@@ -104,19 +143,73 @@ public class ProspectorSkillService {
         UUID uuid = player.getUUID();
         RoleSlotService slots = RoleSlotService.get(server);
 
-        // Role holders earn through assessment, not ore breaks
-        if (slots.isRoleActive(uuid, RoleType.PROSPECTOR)) return;
+        RoleCurrencyService currencyService = RoleCurrencyService.get(server);
+        boolean hasRod = RoleSlotService.hasRoleInHand(player, RoleType.PROSPECTOR);
+        int oreCost = hasRod ? BASELINE_ORES_PER_INFLUENCE / 2 : BASELINE_ORES_PER_INFLUENCE;
 
         int ores = baselineOres.getOrDefault(uuid, 0) + 1;
-        if (ores >= BASELINE_ORES_PER_INFLUENCE) {
-            Alliance alliance = AllianceManager.get(server).getAllianceFor(uuid);
-            if (alliance != null) {
-                AllianceProgressionService.get(server).add(alliance.getId(), 1);
-            }
-            baselineOres.put(uuid, ores % BASELINE_ORES_PER_INFLUENCE);
+        if (ores >= oreCost) {
+            currencyService.add(uuid, RoleType.PROSPECTOR, 1);
+            currencyService.sync(player);
+            baselineOres.put(uuid, ores % oreCost);
         } else {
             baselineOres.put(uuid, ores);
         }
+    }
+
+    /** Right-click action: immediately assess the player's current chunk and show a 4-factor breakdown. */
+    public void assessImmediate(ServerPlayer player) {
+        int chunkX = player.blockPosition().getX() >> 4;
+        int chunkZ = player.blockPosition().getZ() >> 4;
+        String dimId = ((ServerLevel) player.level()).dimension().identifier().toString();
+        ChunkKey key = new ChunkKey(dimId, chunkX, chunkZ);
+
+        TerritoryValueService valueService = TerritoryManager.get(server).getValueService();
+        int total = valueService.getOrCreateChunkValue(key);
+        int[] components = valueService.evaluateComponents(key);
+        // components: [biome, ore, water, structure]
+
+        String quality = switch (total) {
+            case 9, 10 -> "Prime";
+            case 7, 8  -> "Rich";
+            case 5, 6  -> "Average";
+            case 3, 4  -> "Sparse";
+            default    -> "Poor";
+        };
+
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "[Dowsing Rod] Chunk (" + chunkX + ", " + chunkZ + "):"));
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "  Biome:      " + stars(components[0]) + "  " + biomeLabel(components[0])));
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "  Ores:       " + stars(components[1]) + "  " + oreLabel(components[1])));
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "  Water:      " + stars(components[2]) + "  " + waterLabel(components[2])));
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "  Structures: " + stars(components[3]) + "  " + structureLabel(components[3])));
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "  Total: " + total + "/10 — " + quality));
+    }
+
+    private static String stars(int score) {
+        int filled = Math.max(0, Math.min(5, (score + 1) / 2));
+        return "★".repeat(filled) + "☆".repeat(5 - filled);
+    }
+
+    private static String biomeLabel(int s) {
+        return s >= 9 ? "Exceptional" : s >= 7 ? "Fertile" : s >= 5 ? "Moderate" : s >= 3 ? "Sparse" : "Barren";
+    }
+
+    private static String oreLabel(int s) {
+        return s >= 9 ? "Abundant" : s >= 7 ? "Rich" : s >= 5 ? "Moderate" : s >= 3 ? "Sparse" : "None";
+    }
+
+    private static String waterLabel(int s) {
+        return s >= 9 ? "Abundant" : s >= 7 ? "Good" : s >= 5 ? "Moderate" : s >= 3 ? "Sparse" : "None";
+    }
+
+    private static String structureLabel(int s) {
+        return s >= 9 ? "Exceptional" : s >= 7 ? "Notable" : s >= 5 ? "Minor" : s >= 3 ? "Rare" : "None";
     }
 
     public void onPlayerDisconnect(UUID uuid) {

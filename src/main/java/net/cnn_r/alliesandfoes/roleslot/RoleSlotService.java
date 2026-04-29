@@ -30,6 +30,12 @@ public class RoleSlotService {
         return INSTANCES.computeIfAbsent(server, RoleSlotService::new);
     }
 
+    /** True if the player is holding the role item for the given role in main or off hand. */
+    public static boolean hasRoleInHand(ServerPlayer player, RoleType role) {
+        Item required = roleItem(role);
+        return player.getMainHandItem().is(required) || player.getOffhandItem().is(required);
+    }
+
     /** True if the player has a role item for the given role equipped in either slot. */
     public boolean isRoleActive(UUID playerUuid, RoleType role) {
         ItemStack[] slots = slotsByPlayer.get(playerUuid);

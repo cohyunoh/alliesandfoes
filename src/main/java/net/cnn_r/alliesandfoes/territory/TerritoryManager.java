@@ -200,6 +200,16 @@ public class TerritoryManager {
         int chunkValue = this.valueService.getOrCreateChunkValue(targetChunk);
         int expansionCost = this.costService.getExpansionCost(chunkValue);
 
+        // Tiered intel surcharge: same modifier as foundAnchor
+        UUID allianceId = alliance.getId();
+        boolean surveyed = AllianceSurveyService.get(this.server).isSurveyed(allianceId, targetChunk);
+        boolean assessed = AllianceAssessmentService.get(this.server).isAssessed(allianceId, targetChunk);
+        if (!surveyed) {
+            expansionCost = (int) Math.ceil(expansionCost * 1.5);
+        } else if (!assessed) {
+            expansionCost = (int) Math.ceil(expansionCost * 1.25);
+        }
+
         PaymentResult affordabilityResult = this.paymentService.canPayExpansionCost(
                 playerUuid,
                 anchorId,
@@ -590,6 +600,51 @@ public class TerritoryManager {
         return null;
     }
     
+    /**
+     * Returns the anchor whose origin is exactly this chunk, or null if none.
+     */
+    public TerritoryAnchor getAnchorAtChunk(ChunkKey chunkKey) {
+        TerritoryClaim claim = this.getClaimAt(chunkKey);
+        if (claim == null || !claim.isAnchorChunk()) return null;
+        return this.getAnchorById(claim.getAnchorId());
+    }
+
+    /**
+     * Updates an existing anchor's tier in-place. Replaces the entry in the live map and persists.
+     */
+    public boolean updateAnchorTier(UUID anchorId, AnchorTier newTier) {
+        TerritoryAnchor old = this.anchorsById.get(anchorId);
+        if (old == null || newTier == null) return false;
+
+        TerritoryAnchor updated = old.withTier(newTier);
+        this.anchorsById.put(anchorId, updated);
+
+        List<TerritoryAnchor> allianceList = this.anchorsByAllianceId.get(old.getAllianceId());
+        if (allianceList != null) {
+            allianceList.replaceAll(a -> a.getAnchorId().equals(anchorId) ? updated : a);
+        }
+
+        this.save();
+        return true;
+    }
+
+    public boolean updateAnchorName(UUID anchorId, String newName) {
+        if (newName == null || newName.isBlank() || newName.length() > 32) return false;
+        TerritoryAnchor old = this.anchorsById.get(anchorId);
+        if (old == null) return false;
+
+        TerritoryAnchor updated = old.withName(newName.strip());
+        this.anchorsById.put(anchorId, updated);
+
+        List<TerritoryAnchor> allianceList = this.anchorsByAllianceId.get(old.getAllianceId());
+        if (allianceList != null) {
+            allianceList.replaceAll(a -> a.getAnchorId().equals(anchorId) ? updated : a);
+        }
+
+        this.save();
+        return true;
+    }
+
     public record ActionResult(
             boolean success,
             String message,

@@ -630,6 +630,7 @@ public class MapScreen extends Screen {
         this.renderRollbackOverlay(context);
         this.renderVisiblePlayers(context, level);
         this.renderRallyMarkers(context);
+        this.renderCapturePoints(context);
 
         super.extractRenderState(context, mouseX, mouseY, delta);
         renderTopButtonGlows(context, delta);
@@ -1165,7 +1166,7 @@ public class MapScreen extends Screen {
                 }
 
                 if (this.selectedAnchorId == null) {
-                    this.showScreenMessage(Component.literal("Right-click an anchor chunk to select it first."), 2500);
+                    this.showScreenMessage(Component.literal("Left-click a territory chunk to select it first."), 2500);
                     return true;
                 }
 
@@ -1255,7 +1256,7 @@ public class MapScreen extends Screen {
                 }
 
                 if (this.selectedAnchorId == null) {
-                    this.showScreenMessage(Component.literal("Right-click an anchor chunk to select it first."), 2500);
+                    this.showScreenMessage(Component.literal("Left-click a territory chunk to select it first."), 2500);
                     return true;
                 }
 
@@ -3461,6 +3462,85 @@ public class MapScreen extends Screen {
                 && mouseY >= mapTop
                 && mouseX < mapLeft + drawWidth
                 && mouseY < mapTop + drawHeight;
+    }
+
+    private void renderCapturePoints(GuiGraphicsExtractor context) {
+        List<net.cnn_r.alliesandfoes.network.CapturePointSyncPayload.Entry> points =
+                net.cnn_r.alliesandfoes.alliance.war.CapturePointClientState.getPoints();
+        if (points.isEmpty()) return;
+
+        UUID warId = net.cnn_r.alliesandfoes.alliance.war.CapturePointClientState.getWarId();
+
+        // Find attacker/defender alliance IDs for this war from the war cache
+        UUID attackerAllianceId = null;
+        UUID defenderAllianceId = null;
+        for (net.cnn_r.alliesandfoes.network.WarStateSyncPayload.WarEntry war
+                : MapState.getWarSyncCache().getWars()) {
+            if (war.warId().equals(warId)) {
+                attackerAllianceId = war.attackerAllianceId();
+                defenderAllianceId = war.defenderAllianceId();
+                break;
+            }
+        }
+
+        // Determine which alliance ID belongs to the local player (by name match)
+        String myAllianceName = AllianceClientState.getAllianceName();
+        UUID myAllianceId = null;
+        if (myAllianceName != null && attackerAllianceId != null) {
+            for (net.cnn_r.alliesandfoes.network.WarStateSyncPayload.WarEntry war
+                    : MapState.getWarSyncCache().getWars()) {
+                if (war.warId().equals(warId)) {
+                    if (myAllianceName.equals(war.defenderName())) myAllianceId = defenderAllianceId;
+                    else if (myAllianceName.equals(war.attackerName())) myAllianceId = attackerAllianceId;
+                    break;
+                }
+            }
+        }
+
+        int textureCenter = this.mapTexture.getSize() / 2;
+        double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
+        int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int drawWidth = this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE);
+        int drawHeight = this.renderer.getDrawHeight(BLOCK_PIXEL_SIZE);
+
+        context.enableScissor(mapLeft, mapTop, mapLeft + drawWidth, mapTop + drawHeight);
+
+        for (net.cnn_r.alliesandfoes.network.CapturePointSyncPayload.Entry pt : points) {
+            double blockX = pt.chunkX() * 16.0 + 8.0;
+            double blockZ = pt.chunkZ() * 16.0 + 8.0;
+            double texX = textureCenter + (blockX - this.cameraBlockX);
+            double texY = textureCenter + (blockZ - this.cameraBlockZ);
+            int screenX = mapLeft + (int) Math.round(texX * scale);
+            int screenY = mapTop + (int) Math.round(texY * scale);
+
+            // Dot color: green = my alliance holds, red = enemy holds, white = contested
+            int dotColor;
+            if (pt.ownerAllianceId() == null) {
+                dotColor = 0xFFFFFFFF; // contested
+            } else if (pt.ownerAllianceId().equals(myAllianceId)) {
+                dotColor = 0xFF44FF44; // friendly hold
+            } else {
+                dotColor = 0xFFFF4444; // enemy hold
+            }
+
+            // Diamond shape (cross pattern)
+            context.fill(screenX - 1, screenY - 4, screenX + 1, screenY + 4, dotColor);
+            context.fill(screenX - 4, screenY - 1, screenX + 4, screenY + 1, dotColor);
+            context.fill(screenX - 3, screenY - 3, screenX + 3, screenY + 3, dotColor & 0x80FFFFFF);
+
+            // Progress label above the marker
+            if (pt.progress() > 0) {
+                String label = pt.progress() + "%";
+                int textWidth = this.font.width(label);
+                int textX = screenX - textWidth / 2;
+                int textY = screenY - 14;
+                context.fill(textX - 2, textY - 1, textX + textWidth + 2, textY + 9, 0x80000000);
+                context.text(this.font, label, textX, textY, dotColor);
+            }
+        }
+
+        context.disableScissor();
     }
 
 

@@ -5,6 +5,7 @@ import net.cnn_r.alliesandfoes.alliance.AllianceManager;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWar;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
 import net.cnn_r.alliesandfoes.network.MapScreenMessagePayload;
+import net.cnn_r.alliesandfoes.roleslot.RoleCurrencyService;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.cnn_r.alliesandfoes.territory.TerritoryClaim;
@@ -63,7 +64,7 @@ public class WarHornItem extends Item {
         MinecraftServer server = level.getServer();
         RoleSlotService roles = RoleSlotService.get(server);
 
-        if (!roles.isRoleActive(player.getUUID(), RoleType.WARRIOR)) {
+        if (!RoleSlotService.hasRoleInHand(player, RoleType.WARRIOR)) {
             player.sendSystemMessage(
                     Component.literal("Only an active Warrior can blow the War Horn.").withStyle(ChatFormatting.RED), true);
             return;
@@ -98,6 +99,7 @@ public class WarHornItem extends Item {
                                 AllianceWar war, RoleSlotService roles, ItemStack stack) {
         MinecraftServer server = level.getServer();
         WarriorSkillService warriorService = WarriorSkillService.get(server);
+        RoleCurrencyService currencyService = RoleCurrencyService.get(server);
 
         long now = server.overworld().getGameTime();
         if (now - warriorService.getLastWarCryTick(player.getUUID()) < WAR_CRY_COOLDOWN) {
@@ -105,15 +107,15 @@ public class WarHornItem extends Item {
             return;
         }
 
-        int currency = roles.getRoleCurrency(player.getUUID(), RoleType.WARRIOR);
+        int currency = currencyService.get(player.getUUID(), RoleType.WARRIOR);
         if (currency < WAR_CRY_COST) {
             player.sendSystemMessage(Component.literal(
                     "War Cry requires " + WAR_CRY_COST + " Warrior currency. You have " + currency + "."), true);
             return;
         }
 
-        roles.consumeRoleCurrency(player.getUUID(), RoleType.WARRIOR, WAR_CRY_COST);
-        roles.syncPlayer(player);
+        currencyService.consume(player.getUUID(), RoleType.WARRIOR, WAR_CRY_COST);
+        currencyService.sync(player);
         warriorService.setLastWarCryTick(player.getUUID(), now);
         player.getCooldowns().addCooldown(stack, WAR_CRY_COOLDOWN);
 
@@ -177,8 +179,8 @@ public class WarHornItem extends Item {
         }
 
         // Award rally currency to the Warrior
-        roles.addRoleCurrency(player.getUUID(), RoleType.WARRIOR, 5);
-        roles.syncPlayer(player);
+        RoleCurrencyService.get(level.getServer()).add(player.getUUID(), RoleType.WARRIOR, 5);
+        RoleCurrencyService.get(level.getServer()).sync(player);
     }
 
     private void triggerDeclaration(ServerLevel level, ServerPlayer player, Alliance alliance, UUID enemyAllianceId) {

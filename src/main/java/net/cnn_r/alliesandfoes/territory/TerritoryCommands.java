@@ -51,6 +51,18 @@ public final class TerritoryCommands {
             Commands.CommandSelection selection
     ) {
         dispatcher.register(
+                Commands.literal("alliance")
+                        .requires(source -> source.getEntity() instanceof ServerPlayer)
+                        .then(Commands.literal("beacon")
+                                .then(Commands.literal("set")
+                                        .executes(ctx -> beaconSet(ctx.getSource())))
+                                .then(Commands.literal("clear")
+                                        .executes(ctx -> beaconClear(ctx.getSource())))
+                                .then(Commands.literal("list")
+                                        .executes(ctx -> beaconList(ctx.getSource()))))
+        );
+
+        dispatcher.register(
                 Commands.literal("territory")
                         .requires(source -> source.getEntity() instanceof ServerPlayer)
                         .then(
@@ -233,6 +245,46 @@ public final class TerritoryCommands {
 
         source.sendSuccess(() -> Component.literal(
                 "Destroyed " + ownerName + "'s anchor \"" + anchorName + "\" and " + claimCount + " claims."), false);
+        return 1;
+    }
+
+    private static int beaconSet(CommandSourceStack source) {
+        ServerPlayer player;
+        try { player = source.getPlayerOrException(); }
+        catch (Exception e) { source.sendFailure(Component.literal("Only players can use this command.")); return 0; }
+        MinecraftServer server = player.level().getServer();
+        Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+        if (alliance == null) { source.sendFailure(Component.literal("You must be in an alliance.")); return 0; }
+        boolean placed = BeaconService.get(server).setBeacon(alliance.getId(), null);
+        if (!placed) {
+            source.sendFailure(Component.literal("Beacon is already active."));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal("Beacon activated. Alliance members in claimed territory gain Resistance I."), false);
+        return 1;
+    }
+
+    private static int beaconClear(CommandSourceStack source) {
+        ServerPlayer player;
+        try { player = source.getPlayerOrException(); }
+        catch (Exception e) { source.sendFailure(Component.literal("Only players can use this command.")); return 0; }
+        MinecraftServer server = player.level().getServer();
+        Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+        if (alliance == null) { source.sendFailure(Component.literal("You must be in an alliance.")); return 0; }
+        BeaconService.get(server).clearBeacon(alliance.getId(), null);
+        source.sendSuccess(() -> Component.literal("Beacon deactivated."), false);
+        return 1;
+    }
+
+    private static int beaconList(CommandSourceStack source) {
+        ServerPlayer player;
+        try { player = source.getPlayerOrException(); }
+        catch (Exception e) { source.sendFailure(Component.literal("Only players can use this command.")); return 0; }
+        MinecraftServer server = player.level().getServer();
+        Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+        if (alliance == null) { source.sendFailure(Component.literal("You must be in an alliance.")); return 0; }
+        boolean active = BeaconService.get(server).isBeaconActive(alliance.getId());
+        source.sendSuccess(() -> Component.literal("Territory beacon: " + (active ? "ACTIVE" : "inactive")), false);
         return 1;
     }
 

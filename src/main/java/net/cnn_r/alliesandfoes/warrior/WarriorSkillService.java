@@ -2,7 +2,8 @@ package net.cnn_r.alliesandfoes.warrior;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
-import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
+import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
+import net.cnn_r.alliesandfoes.roleslot.RoleCurrencyService;
 import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.minecraft.server.MinecraftServer;
@@ -22,7 +23,7 @@ import java.util.WeakHashMap;
 public class WarriorSkillService {
     private static final Map<MinecraftServer, WarriorSkillService> INSTANCES = new WeakHashMap<>();
 
-    private static final int BASELINE_KILLS_PER_INFLUENCE = 25;
+    private static final int BASELINE_KILLS_PER_CURRENCY = 5;
 
     /** Session-only kill counts (baseline path — resets on restart). */
     private final Map<UUID, Integer> baselineKills  = new HashMap<>();
@@ -43,19 +44,29 @@ public class WarriorSkillService {
         UUID uuid = killer.getUUID();
         RoleSlotService slots = RoleSlotService.get(server);
 
-        if (slots.isRoleActive(uuid, RoleType.WARRIOR)) {
+        boolean hasHorn = RoleSlotService.hasRoleInHand(killer, RoleType.WARRIOR);
+        RoleCurrencyService currencyService = RoleCurrencyService.get(server);
+
+        if (hasHorn) {
             int level  = slots.getRoleItemLevel(uuid, RoleType.WARRIOR);
             int earned = 1 + level; // +0→1, +1→2, +2→3, +3→4 per kill
-            slots.addRoleCurrency(uuid, RoleType.WARRIOR, earned);
-            slots.syncPlayer(killer);
+            currencyService.add(uuid, RoleType.WARRIOR, earned);
+            currencyService.sync(killer);
+            // Peacetime: each kill reduces War Cry cooldown by 5 seconds
+            Alliance warAlliance = AllianceManager.get(server).getAllianceFor(uuid);
+            if (warAlliance != null
+                    && AllianceWarService.get(server).getActiveWarInvolving(warAlliance.getId()).isEmpty()) {
+                long stored = lastWarCryTick.getOrDefault(uuid, Long.MIN_VALUE);
+                if (stored != Long.MIN_VALUE) {
+                    lastWarCryTick.put(uuid, stored - 100);
+                }
+            }
         } else {
             int kills = baselineKills.getOrDefault(uuid, 0) + 1;
-            if (kills >= BASELINE_KILLS_PER_INFLUENCE) {
-                Alliance alliance = AllianceManager.get(server).getAllianceFor(uuid);
-                if (alliance != null) {
-                    AllianceProgressionService.get(server).add(alliance.getId(), 1);
-                }
-                baselineKills.put(uuid, kills % BASELINE_KILLS_PER_INFLUENCE);
+            if (kills >= BASELINE_KILLS_PER_CURRENCY) {
+                currencyService.add(uuid, RoleType.WARRIOR, 1);
+                currencyService.sync(killer);
+                baselineKills.put(uuid, kills % BASELINE_KILLS_PER_CURRENCY);
             } else {
                 baselineKills.put(uuid, kills);
             }

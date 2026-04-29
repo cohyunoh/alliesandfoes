@@ -113,6 +113,14 @@ public final class TerritoryAnchor {
         return this.tier.getMaxClaimValue();
     }
 
+    public TerritoryAnchor withTier(AnchorTier newTier) {
+        return new TerritoryAnchor(anchorId, allianceId, founderUuid, name, newTier, origin, createdAt);
+    }
+
+    public TerritoryAnchor withName(String newName) {
+        return new TerritoryAnchor(anchorId, allianceId, founderUuid, newName, tier, origin, createdAt);
+    }
+
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
         tag.putString(TAG_ANCHOR_ID, this.anchorId.toString());

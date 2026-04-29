@@ -43,6 +43,12 @@ public final class ModItems {
                             Identifier.fromNamespaceAndPath("alliesandfoes", "covenant_shard")))
     );
 
+    public static final Item CRUDE_COVENANT_SHARD = new Item(
+            new Item.Properties()
+                    .setId(ResourceKey.create(Registries.ITEM,
+                            Identifier.fromNamespaceAndPath("alliesandfoes", "crude_covenant_shard")))
+    );
+
     public static final BlockItem TRIBUTE_ALTAR = new BlockItem(
             ModBlocks.TRIBUTE_ALTAR,
             new Item.Properties()
@@ -57,8 +63,15 @@ public final class ModItems {
                             Identifier.fromNamespaceAndPath("alliesandfoes", "covenant_forge")))
     );
 
-    private ModItems() {
-    }
+    public static final BlockItem TERRITORY_FLAG = new BlockItem(
+            ModBlocks.TERRITORY_FLAG,
+            new Item.Properties()
+                    .stacksTo(16)
+                    .setId(ResourceKey.create(Registries.ITEM,
+                            Identifier.fromNamespaceAndPath("alliesandfoes", "territory_flag")))
+    );
+
+    private ModItems() {}
 
     public static void register() {
         register("cartographers_journal", CARTOGRAPHERS_JOURNAL);
@@ -66,8 +79,10 @@ public final class ModItems {
         register("farmers_almanac", FARMERS_ALMANAC);
         register("dowsing_rod", DOWSING_ROD);
         register("covenant_shard", COVENANT_SHARD);
+        register("crude_covenant_shard", CRUDE_COVENANT_SHARD);
         register("tribute_altar", TRIBUTE_ALTAR);
         register("covenant_forge", COVENANT_FORGE);
+        register("territory_flag", TERRITORY_FLAG);
     }
 
     private static <T extends Item> T register(String name, T item) {

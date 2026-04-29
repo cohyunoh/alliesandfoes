@@ -5,7 +5,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
-import net.cnn_r.alliesandfoes.roleslot.RoleSlotService;
+import net.cnn_r.alliesandfoes.roleslot.RoleCurrencyService;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.cnn_r.alliesandfoes.upgrade.RoleType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -86,7 +86,11 @@ public final class AllianceWarCommands {
                                         .then(Commands.argument("seconds", IntegerArgumentType.integer(1, 3600))
                                                 .executes(ctx -> setPrepTime(ctx.getSource(),
                                                         IntegerArgumentType.getInteger(ctx, "seconds")))))
-                                .then(Commands.literal("setactivetime")
+                                .then(Commands.literal("bounty")
+                                .then(Commands.argument("player", StringArgumentType.word())
+                                        .executes(ctx -> placeBounty(ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "player")))))
+                        .then(Commands.literal("setactivetime")
                                         .requires(source -> source.getEntity() instanceof ServerPlayer sp
                                                 && source.getServer().getPlayerList().isOp(
                                                         new NameAndId(sp.getUUID(), sp.getName().getString())))
@@ -228,13 +232,9 @@ public final class AllianceWarCommands {
                     + ". Use WARRIOR, EXPLORER, CULTIVATOR, or PROSPECTOR."));
             return 0;
         }
-        RoleSlotService slots = RoleSlotService.get(player.level().getServer());
-        if (!slots.isRoleActive(player.getUUID(), role)) {
-            source.sendFailure(Component.literal("You don't have the " + roleName + " role equipped."));
-            return 0;
-        }
-        slots.addRoleCurrency(player.getUUID(), role, amount);
-        slots.syncPlayer(player);
+        RoleCurrencyService currencyService = RoleCurrencyService.get(player.level().getServer());
+        currencyService.add(player.getUUID(), role, amount);
+        currencyService.sync(player);
         source.sendSuccess(() -> Component.literal("+" + amount + " " + roleName + " currency added."), false);
         return 1;
     }
@@ -269,6 +269,22 @@ public final class AllianceWarCommands {
         source.sendSuccess(() -> Component.literal(
                 "[DEBUG] Capture hold time set to " + ticks + " ticks ("
                         + (ticks / 20) + "s)."), false);
+        return 1;
+    }
+
+    private static int placeBounty(CommandSourceStack source, String playerName) {
+        ServerPlayer actor = getPlayer(source);
+        if (actor == null) return 0;
+        MinecraftServer server = actor.level().getServer();
+        ServerPlayer target = server.getPlayerList().getPlayerByName(playerName);
+        if (target == null) {
+            source.sendFailure(Component.literal("Player '" + playerName + "' is not online."));
+            return 0;
+        }
+        String error = AllianceWarService.get(server).placeBounty(actor, target.getUUID());
+        if (error != null) { source.sendFailure(Component.literal(error)); return 0; }
+        source.sendSuccess(() -> Component.literal(
+                "Bounty placed on " + playerName + " (50 influence spent). Your alliance earns a Covenant Shard if they're killed in war."), false);
         return 1;
     }
 
