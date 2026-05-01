@@ -1,9 +1,7 @@
 package net.cnn_r.alliesandfoes.mixin;
 
 import net.cnn_r.alliesandfoes.map.MapScreen;
-import net.cnn_r.alliesandfoes.roleslot.RoleSlotRenderer;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.inventory.AbstractRecipeBookScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
@@ -32,11 +30,5 @@ public abstract class InventoryScreenMixin extends AbstractRecipeBookScreen<Inve
                 btn -> Minecraft.getInstance().setScreen(new MapScreen()))
                 .bounds((this.width / 2) - 48, btnY, 96, 20)
                 .build());
-    }
-
-    // Draw slot border/bevel in renderBg so it appears under items and the cursor item
-    @Inject(at = @At("RETURN"), method = "extractBackground")
-    private void renderRoleSlotBg(GuiGraphicsExtractor guiGraphics, int x, int y, float partialTick, CallbackInfo info) {
-        RoleSlotRenderer.renderBackground(guiGraphics, this.leftPos, this.topPos);
     }
 }

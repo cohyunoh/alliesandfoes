@@ -1,23 +1,10 @@
 {
   "itemGroup.alliesandfoes.main": "Allies & Foes",
   "key.alliesandfoes.open_map": "Open Map",
-  "key.alliesandfoes.use_role_item": "Use Role Item",
   "category.alliesandfoes": "Allies & Foes",
-  "item.alliesandfoes.cartographers_journal": "Cartographer's Journal",
-  "item.alliesandfoes.war_horn": "War Horn",
-  "item.alliesandfoes.farmers_almanac": "Farmer's Almanac",
-  "item.alliesandfoes.dowsing_rod": "Dowsing Rod",
-  "item.alliesandfoes.covenant_shard": "Covenant Shard",
-  "item.alliesandfoes.crude_covenant_shard": "Crude Covenant Shard",
-  "item.alliesandfoes.territory_flag": "Territory Flag",
-  "block.alliesandfoes.territory_flag": "Territory Flag",
-  "screen.alliesandfoes.journal.title": "Journal",
-  "screen.alliesandfoes.journal.tab.explorer": "Explorer",
-  "screen.alliesandfoes.journal.tab.warrior": "Warrior",
-  "screen.alliesandfoes.journal.tab.cultivator": "Cultivator",
-  "screen.alliesandfoes.journal.tab.prospector": "Prospector",
-  "screen.alliesandfoes.journal.biomes_header": "Biomes (%s)",
-  "screen.alliesandfoes.journal.structures_header": "Structures (%s)",
-  "screen.alliesandfoes.journal.searching_for": "Searching for: %s",
-  "screen.alliesandfoes.journal.clear_target": "Clear Target"
+  "item.alliesandfoes.copper_token": "Copper Token",
+  "item.alliesandfoes.iron_token": "Iron Token",
+  "item.alliesandfoes.gold_token": "Gold Token",
+  "block.alliesandfoes.base_generator": "Base Generator",
+  "block.alliesandfoes.resource_generator": "Resource Generator"
 }

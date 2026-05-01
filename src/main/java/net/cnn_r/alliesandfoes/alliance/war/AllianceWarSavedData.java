@@ -56,7 +56,10 @@ public class AllianceWarSavedData extends SavedData {
             Codec.STRING.fieldOf("status").forGetter(StoredWar::status),
             CHUNK_KEY_CODEC.listOf().optionalFieldOf("contested_chunks", List.of()).forGetter(StoredWar::contestedChunks),
             KILL_SCORES_CODEC.optionalFieldOf("kill_scores", Map.of()).forGetter(StoredWar::killScores),
-            Codec.LONG.optionalFieldOf("status_changed_at_tick", 0L).forGetter(StoredWar::statusChangedAtTick)
+            Codec.LONG.optionalFieldOf("status_changed_at_tick", 0L).forGetter(StoredWar::statusChangedAtTick),
+            Codec.STRING.optionalFieldOf("winner_alliance_id", "").forGetter(StoredWar::winnerAllianceIdStr),
+            Codec.INT.optionalFieldOf("prize_a_ordinal", -1).forGetter(StoredWar::prizeAOrdinal),
+            Codec.INT.optionalFieldOf("prize_b_ordinal", -1).forGetter(StoredWar::prizeBOrdinal)
     ).apply(instance, StoredWar::new));
 
     private static final Codec<AllianceWarSavedData> CODEC =
@@ -115,7 +118,10 @@ public class AllianceWarSavedData extends SavedData {
             String status,
             List<ChunkKey> contestedChunks,
             Map<UUID, Integer> killScores,
-            long statusChangedAtTick
+            long statusChangedAtTick,
+            String winnerAllianceIdStr,
+            int prizeAOrdinal,
+            int prizeBOrdinal
     ) {
         public static StoredWar fromAllianceWar(AllianceWar war) {
             return new StoredWar(
@@ -125,7 +131,10 @@ public class AllianceWarSavedData extends SavedData {
                     war.status().name(),
                     new ArrayList<>(war.contestedChunks()),
                     new HashMap<>(war.killScores()),
-                    war.statusChangedAtTick()
+                    war.statusChangedAtTick(),
+                    war.winnerAllianceId() != null ? war.winnerAllianceId().toString() : "",
+                    war.prizeAOrdinal(),
+                    war.prizeBOrdinal()
             );
         }
 
@@ -138,7 +147,10 @@ public class AllianceWarSavedData extends SavedData {
             }
             Set<ChunkKey> chunks = Collections.unmodifiableSet(new LinkedHashSet<>(this.contestedChunks));
             Map<UUID, Integer> scores = Collections.unmodifiableMap(new HashMap<>(this.killScores));
-            return new AllianceWar(id, attackerId, defenderId, warStatus, chunks, scores, statusChangedAtTick);
+            UUID winnerId = (winnerAllianceIdStr != null && !winnerAllianceIdStr.isEmpty())
+                    ? UUID.fromString(winnerAllianceIdStr) : null;
+            return new AllianceWar(id, attackerId, defenderId, warStatus, chunks, scores,
+                    statusChangedAtTick, winnerId, prizeAOrdinal, prizeBOrdinal);
         }
     }
 }

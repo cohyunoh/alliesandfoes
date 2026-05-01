@@ -697,8 +697,35 @@ public class AllianceManager {
         }
     }
 
+    public void save(MinecraftServer ignored) {
+        this.save();
+    }
+
     private void save() {
         AllianceSavedData.get(this.server).saveFromLiveAlliances(this.alliancesById.values());
+    }
+
+    public void disbandAlliance(MinecraftServer server, ServerPlayer founder) {
+        Alliance alliance = this.getAllianceFor(founder.getUUID());
+        if (alliance == null) return;
+
+        UUID allianceId = alliance.getId();
+
+        net.cnn_r.alliesandfoes.protect.BlockOwnerSavedData.get(server).clearAlliance(allianceId);
+        net.cnn_r.alliesandfoes.protect.TrustListSavedData.get(server).removeAlliance(allianceId);
+
+        for (UUID memberId : new java.util.ArrayList<>(alliance.getMemberUuids())) {
+            this.playerToAllianceId.remove(memberId);
+            ServerPlayer member = server.getPlayerList().getPlayer(memberId);
+            if (member != null) {
+                member.sendSystemMessage(Component.literal("Your alliance has been disbanded."), true);
+                ServerPlayNetworking.send(member, new net.cnn_r.alliesandfoes.network.AllianceStatePayload(false, "", "", null));
+            }
+        }
+
+        this.alliancesById.remove(allianceId);
+        this.allianceNameToId.remove(alliance.getName().toLowerCase(java.util.Locale.ROOT));
+        this.save();
     }
 
     public record CreationResult(boolean success, String message, Alliance alliance) {

@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "token_type=0": { "model": "alliesandfoes:block/resource_generator" },
+    "token_type=1": { "model": "alliesandfoes:block/resource_generator" },
+    "token_type=2": { "model": "alliesandfoes:block/resource_generator" }
+  }
+}

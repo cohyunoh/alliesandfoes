@@ -6,13 +6,11 @@
 		"AbstractContainerMenuInvoker",
 		"InventoryMenuMixin",
 		"InventoryScreenMixin",
-		"ExplosionBlockSnapshotMixin",
-		"ExplosionChestProtectionMixin"
+		"ExplosionBlockProtectionMixin",
+		"ExplosionChestProtectionMixin",
+		"ServerPlayerXpMixin"
 	],
-	"client": [
-		"client.MonocleArmPoseMixin",
-		"client.ClientLevelBlockChangeMixin"
-	],
+	"client": [],
 	"injectors": {
 		"defaultRequire": 1
 	},

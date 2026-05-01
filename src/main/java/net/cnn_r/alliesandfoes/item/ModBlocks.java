@@ -1,8 +1,7 @@
 package net.cnn_r.alliesandfoes.item;
 
-import net.cnn_r.alliesandfoes.covenantforge.CovenantForgeBlock;
-import net.cnn_r.alliesandfoes.territory.TerritoryFlagBlock;
-import net.cnn_r.alliesandfoes.tributealtar.TributeAltarBlock;
+import net.cnn_r.alliesandfoes.block.BaseGeneratorBlock;
+import net.cnn_r.alliesandfoes.block.ResourceGeneratorBlock;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -14,36 +13,27 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 
 public final class ModBlocks {
 
-    public static final TributeAltarBlock TRIBUTE_ALTAR = new TributeAltarBlock(
+    public static final BaseGeneratorBlock BASE_GENERATOR = new BaseGeneratorBlock(
             BlockBehaviour.Properties.of()
-                    .strength(2.5f, 6.0f)
-                    .sound(SoundType.STONE)
+                    .strength(50f, 1200f)
+                    .sound(SoundType.METAL)
                     .requiresCorrectToolForDrops()
                     .setId(ResourceKey.create(Registries.BLOCK,
-                            Identifier.fromNamespaceAndPath("alliesandfoes", "tribute_altar")))
+                            Identifier.fromNamespaceAndPath("alliesandfoes", "base_generator")))
     );
 
-    public static final CovenantForgeBlock COVENANT_FORGE = new CovenantForgeBlock(
+    public static final ResourceGeneratorBlock RESOURCE_GENERATOR = new ResourceGeneratorBlock(
             BlockBehaviour.Properties.of()
-                    .strength(5.0f, 1200.0f)
+                    .strength(3f, 6f)
                     .sound(SoundType.STONE)
-                    .requiresCorrectToolForDrops()
+                    .randomTicks()
                     .setId(ResourceKey.create(Registries.BLOCK,
-                            Identifier.fromNamespaceAndPath("alliesandfoes", "covenant_forge")))
-    );
-
-    public static final TerritoryFlagBlock TERRITORY_FLAG = new TerritoryFlagBlock(
-            BlockBehaviour.Properties.of()
-                    .strength(2.0f, 6.0f)
-                    .sound(SoundType.WOOD)
-                    .setId(ResourceKey.create(Registries.BLOCK,
-                            Identifier.fromNamespaceAndPath("alliesandfoes", "territory_flag")))
+                            Identifier.fromNamespaceAndPath("alliesandfoes", "resource_generator")))
     );
 
     public static void register() {
-        register("tribute_altar", TRIBUTE_ALTAR);
-        register("covenant_forge", COVENANT_FORGE);
-        register("territory_flag", TERRITORY_FLAG);
+        register("base_generator", BASE_GENERATOR);
+        register("resource_generator", RESOURCE_GENERATOR);
     }
 
     private static <T extends Block> T register(String name, T block) {
