@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes.item;
 
 import net.cnn_r.alliesandfoes.block.BaseGeneratorBlock;
+import net.cnn_r.alliesandfoes.block.GeneratorPedestalBlock;
 import net.cnn_r.alliesandfoes.block.ResourceGeneratorBlock;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -26,14 +27,22 @@ public final class ModBlocks {
             BlockBehaviour.Properties.of()
                     .strength(3f, 6f)
                     .sound(SoundType.STONE)
-                    .randomTicks()
                     .setId(ResourceKey.create(Registries.BLOCK,
                             Identifier.fromNamespaceAndPath("alliesandfoes", "resource_generator")))
+    );
+
+    public static final GeneratorPedestalBlock GENERATOR_PEDESTAL = new GeneratorPedestalBlock(
+            BlockBehaviour.Properties.of()
+                    .strength(2f, 6f)
+                    .sound(SoundType.STONE)
+                    .setId(ResourceKey.create(Registries.BLOCK,
+                            Identifier.fromNamespaceAndPath("alliesandfoes", "generator_pedestal")))
     );
 
     public static void register() {
         register("base_generator", BASE_GENERATOR);
         register("resource_generator", RESOURCE_GENERATOR);
+        register("generator_pedestal", GENERATOR_PEDESTAL);
     }
 
     private static <T extends Block> T register(String name, T block) {

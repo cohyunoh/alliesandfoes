@@ -13,7 +13,7 @@ import java.util.WeakHashMap;
 public class BattleDimensionManager {
     private static final Map<MinecraftServer, BattleDimensionManager> INSTANCES = new WeakHashMap<>();
 
-    private static final ResourceKey<Level> BATTLE_DIMENSION =
+    public static final ResourceKey<Level> BATTLE_DIMENSION =
             ResourceKey.create(Registries.DIMENSION, Identifier.parse("alliesandfoes:battle"));
 
     private int nextOffset = 0;
@@ -36,5 +36,9 @@ public class BattleDimensionManager {
 
     public ServerLevel getBattleLevel(MinecraftServer server) {
         return server.getLevel(BATTLE_DIMENSION);
+    }
+
+    public static boolean isBattleDimension(ServerLevel level) {
+        return level.dimension().equals(BATTLE_DIMENSION);
     }
 }

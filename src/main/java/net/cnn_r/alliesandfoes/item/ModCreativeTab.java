@@ -14,13 +14,19 @@ public class ModCreativeTab {
                 Identifier.fromNamespaceAndPath("alliesandfoes", "main"),
                 CreativeModeTab.builder(CreativeModeTab.Row.TOP, 0)
                         .title(Component.translatable("itemGroup.alliesandfoes.main"))
-                        .icon(() -> new ItemStack(ModItems.COPPER_TOKEN))
+                        .icon(() -> new ItemStack(ModItems.GOLD_TOKEN))
                         .displayItems((params, output) -> {
-                            output.accept(ModItems.COPPER_TOKEN);
                             output.accept(ModItems.IRON_TOKEN);
                             output.accept(ModItems.GOLD_TOKEN);
+                            output.accept(ModItems.DIAMOND_TOKEN);
+                            output.accept(ModItems.EMERALD_TOKEN);
+                            output.accept(ModItems.CHUNK_FRAGMENT);
+                            output.accept(ModItems.CHUNK_FRAGMENT_SHARD);
+                            output.accept(ModItems.DOWSING_ROD);
+                            output.accept(ModItems.TROUGH);
                             output.accept(ModItems.BASE_GENERATOR_ITEM);
                             output.accept(ModItems.RESOURCE_GENERATOR_ITEM);
+                            output.accept(ModItems.GENERATOR_PEDESTAL_ITEM);
                         })
                         .build());
     }

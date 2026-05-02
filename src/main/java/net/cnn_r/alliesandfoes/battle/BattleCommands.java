@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes.battle;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
@@ -35,6 +36,12 @@ public final class BattleCommands {
                                 .then(Commands.argument("allianceName", StringArgumentType.greedyString())
                                         .executes(ctx -> joinBattle(ctx.getSource(),
                                                 StringArgumentType.getString(ctx, "allianceName")))))
+                        .then(Commands.literal("setduration")
+                                .requires(src -> src.permissions().hasPermission(
+                                        net.minecraft.server.permissions.Permissions.COMMANDS_GAMEMASTER))
+                                .then(Commands.argument("minutes", IntegerArgumentType.integer(1, 60))
+                                        .executes(ctx -> setDuration(ctx.getSource(),
+                                                IntegerArgumentType.getInteger(ctx, "minutes")))))
         );
     }
 
@@ -62,6 +69,13 @@ public final class BattleCommands {
 
         BattleManager.get(server).challenge(player, target);
         source.sendSuccess(() -> Component.literal("Challenge sent to " + target.getName() + "."), false);
+        return 1;
+    }
+
+    private static int setDuration(CommandSourceStack source, int minutes) {
+        MinecraftServer server = source.getServer();
+        BattleManager.get(server).setDurationTicks(minutes * 60 * 20);
+        source.sendSuccess(() -> Component.literal("Battle duration set to " + minutes + " min."), true);
         return 1;
     }
 

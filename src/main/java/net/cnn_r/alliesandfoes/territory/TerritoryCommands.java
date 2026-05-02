@@ -2,6 +2,7 @@ package net.cnn_r.alliesandfoes.territory;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.network.TerritoryChunkBatchPayload;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -90,6 +91,15 @@ public final class TerritoryCommands {
         TerritoryAnchor anchor = anchors.get(0);
         ChunkKey targetChunk = ChunkKey.of(player.level(), player.chunkPosition());
 
+        // Expansion claims require a Chunk Fragment (1x) or 3x Chunk Fragment Shards
+        boolean hasWhole = player.getInventory().countItem(ModItems.CHUNK_FRAGMENT) >= 1;
+        boolean hasShards = player.getInventory().countItem(ModItems.CHUNK_FRAGMENT_SHARD) >= 3;
+        if (!hasWhole && !hasShards) {
+            source.sendFailure(Component.literal(
+                    "You need a Chunk Fragment or 3 Chunk Fragment Shards to claim a chunk."));
+            return 0;
+        }
+
         TerritoryManager.ActionResult result = tm.claimChunk(
                 player.getUUID(), anchor.getAnchorId(), targetChunk, true);
 
@@ -98,13 +108,22 @@ public final class TerritoryCommands {
             return 0;
         }
 
+        // Consume the fragment item
+        if (hasWhole) {
+            player.getInventory().clearOrCountMatchingItems(
+                    s -> s.is(ModItems.CHUNK_FRAGMENT), 1, null);
+        } else {
+            player.getInventory().clearOrCountMatchingItems(
+                    s -> s.is(ModItems.CHUNK_FRAGMENT_SHARD), 3, null);
+        }
+
         TerritoryChunkBatchPayload payload = TerritoryMapSyncService.buildChunkBatch(
                 new TerritoryQueryService(tm), List.of(targetChunk));
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             ServerPlayNetworking.send(p, payload);
         }
 
-        source.sendSuccess(() -> Component.literal(result.message() + " | Cost: " + result.cost()), false);
+        source.sendSuccess(() -> Component.literal(result.message()), false);
         return 1;
     }
 

@@ -2,9 +2,15 @@
   "itemGroup.alliesandfoes.main": "Allies & Foes",
   "key.alliesandfoes.open_map": "Open Map",
   "category.alliesandfoes": "Allies & Foes",
-  "item.alliesandfoes.copper_token": "Copper Token",
   "item.alliesandfoes.iron_token": "Iron Token",
   "item.alliesandfoes.gold_token": "Gold Token",
+  "item.alliesandfoes.diamond_token": "Diamond Token",
+  "item.alliesandfoes.emerald_token": "Emerald Token",
+  "item.alliesandfoes.chunk_fragment": "Chunk Fragment",
+  "item.alliesandfoes.chunk_fragment_shard": "Chunk Fragment Shard",
+  "item.alliesandfoes.dowsing_rod": "Dowsing Rod",
+  "item.alliesandfoes.trough": "Trough",
   "block.alliesandfoes.base_generator": "Base Generator",
-  "block.alliesandfoes.resource_generator": "Resource Generator"
+  "block.alliesandfoes.resource_generator": "Resource Generator",
+  "block.alliesandfoes.generator_pedestal": "Generator Pedestal"
 }

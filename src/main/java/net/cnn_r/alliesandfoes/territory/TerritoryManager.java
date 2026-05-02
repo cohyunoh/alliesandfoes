@@ -184,29 +184,8 @@ public class TerritoryManager {
         }
 
         int chunkValue = this.valueService.getOrCreateChunkValue(targetChunk);
-        int expansionCost = this.costService.getExpansionCost(chunkValue);
 
         UUID allianceId = alliance.getId();
-
-        PaymentResult affordabilityResult = this.paymentService.canPayExpansionCost(
-                playerUuid,
-                anchorId,
-                targetChunk,
-                expansionCost
-        );
-        if (!affordabilityResult.allowed()) {
-            return ActionResult.failure(affordabilityResult.failureReason());
-        }
-
-        PaymentResult paymentResult = this.paymentService.payExpansionCost(
-                playerUuid,
-                anchorId,
-                targetChunk,
-                expansionCost
-        );
-        if (!paymentResult.allowed()) {
-            return ActionResult.failure(paymentResult.failureReason());
-        }
 
         TerritoryClaim claim = TerritoryClaim.createExpansionClaim(
                 targetChunk,
@@ -224,7 +203,7 @@ public class TerritoryManager {
                 "Territory claimed.",
                 anchor,
                 claim,
-                expansionCost
+                0
         );
     }
 

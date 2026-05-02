@@ -7,12 +7,16 @@ import net.cnn_r.alliesandfoes.alliance.influence.AllianceInfluenceService;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWar;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
 import net.cnn_r.alliesandfoes.battle.BattleCommands;
+import net.cnn_r.alliesandfoes.battle.BattleDimensionManager;
 import net.cnn_r.alliesandfoes.battle.BattleManager;
+import net.cnn_r.alliesandfoes.battle.BattleSession;
+import net.cnn_r.alliesandfoes.battle.GeneratorPedestalSavedData;
 import net.cnn_r.alliesandfoes.battle.ShopService;
 import net.cnn_r.alliesandfoes.item.ModBlocks;
 import net.cnn_r.alliesandfoes.item.ModCreativeTab;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.network.*;
+import net.cnn_r.alliesandfoes.protect.BlockOwnerSavedData;
 import net.cnn_r.alliesandfoes.protect.BlockOwnerService;
 import net.cnn_r.alliesandfoes.protect.TrustListSavedData;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
@@ -216,10 +220,26 @@ public class Alliesandfoes implements ModInitializer {
 			context.server().execute(() -> {
 				TerritoryManager tm = TerritoryManager.get(context.server());
 				ChunkKey targetChunk = new ChunkKey(payload.dimensionId(), payload.chunkX(), payload.chunkZ());
-				TerritoryManager.ActionResult result = switch (payload.actionType()) {
-					case CLAIM -> tm.claimChunk(context.player().getUUID(), payload.anchorId(), targetChunk, true);
-					case UNCLAIM -> tm.unclaimChunk(context.player().getUUID(), payload.anchorId(), targetChunk, true);
-				};
+				TerritoryManager.ActionResult result;
+				if (payload.actionType() == net.cnn_r.alliesandfoes.network.RequestTerritoryActionPayload.ActionType.CLAIM) {
+					ServerPlayer claimPlayer = context.player();
+					boolean hasWhole = claimPlayer.getInventory().countItem(ModItems.CHUNK_FRAGMENT) >= 1;
+					boolean hasShards = claimPlayer.getInventory().countItem(ModItems.CHUNK_FRAGMENT_SHARD) >= 3;
+					if (!hasWhole && !hasShards) {
+						ServerPlayNetworking.send(claimPlayer, new MapScreenMessagePayload(
+								"You need a Chunk Fragment or 3 Chunk Fragment Shards to claim a chunk."));
+						return;
+					}
+					result = tm.claimChunk(claimPlayer.getUUID(), payload.anchorId(), targetChunk, true);
+					if (result.success()) {
+						if (hasWhole) claimPlayer.getInventory().clearOrCountMatchingItems(
+								s -> s.is(ModItems.CHUNK_FRAGMENT), 1, null);
+						else claimPlayer.getInventory().clearOrCountMatchingItems(
+								s -> s.is(ModItems.CHUNK_FRAGMENT_SHARD), 3, null);
+					}
+				} else {
+					result = tm.unclaimChunk(context.player().getUUID(), payload.anchorId(), targetChunk, true);
+				}
 				ServerPlayNetworking.send(context.player(), new MapScreenMessagePayload(result.message()));
 				TerritoryQueryService qs = new TerritoryQueryService(tm);
 				TerritoryChunkBatchPayload batch = TerritoryMapSyncService.buildChunkBatch(qs, List.of(targetChunk));
@@ -328,19 +348,29 @@ public class Alliesandfoes implements ModInitializer {
 		// ── War kill tracking ─────────────────────────────────────────────
 		ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
 			if (!(entity instanceof ServerPlayer victim)) return true;
-			if (!(source.getEntity() instanceof ServerPlayer killer)) return true;
 
 			MinecraftServer server = (MinecraftServer) victim.level().getServer();
 
-			// Check if in a battle
+			// Battle death: transfer tokens to killer, clear inventory (nothing drops)
 			UUID battleId = BattleManager.get(server).getBattleForPlayer(victim.getUUID());
 			if (battleId != null) {
-				AllianceWarService.get(server).saveAndClearInventory(victim);
+				ServerPlayer killer = source.getEntity() instanceof ServerPlayer kp ? kp : null;
+				if (killer != null) {
+					for (int i = 0; i < victim.getInventory().getContainerSize(); i++) {
+						ItemStack stack = victim.getInventory().getItem(i);
+						if (!stack.isEmpty() && BattleManager.isBattleToken(stack)) {
+							killer.getInventory().add(stack.copy());
+						}
+					}
+				}
+				victim.getInventory().clearContent();
 				BattleManager.get(server).onPlayerKill(battleId, killer, victim);
 				return true;
 			}
 
-			// Regular war kill tracking
+			// Regular war kill tracking — requires player killer
+			if (!(source.getEntity() instanceof ServerPlayer killer)) return true;
+
 			Alliance victimAlliance = AllianceManager.get(server).getAllianceFor(victim.getUUID());
 			Alliance killerAlliance = AllianceManager.get(server).getAllianceFor(killer.getUUID());
 			if (victimAlliance == null || killerAlliance == null) return true;
@@ -546,6 +576,36 @@ public class Alliesandfoes implements ModInitializer {
 			if (!(player instanceof ServerPlayer sp)) return true;
 			MinecraftServer server = sl.getServer();
 
+			// Battle dimension: BedWars-style block rules
+			if (BattleDimensionManager.isBattleDimension(sl)) {
+				BattleSession battleSession = BattleManager.get(server).findSessionForPlayer(sp.getUUID());
+				if (battleSession == null) return false; // non-participant can't break anything
+
+				// Base generator: only opposing team can break
+				if (state.is(ModBlocks.BASE_GENERATOR)) {
+					if (battleSession.generatorPosA != null && battleSession.generatorPosA.equals(pos)
+							&& battleSession.isOnTeamA(sp.getUUID())) {
+						sp.sendSystemMessage(Component.literal("§cYou can't destroy your own generator."), true);
+						return false;
+					}
+					if (battleSession.generatorPosB != null && battleSession.generatorPosB.equals(pos)
+							&& battleSession.isOnTeamB(sp.getUUID())) {
+						sp.sendSystemMessage(Component.literal("§cYou can't destroy your own generator."), true);
+						return false;
+					}
+					return true;
+				}
+
+				// Original terrain and system-placed blocks (no owner) are unbreakable
+				String battlePosKey = BlockOwnerService.toKey(sl, pos);
+				UUID blockOwner = BlockOwnerSavedData.get(server).getOwner(battlePosKey);
+				if (blockOwner == null) {
+					sp.sendSystemMessage(Component.literal("§cYou can't break the original terrain."), true);
+					return false;
+				}
+				return true; // player-placed block: any participant can break
+			}
+
 			// Block ownership check first
 			String posKey = BlockOwnerService.toKey(sl, pos);
 			if (!BlockOwnerService.get(server).canBreak(server, sp.getUUID(), posKey)) {
@@ -585,7 +645,11 @@ public class Alliesandfoes implements ModInitializer {
 		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
 			if (!(level instanceof ServerLevel sl)) return;
 			if (!(player instanceof ServerPlayer)) return;
-			BlockOwnerService.get(sl.getServer()).onBlockBroken(sl, pos);
+			MinecraftServer server = sl.getServer();
+			BlockOwnerService.get(server).onBlockBroken(sl, pos);
+			if (state.is(ModBlocks.BASE_GENERATOR)) {
+				BattleManager.get(server).onBaseGeneratorBroken(sl, pos);
+			}
 		});
 
 		UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
@@ -621,6 +685,37 @@ public class Alliesandfoes implements ModInitializer {
 
 			if (player instanceof ServerPlayer sp) {
 				BlockOwnerService.get(server).onBlockPlaced(server, sl, placePos, sp.getUUID());
+
+				// Generator pedestal placement: one per alliance, placing a second moves the first
+				if (stack.getItem() == ModItems.GENERATOR_PEDESTAL_ITEM) {
+					Alliance pedestalAlliance = AllianceManager.get(server).getAllianceFor(sp.getUUID());
+					if (pedestalAlliance == null) {
+						sp.sendSystemMessage(Component.literal("§cYou must be in an alliance to place a generator pedestal."), true);
+						sl.setBlock(placePos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 3);
+						return InteractionResult.FAIL;
+					}
+					TerritoryClaim pedestalClaim = TerritoryManager.get(server).getClaimAt(
+							ChunkKey.of(sl, new net.minecraft.world.level.ChunkPos(placePos.getX() >> 4, placePos.getZ() >> 4)));
+					if (pedestalClaim == null || !pedestalClaim.getAllianceId().equals(pedestalAlliance.getId())) {
+						sp.sendSystemMessage(Component.literal("§cYou can only place a generator pedestal in your own territory."), true);
+						sl.setBlock(placePos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 3);
+						return InteractionResult.FAIL;
+					}
+					// Remove the old pedestal block if one exists
+					GeneratorPedestalSavedData pedestalData = GeneratorPedestalSavedData.get(server);
+					GeneratorPedestalSavedData.PedestalData old = pedestalData.getPedestal(pedestalAlliance.getId());
+					if (old != null) {
+						net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> oldDimKey =
+								net.minecraft.resources.ResourceKey.create(
+										net.minecraft.core.registries.Registries.DIMENSION,
+										net.minecraft.resources.Identifier.parse(old.dimensionId()));
+						ServerLevel oldLevel = server.getLevel(oldDimKey);
+						if (oldLevel != null) oldLevel.setBlock(old.pos(), net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 3);
+					}
+					pedestalData.setPedestal(pedestalAlliance.getId(), placePos,
+							sl.dimension().identifier().toString());
+					sp.sendSystemMessage(Component.literal("§aGenerator pedestal set. Your generator will appear here in battle."), true);
+				}
 			}
 
 			return InteractionResult.PASS;

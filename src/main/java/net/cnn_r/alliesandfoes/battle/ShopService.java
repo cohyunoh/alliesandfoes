@@ -3,6 +3,7 @@ package net.cnn_r.alliesandfoes.battle;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -19,48 +20,45 @@ public class ShopService {
         return INSTANCES.computeIfAbsent(server, s -> new ShopService());
     }
 
-    public enum TokenType { COPPER, IRON, GOLD }
+    public enum TokenType { IRON, GOLD, DIAMOND, EMERALD }
 
-    public record ShopItem(int id, TokenType tokenType, int cost, ItemStack result) {
-        public ItemStack token(TokenType t) {
-            return switch (t) {
-                case COPPER -> new ItemStack(ModItems.COPPER_TOKEN);
-                case IRON -> new ItemStack(ModItems.IRON_TOKEN);
-                case GOLD -> new ItemStack(ModItems.GOLD_TOKEN);
-            };
-        }
-    }
+    public record ShopItem(int id, TokenType tokenType, int cost, String label) {}
 
-    private static final ShopItem[] ITEMS = {
-            new ShopItem(0,  TokenType.COPPER,  6,  armor(Items.CHAINMAIL_HELMET, Items.CHAINMAIL_CHESTPLATE, Items.CHAINMAIL_LEGGINGS, Items.CHAINMAIL_BOOTS)),
-            new ShopItem(1,  TokenType.IRON,   12,  armor(Items.IRON_HELMET, Items.IRON_CHESTPLATE, Items.IRON_LEGGINGS, Items.IRON_BOOTS)),
-            new ShopItem(2,  TokenType.GOLD,    8,  armor(Items.DIAMOND_HELMET, Items.DIAMOND_CHESTPLATE, Items.DIAMOND_LEGGINGS, Items.DIAMOND_BOOTS)),
-            new ShopItem(3,  TokenType.COPPER,  4,  new ItemStack(Items.STONE_SWORD)),
-            new ShopItem(4,  TokenType.IRON,    6,  new ItemStack(Items.IRON_SWORD)),
-            new ShopItem(5,  TokenType.GOLD,    8,  new ItemStack(Items.DIAMOND_SWORD)),
-            new ShopItem(6,  TokenType.COPPER,  4,  new ItemStack(Items.BOW)),
-            new ShopItem(7,  TokenType.IRON,    6,  new ItemStack(Items.CROSSBOW)),
-            new ShopItem(8,  TokenType.COPPER,  2,  new ItemStack(Items.ARROW, 16)),
-            new ShopItem(9,  TokenType.COPPER,  2,  new ItemStack(Items.WHITE_WOOL, 16)),
-            new ShopItem(10, TokenType.COPPER,  2,  new ItemStack(Items.STONE, 8)),
-            new ShopItem(11, TokenType.IRON,    4,  new ItemStack(Items.OBSIDIAN, 4)),
-            new ShopItem(12, TokenType.IRON,    4,  new ItemStack(Items.TNT)),
-            new ShopItem(13, TokenType.IRON,    3,  null), // slowness splash potion — built at purchase time
-            new ShopItem(14, TokenType.IRON,    3,  null), // weakness splash potion — built at purchase time
-            new ShopItem(15, TokenType.GOLD,    5,  new ItemStack(Items.GOLDEN_APPLE)),
-            new ShopItem(16, TokenType.IRON,    5,  new ItemStack(Items.ENDER_PEARL)),
+    public static final ShopItem[] ITEMS = {
+            // Armor (per piece)
+            new ShopItem(0,  TokenType.IRON,    4,  "Chainmail Helmet"),
+            new ShopItem(1,  TokenType.IRON,    5,  "Chainmail Chestplate"),
+            new ShopItem(2,  TokenType.IRON,    4,  "Chainmail Leggings"),
+            new ShopItem(3,  TokenType.IRON,    3,  "Chainmail Boots"),
+            new ShopItem(4,  TokenType.GOLD,    5,  "Iron Helmet"),
+            new ShopItem(5,  TokenType.GOLD,    6,  "Iron Chestplate"),
+            new ShopItem(6,  TokenType.GOLD,    5,  "Iron Leggings"),
+            new ShopItem(7,  TokenType.GOLD,    4,  "Iron Boots"),
+            new ShopItem(8,  TokenType.DIAMOND, 5,  "Diamond Helmet"),
+            new ShopItem(9,  TokenType.DIAMOND, 6,  "Diamond Chestplate"),
+            new ShopItem(10, TokenType.DIAMOND, 5,  "Diamond Leggings"),
+            new ShopItem(11, TokenType.DIAMOND, 4,  "Diamond Boots"),
+            // Weapons
+            new ShopItem(12, TokenType.IRON,    5,  "Stone Sword"),
+            new ShopItem(13, TokenType.IRON,    3,  "Bow"),
+            new ShopItem(14, TokenType.IRON,    3,  "Arrows x16"),
+            new ShopItem(15, TokenType.GOLD,    5,  "Iron Sword"),
+            new ShopItem(16, TokenType.GOLD,    5,  "Crossbow"),
+            new ShopItem(17, TokenType.DIAMOND, 5,  "Diamond Sword"),
+            // Blocks & utility
+            new ShopItem(18, TokenType.IRON,    3,  "Wool x8"),
+            new ShopItem(19, TokenType.IRON,    4,  "Stone x8"),
+            new ShopItem(20, TokenType.GOLD,    4,  "Obsidian x4"),
+            new ShopItem(21, TokenType.GOLD,    8,  "TNT"),
+            new ShopItem(22, TokenType.GOLD,    4,  "Weakness Potion"),
+            new ShopItem(23, TokenType.GOLD,    5,  "Slowness Potion"),
+            // Premium
+            new ShopItem(24, TokenType.EMERALD, 2,  "Golden Apple"),
+            new ShopItem(25, TokenType.EMERALD, 3,  "Ender Pearl"),
     };
 
-    private static ItemStack armor(net.minecraft.world.item.Item helmet,
-                                   net.minecraft.world.item.Item chest,
-                                   net.minecraft.world.item.Item legs,
-                                   net.minecraft.world.item.Item boots) {
-        // For armor sets, we use the helmet as a placeholder — BattleManager gives full sets
-        return new ItemStack(helmet);
-    }
-
     public void purchase(ServerPlayer player, UUID battleId, int itemId) {
-        net.minecraft.server.MinecraftServer mcServer = ((net.minecraft.server.level.ServerLevel) player.level()).getServer();
+        MinecraftServer mcServer = ((net.minecraft.server.level.ServerLevel) player.level()).getServer();
         BattleSession session = BattleManager.get(mcServer).findSession(battleId);
         if (session == null) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§cNo active battle found."), true);
@@ -76,27 +74,15 @@ public class ShopService {
             return;
         }
 
-        net.minecraft.world.item.Item tokenItem = switch (item.tokenType()) {
-            case COPPER -> ModItems.COPPER_TOKEN;
-            case IRON -> ModItems.IRON_TOKEN;
-            case GOLD -> ModItems.GOLD_TOKEN;
-        };
-
-        if (!player.getInventory().contains(new ItemStack(tokenItem))) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§cNot enough tokens."), true);
-            return;
-        }
-
-        int available = 0;
-        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
-            ItemStack s = player.getInventory().getItem(i);
-            if (s.getItem() == tokenItem) available += s.getCount();
-        }
+        Item tokenItem = tokenItem(item.tokenType());
+        int available = countTokens(player, tokenItem);
         if (available < item.cost()) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§cNeed " + item.cost() + " " + item.tokenType().name().toLowerCase() + " tokens."), true);
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "§cNeed " + item.cost() + " " + item.tokenType().name().toLowerCase() + " tokens (have " + available + ")."), true);
             return;
         }
 
+        // Deduct tokens
         int toRemove = item.cost();
         for (int i = 0; i < player.getInventory().getContainerSize() && toRemove > 0; i++) {
             ItemStack s = player.getInventory().getItem(i);
@@ -108,33 +94,63 @@ public class ShopService {
         }
 
         // Give items
-        if (itemId <= 2) {
-            giveArmorSet(player, itemId);
-        } else if (itemId == 13 || itemId == 14) {
-            giveSplashPotion(player, mcServer, itemId);
-        } else {
-            player.getInventory().add(item.result().copy());
+        giveItem(player, mcServer, itemId, item);
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§aPurchased: " + item.label()), true);
+    }
+
+    private void giveItem(ServerPlayer player, MinecraftServer server, int itemId, ShopItem item) {
+        switch (itemId) {
+            case 0  -> player.getInventory().add(new ItemStack(Items.CHAINMAIL_HELMET));
+            case 1  -> player.getInventory().add(new ItemStack(Items.CHAINMAIL_CHESTPLATE));
+            case 2  -> player.getInventory().add(new ItemStack(Items.CHAINMAIL_LEGGINGS));
+            case 3  -> player.getInventory().add(new ItemStack(Items.CHAINMAIL_BOOTS));
+            case 4  -> player.getInventory().add(new ItemStack(Items.IRON_HELMET));
+            case 5  -> player.getInventory().add(new ItemStack(Items.IRON_CHESTPLATE));
+            case 6  -> player.getInventory().add(new ItemStack(Items.IRON_LEGGINGS));
+            case 7  -> player.getInventory().add(new ItemStack(Items.IRON_BOOTS));
+            case 8  -> player.getInventory().add(new ItemStack(Items.DIAMOND_HELMET));
+            case 9  -> player.getInventory().add(new ItemStack(Items.DIAMOND_CHESTPLATE));
+            case 10 -> player.getInventory().add(new ItemStack(Items.DIAMOND_LEGGINGS));
+            case 11 -> player.getInventory().add(new ItemStack(Items.DIAMOND_BOOTS));
+            case 12 -> player.getInventory().add(new ItemStack(Items.STONE_SWORD));
+            case 13 -> player.getInventory().add(new ItemStack(Items.BOW));
+            case 14 -> player.getInventory().add(new ItemStack(Items.ARROW, 16));
+            case 15 -> player.getInventory().add(new ItemStack(Items.IRON_SWORD));
+            case 16 -> player.getInventory().add(new ItemStack(Items.CROSSBOW));
+            case 17 -> player.getInventory().add(new ItemStack(Items.DIAMOND_SWORD));
+            case 18 -> player.getInventory().add(new ItemStack(Items.WHITE_WOOL, 8));
+            case 19 -> player.getInventory().add(new ItemStack(Items.STONE, 8));
+            case 20 -> player.getInventory().add(new ItemStack(Items.OBSIDIAN, 4));
+            case 21 -> player.getInventory().add(new ItemStack(Items.TNT));
+            case 22 -> giveSplashPotion(player, net.minecraft.world.item.alchemy.Potions.WEAKNESS);
+            case 23 -> giveSplashPotion(player, net.minecraft.world.item.alchemy.Potions.SLOWNESS);
+            case 24 -> player.getInventory().add(new ItemStack(Items.GOLDEN_APPLE));
+            case 25 -> player.getInventory().add(new ItemStack(Items.ENDER_PEARL));
         }
     }
 
-    private void giveSplashPotion(ServerPlayer player, net.minecraft.server.MinecraftServer server, int itemId) {
-        net.minecraft.core.Holder<net.minecraft.world.item.alchemy.Potion> holder =
-                itemId == 13 ? net.minecraft.world.item.alchemy.Potions.SLOWNESS
-                             : net.minecraft.world.item.alchemy.Potions.WEAKNESS;
+    private void giveSplashPotion(ServerPlayer player, net.minecraft.core.Holder<net.minecraft.world.item.alchemy.Potion> potion) {
         ItemStack stack = new ItemStack(Items.SPLASH_POTION);
         stack.set(net.minecraft.core.component.DataComponents.POTION_CONTENTS,
-                new net.minecraft.world.item.alchemy.PotionContents(holder));
+                new net.minecraft.world.item.alchemy.PotionContents(potion));
         player.getInventory().add(stack);
     }
 
-    private void giveArmorSet(ServerPlayer player, int tier) {
-        net.minecraft.world.item.Item[] helmets  = {Items.CHAINMAIL_HELMET,  Items.IRON_HELMET,  Items.DIAMOND_HELMET};
-        net.minecraft.world.item.Item[] chests   = {Items.CHAINMAIL_CHESTPLATE, Items.IRON_CHESTPLATE, Items.DIAMOND_CHESTPLATE};
-        net.minecraft.world.item.Item[] legs     = {Items.CHAINMAIL_LEGGINGS, Items.IRON_LEGGINGS, Items.DIAMOND_LEGGINGS};
-        net.minecraft.world.item.Item[] boots    = {Items.CHAINMAIL_BOOTS,   Items.IRON_BOOTS,   Items.DIAMOND_BOOTS};
-        player.getInventory().add(new ItemStack(helmets[tier]));
-        player.getInventory().add(new ItemStack(chests[tier]));
-        player.getInventory().add(new ItemStack(legs[tier]));
-        player.getInventory().add(new ItemStack(boots[tier]));
+    private int countTokens(ServerPlayer player, Item tokenItem) {
+        int count = 0;
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            ItemStack s = player.getInventory().getItem(i);
+            if (s.getItem() == tokenItem) count += s.getCount();
+        }
+        return count;
+    }
+
+    private Item tokenItem(TokenType type) {
+        return switch (type) {
+            case IRON    -> ModItems.IRON_TOKEN;
+            case GOLD    -> ModItems.GOLD_TOKEN;
+            case DIAMOND -> ModItems.DIAMOND_TOKEN;
+            case EMERALD -> ModItems.EMERALD_TOKEN;
+        };
     }
 }

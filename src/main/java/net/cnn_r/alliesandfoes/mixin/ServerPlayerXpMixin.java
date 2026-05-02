@@ -21,7 +21,8 @@ public class ServerPlayerXpMixin {
             if (server == null || amount <= 0) return;
             Alliance alliance = AllianceManager.get(server).getAllianceFor(self.getUUID());
             if (alliance == null) return;
-            AllianceInfluenceService.get(server).add(alliance.getId(), amount);
+            int influenceGain = Math.max(1, amount / 5); // 5 XP = 1 influence
+            AllianceInfluenceService.get(server).add(alliance.getId(), influenceGain);
         } catch (Exception ignored) {}
     }
 }

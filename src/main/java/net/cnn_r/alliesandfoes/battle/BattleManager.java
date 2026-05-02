@@ -12,6 +12,8 @@ import net.cnn_r.alliesandfoes.network.BattleBaseSelectPayload;
 import net.cnn_r.alliesandfoes.network.BattleChallengePayload;
 import net.cnn_r.alliesandfoes.network.BattleEndPayload;
 import net.cnn_r.alliesandfoes.network.BattleStartPayload;
+import net.cnn_r.alliesandfoes.protect.BlockOwnerSavedData;
+import net.cnn_r.alliesandfoes.protect.BlockOwnerService;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.cnn_r.alliesandfoes.territory.TerritoryAnchor;
 import net.cnn_r.alliesandfoes.territory.TerritoryManager;
@@ -25,14 +27,19 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.DyedItemColor;
 import net.minecraft.world.level.GameType;
-import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -49,8 +56,9 @@ import java.util.WeakHashMap;
 public class BattleManager {
     private static final Map<MinecraftServer, BattleManager> INSTANCES = new WeakHashMap<>();
 
-    private static final int BATTLE_TIMEOUT_TICKS = 20 * 60 * 30; // 30 minutes
     private static final int COPY_CHUNKS_PER_TICK = 2;
+
+    private int durationTicks = 20 * 60 * 20; // default 20 minutes
 
     private final MinecraftServer server;
     private final List<BattleSession> sessions = new ArrayList<>();
@@ -61,6 +69,15 @@ public class BattleManager {
 
     public static BattleManager get(MinecraftServer server) {
         return INSTANCES.computeIfAbsent(server, BattleManager::new);
+    }
+
+    public void setDurationTicks(int ticks) { this.durationTicks = ticks; }
+    public int getDurationTicks() { return durationTicks; }
+
+    public static boolean isBattleToken(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        return stack.is(ModItems.IRON_TOKEN) || stack.is(ModItems.GOLD_TOKEN)
+                || stack.is(ModItems.DIAMOND_TOKEN) || stack.is(ModItems.EMERALD_TOKEN);
     }
 
     // =========================================================================
@@ -106,15 +123,13 @@ public class BattleManager {
             Alliance challenger = AllianceManager.get(server).getAllianceById(session.allianceAId);
             if (challenger != null) {
                 AllianceWarService.get(server).notifyAlliance(challenger,
-                        Component.literal("Battle challenge declined by " + AllianceManager.get(server).getAllianceById(session.allianceBId).getName())
+                        Component.literal("Battle challenge declined.")
                                 .withStyle(ChatFormatting.RED));
             }
             return;
         }
 
         session.prizeB = prize;
-
-        // Send base selection screen to both founders
         sendBaseSelectToFounder(session, session.allianceAId);
         sendBaseSelectToFounder(session, session.allianceBId);
     }
@@ -160,19 +175,28 @@ public class BattleManager {
         session.status = WarStatus.COPYING;
         session.zOffset = BattleDimensionManager.get(server).allocateOffset();
 
-        for (ChunkKey c : TerritoryManager.get(server).getClaimsForAnchor(session.chosenAnchorA)
-                .stream().map(cl -> cl.getChunkKey()).toList()) {
-            session.chunksA.add(c);
+        for (net.cnn_r.alliesandfoes.territory.TerritoryClaim c :
+                TerritoryManager.get(server).getClaimsForAnchor(session.chosenAnchorA)) {
+            session.chunksA.add(c.getChunkKey());
         }
-        for (ChunkKey c : TerritoryManager.get(server).getClaimsForAnchor(session.chosenAnchorB)
-                .stream().map(cl -> cl.getChunkKey()).toList()) {
-            session.chunksB.add(c);
+        for (net.cnn_r.alliesandfoes.territory.TerritoryClaim c :
+                TerritoryManager.get(server).getClaimsForAnchor(session.chosenAnchorB)) {
+            session.chunksB.add(c.getChunkKey());
         }
 
         AllianceWar war = AllianceWarService.get(server).getWarById(session.battleId);
         if (war != null) {
             AllianceWar updating = war.withStatus(WarStatus.COPYING, server.getTickCount());
             AllianceWarService.get(server).updateWar(war, updating);
+        }
+
+        // Compute surface bounds so copied arena is height-bounded (floating island look)
+        ServerLevel overworld = server.overworld();
+        java.util.List<ChunkKey> allChunks = new java.util.ArrayList<>(session.chunksA);
+        allChunks.addAll(session.chunksB);
+        if (!allChunks.isEmpty()) {
+            session.copyMinY = ChunkCopyService.findGlobalSurfaceMin(overworld, allChunks) - 8;
+            session.copyMaxY = ChunkCopyService.findGlobalSurfaceMax(overworld, allChunks);
         }
 
         notifyBoth(session, "⚔ Battle preparation starting — copying territory...", ChatFormatting.YELLOW);
@@ -194,10 +218,7 @@ public class BattleManager {
 
     private void tickCopying(BattleSession session) {
         ServerLevel battleLevel = BattleDimensionManager.get(server).getBattleLevel(server);
-        if (battleLevel == null) {
-            // Battle dimension not loaded — skip until available
-            return;
-        }
+        if (battleLevel == null) return;
 
         List<ChunkKey> allChunks = new ArrayList<>();
         allChunks.addAll(session.chunksA);
@@ -211,7 +232,7 @@ public class BattleManager {
             ServerLevel source = getLevel(dimId);
             if (source != null) {
                 int xOffset = isA ? 0 : ChunkCopyService.computeTeamBXOffset(new ArrayList<>(session.chunksA));
-                ChunkCopyService.copyOneChunk(source, battleLevel, chunk, xOffset, session.zOffset);
+                ChunkCopyService.copyOneChunk(source, battleLevel, chunk, xOffset, session.zOffset, session.copyMinY, session.copyMaxY);
             }
             session.copyProgress++;
             copied++;
@@ -224,13 +245,55 @@ public class BattleManager {
 
     private void tickActive(BattleSession session) {
         if (session.startTick < 0) return;
+        ServerLevel battleLevel = BattleDimensionManager.get(server).getBattleLevel(server);
+        if (battleLevel == null) return;
+
         long elapsed = server.getTickCount() - session.startTick;
-        if (elapsed > BATTLE_TIMEOUT_TICKS) {
-            // Time limit — determine winner by kills
-            int aKills = session.killsA;
-            int bKills = session.killsB;
-            UUID winner = aKills >= bKills ? session.allianceAId : session.allianceBId;
-            endBattle(session, winner);
+
+        // Update boss bar
+        session.updateBossBar(elapsed, durationTicks);
+
+        // Sudden death trigger
+        if (!session.suddenDeath && elapsed >= durationTicks) {
+            session.suddenDeath = true;
+            spawnDragon(battleLevel, session, session.generatorPosA);
+            spawnDragon(battleLevel, session, session.generatorPosB);
+            for (UUID uid : session.getAllParticipants()) {
+                ServerPlayer p = server.getPlayerList().getPlayer(uid);
+                if (p != null) p.sendSystemMessage(
+                        Component.literal("§c§lSUDDEN DEATH! Ender Dragons have arrived!"), false);
+            }
+        }
+
+        // Escalation stages
+        int stage = elapsed < 6000 ? 0 : (elapsed < 18000 ? 1 : 2);
+        int[] baseCooldown = {200, 100, 40};
+        int[] midCooldown  = {400, 200, 80};
+
+        // Base generators spawn iron + gold
+        if (session.generatorAAlive && session.generatorPosA != null) {
+            if (--session.baseGenCooldownA <= 0) {
+                spawnTokenAt(battleLevel, session.generatorPosA.above(), ModItems.IRON_TOKEN, 2);
+                spawnTokenAt(battleLevel, session.generatorPosA.above(), ModItems.GOLD_TOKEN, 1);
+                session.baseGenCooldownA = baseCooldown[stage];
+            }
+        }
+        if (session.generatorBAlive && session.generatorPosB != null) {
+            if (--session.baseGenCooldownB <= 0) {
+                spawnTokenAt(battleLevel, session.generatorPosB.above(), ModItems.IRON_TOKEN, 2);
+                spawnTokenAt(battleLevel, session.generatorPosB.above(), ModItems.GOLD_TOKEN, 1);
+                session.baseGenCooldownB = baseCooldown[stage];
+            }
+        }
+
+        // Middle islands spawn diamond + emerald
+        for (int i = 0; i < 3; i++) {
+            if (session.midGenPositions[i] == null) continue;
+            if (--session.midGenCooldowns[i] <= 0) {
+                Item token = (i == 2) ? ModItems.EMERALD_TOKEN : ModItems.DIAMOND_TOKEN;
+                spawnTokenAt(battleLevel, session.midGenPositions[i].above(), token, 1);
+                session.midGenCooldowns[i] = midCooldown[stage];
+            }
         }
     }
 
@@ -247,36 +310,74 @@ public class BattleManager {
         ServerLevel battleLevel = BattleDimensionManager.get(server).getBattleLevel(server);
         if (battleLevel == null) return;
 
-        // Place base generators
         int xOffsetB = ChunkCopyService.computeTeamBXOffset(new ArrayList<>(session.chunksA));
 
-        // Find a spawn pos for each base generator (use center of the first anchor chunk)
-        session.generatorPosA = findSpawnPos(session.chunksA, 0, session.zOffset);
-        session.generatorPosB = findSpawnPos(session.chunksB, xOffsetB, session.zOffset);
+        session.generatorPosA = resolveGeneratorPos(session, session.allianceAId, session.chunksA, 0);
+        session.generatorPosB = resolveGeneratorPos(session, session.allianceBId, session.chunksB, xOffsetB);
 
+        // Place base generators and mark ownership
+        BlockOwnerSavedData ownerData = BlockOwnerSavedData.get(server);
         if (session.generatorPosA != null) {
             battleLevel.setBlock(session.generatorPosA, ModBlocks.BASE_GENERATOR.defaultBlockState(), 3);
+            ownerData.setOwner(BlockOwnerService.toKey(battleLevel, session.generatorPosA), session.allianceAId);
         }
         if (session.generatorPosB != null) {
             battleLevel.setBlock(session.generatorPosB, ModBlocks.BASE_GENERATOR.defaultBlockState(), 3);
+            ownerData.setOwner(BlockOwnerService.toKey(battleLevel, session.generatorPosB), session.allianceBId);
         }
 
-        // Place resource islands in the middle
+        // Place resource islands
         placeResourceIslands(battleLevel, session, xOffsetB);
 
-        // Teleport and equip all participants
+        // Add hanging stone/gravel tails below the terrain (floating island look)
+        ChunkCopyService.addFloatingBase(battleLevel, session.chunksA, 0, session.zOffset, session.copyMinY);
+        ChunkCopyService.addFloatingBase(battleLevel, session.chunksB, xOffsetB, session.zOffset, session.copyMinY);
+
+        // Init boss bar
+        session.initBossBar();
+
+        // Save inventories, give kits, teleport
         for (UUID uuid : session.getAllParticipants()) {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player == null) continue;
+
+            // Save real-world inventory before giving battle kit
+            session.savedInventories.put(uuid, captureInventory(player));
+
             boolean isTeamA = session.isOnTeamA(uuid);
             giveKit(player, isTeamA);
             BlockPos spawn = isTeamA ? session.generatorPosA : session.generatorPosB;
             if (spawn == null) spawn = new BlockPos(0, 64, session.zOffset);
             teleport(player, battleLevel, spawn.getX() + 0.5, spawn.getY() + 1.5, spawn.getZ() + 0.5);
+
+            if (session.bossBar != null) session.bossBar.addPlayer(player);
             ServerPlayNetworking.send(player, new BattleStartPayload(session.battleId, isTeamA));
         }
 
         notifyBoth(session, "⚔ Battle has begun!", ChatFormatting.RED);
+    }
+
+    private BlockPos resolveGeneratorPos(BattleSession session, UUID allianceId, Set<ChunkKey> chunks, int xOffset) {
+        GeneratorPedestalSavedData.PedestalData pedestal =
+                GeneratorPedestalSavedData.get(server).getPedestal(allianceId);
+        if (pedestal != null) {
+            ChunkKey pedestalChunk = new ChunkKey(pedestal.dimensionId(),
+                    pedestal.pos().getX() >> 4, pedestal.pos().getZ() >> 4);
+            if (chunks.contains(pedestalChunk)) {
+                // Translate pedestal position into the battle dimension coordinate space
+                ServerLevel src = getLevel(pedestal.dimensionId());
+                if (src != null) {
+                    int srcBaseX = pedestalChunk.getChunkX() << 4;
+                    int srcBaseZ = pedestalChunk.getChunkZ() << 4;
+                    int relX = pedestal.pos().getX() - srcBaseX;
+                    int relZ = pedestal.pos().getZ() - srcBaseZ;
+                    int dstX = (pedestalChunk.getChunkX() << 4) + xOffset + relX;
+                    int dstZ = (pedestalChunk.getChunkZ() << 4) + session.zOffset + relZ;
+                    return new BlockPos(dstX, pedestal.pos().getY(), dstZ);
+                }
+            }
+        }
+        return findSpawnPos(chunks, xOffset, session.zOffset);
     }
 
     private BlockPos findSpawnPos(Set<ChunkKey> chunks, int xOffset, int zOffset) {
@@ -291,41 +392,60 @@ public class BattleManager {
         int midX = xOffsetB / 2;
         int z = session.zOffset + 8;
 
-        int[][] platforms = {{midX - 16, z}, {midX, z}, {midX + 16, z}};
-        int[] types = {0, 1, 2}; // copper, iron, gold
+        int[][] centers = {{midX - 16, z}, {midX, z}, {midX + 16, z}};
 
-        for (int i = 0; i < platforms.length; i++) {
-            int px = platforms[i][0];
-            int pz = platforms[i][1];
+        for (int i = 0; i < 3; i++) {
+            int cx = centers[i][0];
+            int cz = centers[i][1];
 
-            for (int dx = -2; dx <= 2; dx++) {
-                for (int dz = -2; dz <= 2; dz++) {
-                    level.setBlock(new BlockPos(px + dx, 62, pz + dz),
-                            net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(), 3);
-                }
-            }
+            placeFloatingIsland(level, cx, 63, cz);
 
             BlockState genState = ModBlocks.RESOURCE_GENERATOR.defaultBlockState()
-                    .setValue(net.cnn_r.alliesandfoes.block.ResourceGeneratorBlock.TOKEN_TYPE, types[i]);
-            level.setBlock(new BlockPos(px, 63, pz), genState, 3);
+                    .setValue(net.cnn_r.alliesandfoes.block.ResourceGeneratorBlock.TOKEN_TYPE, i);
+            BlockPos genPos = new BlockPos(cx, 65, cz);
+            level.setBlock(genPos, genState, 3);
+            session.midGenPositions[i] = genPos;
         }
+    }
+
+    // Floating island: grass top at y, tapers down to gravel tip at y-5
+    private void placeFloatingIsland(ServerLevel level, int cx, int y, int cz) {
+        // Grass cap 7x7
+        for (int dx = -3; dx <= 3; dx++)
+            for (int dz = -3; dz <= 3; dz++)
+                level.setBlock(new BlockPos(cx + dx, y, cz + dz), Blocks.GRASS_BLOCK.defaultBlockState(), 3);
+        // Dirt 7x7
+        for (int dx = -3; dx <= 3; dx++)
+            for (int dz = -3; dz <= 3; dz++)
+                level.setBlock(new BlockPos(cx + dx, y - 1, cz + dz), Blocks.DIRT.defaultBlockState(), 3);
+        // Stone 5x5
+        for (int dx = -2; dx <= 2; dx++)
+            for (int dz = -2; dz <= 2; dz++)
+                level.setBlock(new BlockPos(cx + dx, y - 2, cz + dz), Blocks.STONE.defaultBlockState(), 3);
+        // Stone 3x3
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+                level.setBlock(new BlockPos(cx + dx, y - 3, cz + dz), Blocks.STONE.defaultBlockState(), 3);
+        // Stone pillar
+        level.setBlock(new BlockPos(cx, y - 4, cz), Blocks.STONE.defaultBlockState(), 3);
+        // Gravel tip
+        level.setBlock(new BlockPos(cx, y - 5, cz), Blocks.GRAVEL.defaultBlockState(), 3);
     }
 
     private void giveKit(ServerPlayer player, boolean isTeamA) {
         player.getInventory().clearContent();
 
         int color = isTeamA ? 0xCC3333 : 0x3333CC;
-
-        player.setItemSlot(EquipmentSlot.HEAD, dyeLeather(new ItemStack(Items.LEATHER_HELMET), color));
+        player.setItemSlot(EquipmentSlot.HEAD,  dyeLeather(new ItemStack(Items.LEATHER_HELMET), color));
         player.setItemSlot(EquipmentSlot.CHEST, dyeLeather(new ItemStack(Items.LEATHER_CHESTPLATE), color));
-        player.setItemSlot(EquipmentSlot.LEGS, dyeLeather(new ItemStack(Items.LEATHER_LEGGINGS), color));
-        player.setItemSlot(EquipmentSlot.FEET, dyeLeather(new ItemStack(Items.LEATHER_BOOTS), color));
+        player.setItemSlot(EquipmentSlot.LEGS,  dyeLeather(new ItemStack(Items.LEATHER_LEGGINGS), color));
+        player.setItemSlot(EquipmentSlot.FEET,  dyeLeather(new ItemStack(Items.LEATHER_BOOTS), color));
 
         player.getInventory().add(new ItemStack(Items.WOODEN_SWORD));
         player.getInventory().add(new ItemStack(Items.CROSSBOW));
         player.getInventory().add(new ItemStack(Items.ARROW, 16));
         player.getInventory().add(new ItemStack(Items.WHITE_WOOL, 8));
-        player.getInventory().add(new ItemStack(ModItems.COPPER_TOKEN, 5));
+        player.getInventory().add(new ItemStack(ModItems.IRON_TOKEN, 5));
     }
 
     private ItemStack dyeLeather(ItemStack stack, int color) {
@@ -350,8 +470,16 @@ public class BattleManager {
         BattleSession session = findSession(battleId);
         if (session == null) return;
 
-        if (session.isOnTeamA(killer.getUUID())) session.killsA++;
-        else if (session.isOnTeamB(killer.getUUID())) session.killsB++;
+        if (killer != null) {
+            if (session.isOnTeamA(killer.getUUID())) session.killsA++;
+            else if (session.isOnTeamB(killer.getUUID())) session.killsB++;
+        }
+
+        // Influence penalty for the victim's alliance
+        Alliance victimAlliance = AllianceManager.get(server).getAllianceFor(victim.getUUID());
+        if (victimAlliance != null) {
+            deductInfluence(victimAlliance.getId(), 20);
+        }
     }
 
     public void onPlayerRespawn(ServerPlayer player) {
@@ -369,6 +497,9 @@ public class BattleManager {
         } else {
             BlockPos spawn = isTeamA ? session.generatorPosA : session.generatorPosB;
             if (spawn == null) spawn = new BlockPos(0, 64, session.zOffset);
+            player.setHealth(player.getMaxHealth());
+            giveKit(player, isTeamA);
+            if (session.bossBar != null) session.bossBar.addPlayer(player);
             teleport(player, battleLevel, spawn.getX() + 0.5, spawn.getY() + 1.5, spawn.getZ() + 0.5);
         }
     }
@@ -383,8 +514,31 @@ public class BattleManager {
             session.generatorBAlive = false;
         }
 
+        // Spectate survivors of the losing team
+        for (UUID uid : session.getAllParticipants()) {
+            boolean isA = session.isOnTeamA(uid);
+            boolean losingTeam = (isA && !session.generatorAAlive) || (!isA && !session.generatorBAlive);
+            if (losingTeam) {
+                ServerPlayer p = server.getPlayerList().getPlayer(uid);
+                if (p != null) p.setGameMode(GameType.SPECTATOR);
+            }
+        }
+
         UUID winner = teamAllianceId.equals(session.allianceAId) ? session.allianceBId : session.allianceAId;
         endBattle(session, winner);
+    }
+
+    public void onBaseGeneratorBroken(ServerLevel level, BlockPos pos) {
+        for (BattleSession session : new ArrayList<>(sessions)) {
+            if (pos.equals(session.generatorPosA)) {
+                onGeneratorDestroyed(session.battleId, session.allianceAId);
+                return;
+            }
+            if (pos.equals(session.generatorPosB)) {
+                onGeneratorDestroyed(session.battleId, session.allianceBId);
+                return;
+            }
+        }
     }
 
     public void endBattle(BattleSession session, UUID winnerAllianceId) {
@@ -399,10 +553,19 @@ public class BattleManager {
         Alliance winnerAlliance = AllianceManager.get(server).getAllianceById(winnerAllianceId);
         String winnerName = winnerAlliance != null ? winnerAlliance.getName() : "Unknown";
 
-        // Distribute prize
-        if (winnerPrize != null && winnerAlliance != null) {
-            distributePrize(winnerAlliance, winnerPrize);
+        if (winnerPrize != null && winnerAlliance != null) distributePrize(winnerAlliance, winnerPrize);
+
+        // Despawn dragons
+        ServerLevel battleLevel = BattleDimensionManager.get(server).getBattleLevel(server);
+        if (battleLevel != null) {
+            for (int dragonId : session.dragonIds) {
+                net.minecraft.world.entity.Entity e = battleLevel.getEntity(dragonId);
+                if (e != null) e.discard();
+            }
         }
+
+        // Remove boss bar
+        if (session.bossBar != null) session.bossBar.removeAllPlayers();
 
         // Return all players and restore inventories
         ServerLevel overworld = server.overworld();
@@ -410,14 +573,7 @@ public class BattleManager {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player == null) continue;
 
-            List<ItemStack> saved = AllianceWarService.get(server).popSavedInventory(uuid);
-            player.getInventory().clearContent();
-            if (saved != null) {
-                for (int i = 0; i < Math.min(36, saved.size()); i++) {
-                    player.getInventory().setItem(i, saved.get(i));
-                }
-            }
-
+            restoreInventory(player, session.savedInventories.get(uuid));
             player.setGameMode(GameType.SURVIVAL);
             BlockPos spawnPos = overworld.getRespawnData().pos();
             player.teleport(new TeleportTransition(overworld,
@@ -430,9 +586,11 @@ public class BattleManager {
         }
 
         // Wipe battle chunks
-        wipeChunks(session);
-
+        if (battleLevel != null) wipeChunks(session, battleLevel);
         BattleDimensionManager.get(server).freeOffset(session.zOffset);
+
+        // Also clear block ownership data for battle dimension
+        clearBattleOwnership(session);
     }
 
     private void distributePrize(Alliance alliance, PrizeType prize) {
@@ -449,18 +607,10 @@ public class BattleManager {
         }
     }
 
-    private void wipeChunks(BattleSession session) {
-        ServerLevel battleLevel = BattleDimensionManager.get(server).getBattleLevel(server);
-        if (battleLevel == null) return;
-
+    private void wipeChunks(BattleSession session, ServerLevel battleLevel) {
         int xOffsetB = ChunkCopyService.computeTeamBXOffset(new ArrayList<>(session.chunksA));
-
-        for (ChunkKey chunk : session.chunksA) {
-            clearChunk(battleLevel, chunk, 0, session.zOffset);
-        }
-        for (ChunkKey chunk : session.chunksB) {
-            clearChunk(battleLevel, chunk, xOffsetB, session.zOffset);
-        }
+        for (ChunkKey chunk : session.chunksA) clearChunk(battleLevel, chunk, 0, session.zOffset);
+        for (ChunkKey chunk : session.chunksB) clearChunk(battleLevel, chunk, xOffsetB, session.zOffset);
     }
 
     private void clearChunk(ServerLevel level, ChunkKey chunk, int xOffset, int zOffset) {
@@ -472,9 +622,21 @@ public class BattleManager {
             for (int z = 0; z < 16; z++) {
                 for (int y = minY; y < maxY; y++) {
                     level.setBlock(new BlockPos(baseX + x, y, baseZ + z),
-                            net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 3);
+                            Blocks.AIR.defaultBlockState(), 3);
                 }
             }
+        }
+    }
+
+    private void clearBattleOwnership(BattleSession session) {
+        BlockOwnerSavedData ownerData = BlockOwnerSavedData.get(server);
+        if (session.generatorPosA != null) {
+            ServerLevel bl = BattleDimensionManager.get(server).getBattleLevel(server);
+            if (bl != null) ownerData.removeOwner(BlockOwnerService.toKey(bl, session.generatorPosA));
+        }
+        if (session.generatorPosB != null) {
+            ServerLevel bl = BattleDimensionManager.get(server).getBattleLevel(server);
+            if (bl != null) ownerData.removeOwner(BlockOwnerService.toKey(bl, session.generatorPosB));
         }
     }
 
@@ -527,6 +689,10 @@ public class BattleManager {
         return null;
     }
 
+    public BattleSession getSessionForPlayer(UUID playerUuid) {
+        return findSessionForPlayer(playerUuid);
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
@@ -546,5 +712,56 @@ public class BattleManager {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private void spawnTokenAt(ServerLevel level, BlockPos pos, Item item, int count) {
+        net.minecraft.world.entity.item.ItemEntity entity = new net.minecraft.world.entity.item.ItemEntity(
+                level, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                new ItemStack(item, count));
+        entity.setPickUpDelay(10);
+        level.addFreshEntity(entity);
+    }
+
+    private void spawnDragon(ServerLevel level, BattleSession session, BlockPos near) {
+        if (near == null) return;
+        try {
+            EnderDragon dragon = EntityType.ENDER_DRAGON.create(level, EntitySpawnReason.EVENT);
+            if (dragon == null) return;
+            dragon.setPos(near.getX(), near.getY() + 30.0, near.getZ());
+            dragon.setHealth(dragon.getMaxHealth());
+            level.addFreshEntity(dragon);
+            session.dragonIds.add(dragon.getId());
+        } catch (Exception ignored) {}
+    }
+
+    private void deductInfluence(UUID allianceId, int amount) {
+        int balance = AllianceInfluenceService.get(server).getBalance(allianceId);
+        if (balance > 0) {
+            AllianceInfluenceService.get(server).trySpend(allianceId, Math.min(amount, balance));
+        }
+    }
+
+    private List<ItemStack> captureInventory(ServerPlayer player) {
+        List<ItemStack> snapshot = new ArrayList<>();
+        for (int i = 0; i < 36; i++) snapshot.add(player.getInventory().getItem(i).copy());
+        snapshot.add(player.getItemBySlot(EquipmentSlot.FEET).copy());
+        snapshot.add(player.getItemBySlot(EquipmentSlot.LEGS).copy());
+        snapshot.add(player.getItemBySlot(EquipmentSlot.CHEST).copy());
+        snapshot.add(player.getItemBySlot(EquipmentSlot.HEAD).copy());
+        snapshot.add(player.getItemBySlot(EquipmentSlot.OFFHAND).copy());
+        return snapshot;
+    }
+
+    private void restoreInventory(ServerPlayer player, List<ItemStack> snapshot) {
+        player.getInventory().clearContent();
+        if (snapshot == null) return;
+        int idx = 0;
+        for (int i = 0; i < 36 && idx < snapshot.size(); i++, idx++)
+            player.getInventory().setItem(i, snapshot.get(idx));
+        if (idx < snapshot.size()) player.setItemSlot(EquipmentSlot.FEET,    snapshot.get(idx++));
+        if (idx < snapshot.size()) player.setItemSlot(EquipmentSlot.LEGS,    snapshot.get(idx++));
+        if (idx < snapshot.size()) player.setItemSlot(EquipmentSlot.CHEST,   snapshot.get(idx++));
+        if (idx < snapshot.size()) player.setItemSlot(EquipmentSlot.HEAD,    snapshot.get(idx++));
+        if (idx < snapshot.size()) player.setItemSlot(EquipmentSlot.OFFHAND, snapshot.get(idx));
     }
 }
