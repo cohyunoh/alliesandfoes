@@ -329,6 +329,12 @@ public class MapState {
                 });
     }
 
+    /** Clears and re-queues all loaded chunks in the current dimension for scanning. */
+    public static void reloadCurrentDimension() {
+        triggerRescanCurrentDimension();
+        markMapDirty();
+    }
+
     private static void triggerRescanCurrentDimension() {
         ChunkScanner s = getScanner();
         ClientLevel level = Minecraft.getInstance().level;

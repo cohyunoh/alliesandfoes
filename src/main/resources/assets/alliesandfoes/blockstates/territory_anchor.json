@@ -1,0 +1,6 @@
+{
+  "variants": {
+    "active=false": { "model": "alliesandfoes:block/territory_anchor_inactive" },
+    "active=true":  { "model": "alliesandfoes:block/territory_anchor_active" }
+  }
+}

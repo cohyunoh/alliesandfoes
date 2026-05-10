@@ -44,14 +44,6 @@ public final class AllianceMapIntelPolicy {
     }
 
     /**
-     * Any alliance member may use the map screen's explorer intuition cues.
-     * The HUD layer is gated by the Monocle item instead (checked in HudMinimapRenderer).
-     */
-    public static boolean canUseExplorerIntuition() {
-        return AllianceClientState.isInAlliance();
-    }
-
-    /**
      * Raw structure intel remains a debug capability.
      * Founder is temporarily allowed here too so you can test without role swapping.
      */
@@ -78,10 +70,6 @@ public final class AllianceMapIntelPolicy {
     public static boolean isFounder() {
         String role = normalizeRole(AllianceClientState.getMemberRole());
         return role.equals("founder") || role.equals("owner");
-    }
-
-    public static boolean isExplorer() {
-        return normalizeRole(AllianceClientState.getMemberRole()).equals("explorer");
     }
 
     private static String normalizeRole(String role) {

@@ -3,14 +3,14 @@
 	"package": "net.cnn_r.alliesandfoes.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
-		"AbstractContainerMenuInvoker",
-		"InventoryMenuMixin",
 		"InventoryScreenMixin",
-		"ExplosionBlockProtectionMixin",
+		"ExplosionBlockSnapshotMixin",
 		"ExplosionChestProtectionMixin",
-		"ServerPlayerXpMixin"
+		"PlayerXpInfluenceMixin"
 	],
-	"client": [],
+	"client": [
+		"client.ClientLevelBlockChangeMixin"
+	],
 	"injectors": {
 		"defaultRequire": 1
 	},

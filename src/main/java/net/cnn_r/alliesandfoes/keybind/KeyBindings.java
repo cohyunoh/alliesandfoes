@@ -27,9 +27,11 @@ public class KeyBindings {
                 if (client.player != null && client.level != null) {
                     if (client.screen instanceof MapScreen) {
                         client.setScreen(null);
-                    } else if (client.screen == null) {
-                        client.setScreen(new MapScreen());
-                        client.player.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
+                    } else {
+                        if (client.screen == null) {
+                            client.setScreen(new MapScreen());
+                            client.player.playSound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 1.0f, 1.0f);
+                        }
                     }
                 }
             }

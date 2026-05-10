@@ -1,26 +1,28 @@
 package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
-import net.cnn_r.alliesandfoes.alliance.AllianceCommands;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
-import net.cnn_r.alliesandfoes.alliance.influence.AllianceInfluenceService;
+import net.cnn_r.alliesandfoes.network.DeadPetListSyncPayload;
+import net.cnn_r.alliesandfoes.network.RequestPetRevivePayload;
+import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
+import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWar;
+import net.cnn_r.alliesandfoes.network.TerritoryChunkBatchPayload;
+import net.cnn_r.alliesandfoes.territory.TerritoryClaim;
+import net.cnn_r.alliesandfoes.territory.TerritoryMapSyncService;
+import net.cnn_r.alliesandfoes.territory.TerritoryQueryService;
+import net.cnn_r.alliesandfoes.alliance.war.AllianceWarCommands;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
-import net.cnn_r.alliesandfoes.battle.BattleCommands;
-import net.cnn_r.alliesandfoes.battle.BattleDimensionManager;
-import net.cnn_r.alliesandfoes.battle.BattleManager;
-import net.cnn_r.alliesandfoes.battle.BattleSession;
-import net.cnn_r.alliesandfoes.battle.GeneratorPedestalSavedData;
-import net.cnn_r.alliesandfoes.battle.ShopService;
+import net.cnn_r.alliesandfoes.alliance.war.WarSnapshotService;
+import net.cnn_r.alliesandfoes.block.TerritoryAnchorBlock;
 import net.cnn_r.alliesandfoes.item.ModBlocks;
-import net.cnn_r.alliesandfoes.item.ModCreativeTab;
 import net.cnn_r.alliesandfoes.item.ModItems;
+import net.cnn_r.alliesandfoes.territory.FoundingManager;
 import net.cnn_r.alliesandfoes.network.*;
-import net.cnn_r.alliesandfoes.protect.BlockOwnerSavedData;
-import net.cnn_r.alliesandfoes.protect.BlockOwnerService;
-import net.cnn_r.alliesandfoes.protect.TrustListSavedData;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.structure.StructureChunkValueCalculator;
+import net.cnn_r.alliesandfoes.network.DeclareWarRequestPayload;
+import net.cnn_r.alliesandfoes.network.WarStateSyncPayload;
 import net.cnn_r.alliesandfoes.territory.*;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.api.ModInitializer;
@@ -41,40 +43,52 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.cnn_r.alliesandfoes.territory.ChestLootScorer;
+
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.TamableAnimal;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 public class Alliesandfoes implements ModInitializer {
+	// Tracks each player's last known chunk (as "dim:cx:cz") for entry notifications
 	private static final Map<UUID, String> playerLastChunkKey = new HashMap<>();
+	// Tracks last territory owner per player — message only fires on owner change
 	private static final Map<UUID, String> playerLastTerritoryKey = new HashMap<>();
-	private static final java.util.Set<UUID> hasSeenAllianceTip = new HashSet<>();
+	// Saves XP before death so it can be restored after respawn
+	private record XpSnapshot(int level, float progress) {}
+	private static final Map<UUID, XpSnapshot> savedXpMap = new HashMap<>();
+
+	private static ServerPlayer resolveKillerPlayer(net.minecraft.world.damagesource.DamageSource source) {
+		if (source.getEntity() instanceof ServerPlayer sp) return sp;
+		if (source.getDirectEntity() instanceof TamableAnimal pet
+				&& pet.getOwner() instanceof ServerPlayer owner) return owner;
+		return null;
+	}
 
 	@Override
 	public void onInitialize() {
 		net.cnn_r.alliesandfoes.config.ModConfig.load();
-		ModBlocks.register();
 		ModItems.register();
-		ModCreativeTab.register();
+		ModBlocks.register();
 		TerritoryCommands.register();
-		AllianceCommands.register();
-		BattleCommands.register();
+		AllianceProgressionCommands.register();
+		AllianceWarCommands.register();
 
 		registerTerritoryProtection();
-
-		// ── Clientbound payloads ──────────────────────────────────────────
 		PayloadTypeRegistry.clientboundPlay().register(PlayerPositionsPayload.TYPE, PlayerPositionsPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(ChunkStructurePayload.TYPE, ChunkStructurePayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(AllianceCreationScreenPayload.TYPE, AllianceCreationScreenPayload.STREAM_CODEC);
@@ -85,19 +99,7 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.clientboundPlay().register(AllianceInvitePayload.TYPE, AllianceInvitePayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(AllianceJoinRequestPayload.TYPE, AllianceJoinRequestPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(InviteAllianceManagementScreenPayload.TYPE, InviteAllianceManagementScreenPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(TerritoryChunkBatchPayload.TYPE, TerritoryChunkBatchPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(TerritoryPreviewBatchPayload.TYPE, TerritoryPreviewBatchPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(WarStateSyncPayload.TYPE, WarStateSyncPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(MapScreenMessagePayload.TYPE, MapScreenMessagePayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(AllianceInfluenceSyncPayload.TYPE, AllianceInfluenceSyncPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(BattleChallengePayload.TYPE, BattleChallengePayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(BattleBaseSelectPayload.TYPE, BattleBaseSelectPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(BattleStartPayload.TYPE, BattleStartPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(BattleEndPayload.TYPE, BattleEndPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(ShopOpenPayload.TYPE, ShopOpenPayload.STREAM_CODEC);
-		PayloadTypeRegistry.clientboundPlay().register(TrustListSyncPayload.TYPE, TrustListSyncPayload.STREAM_CODEC);
 
-		// ── Serverbound payloads ──────────────────────────────────────────
 		PayloadTypeRegistry.serverboundPlay().register(RequestAllianceCreationScreenPayload.TYPE, RequestAllianceCreationScreenPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestJoinAllianceScreenPayload.TYPE, RequestJoinAllianceScreenPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(CreateAlliancePayload.TYPE, CreateAlliancePayload.STREAM_CODEC);
@@ -111,30 +113,47 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(RespondAllianceJoinRequestPayload.TYPE, RespondAllianceJoinRequestPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestInviteAllianceManagementScreenPayload.TYPE, RequestInviteAllianceManagementScreenPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(SendAllianceInvitesPayload.TYPE, SendAllianceInvitesPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(TerritoryChunkBatchPayload.TYPE, TerritoryChunkBatchPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(TerritoryPreviewBatchPayload.TYPE, TerritoryPreviewBatchPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestTerritoryPreviewPayload.TYPE, RequestTerritoryPreviewPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestTerritoryActionPayload.TYPE, RequestTerritoryActionPayload.STREAM_CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(BattleRespondPayload.TYPE, BattleRespondPayload.STREAM_CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(BattleBaseChosenPayload.TYPE, BattleBaseChosenPayload.STREAM_CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(ShopPurchasePayload.TYPE, ShopPurchasePayload.STREAM_CODEC);
-		PayloadTypeRegistry.serverboundPlay().register(SetTrustPayload.TYPE, SetTrustPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(DeclareWarRequestPayload.TYPE, DeclareWarRequestPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(WarStateSyncPayload.TYPE, WarStateSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(WarInvitePayload.TYPE, WarInvitePayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RespondWarInvitePayload.TYPE, RespondWarInvitePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(MapScreenMessagePayload.TYPE, MapScreenMessagePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(AllianceInfluenceSyncPayload.TYPE, AllianceInfluenceSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(RollbackEligibleSyncPayload.TYPE, RollbackEligibleSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestRollbackChunkPayload.TYPE, RequestRollbackChunkPayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(DeadPetListSyncPayload.TYPE, DeadPetListSyncPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestPetRevivePayload.TYPE, RequestPetRevivePayload.STREAM_CODEC);
 
-		// ── Serverbound receivers ─────────────────────────────────────────
-		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) ->
-			context.server().execute(() -> AllianceManager.get(context.server()).sendCreationScreen(context.server(), context.player())));
+		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.get(context.server()).sendCreationScreen(context.server(), context.player());
+			});
+		});
 
-		ServerPlayNetworking.registerGlobalReceiver(RequestJoinAllianceScreenPayload.TYPE, (payload, context) ->
-			context.server().execute(() -> AllianceManager.get(context.server()).sendJoinScreen(context.server(), context.player())));
+		ServerPlayNetworking.registerGlobalReceiver(RequestJoinAllianceScreenPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.get(context.server()).sendJoinScreen(context.server(), context.player());
+			});
+		});
 
 		ServerPlayNetworking.registerGlobalReceiver(CreateAlliancePayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
 				AllianceManager.CreationResult result = AllianceManager.get(context.server())
 						.createAlliance(context.server(), context.player(), payload.allianceName(), payload.invitedPlayers());
+
 				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
+
 				if (!result.success()) {
 					AllianceManager.get(context.server()).sendCreationScreen(context.server(), context.player());
 					return;
 				}
-				context.player().sendSystemMessage(Component.literal("Created alliance: " + result.alliance().getName()), true);
+
+				context.player().sendSystemMessage(
+						Component.literal("Created alliance: " + result.alliance().getName()));
 			});
 		});
 
@@ -142,20 +161,28 @@ public class Alliesandfoes implements ModInitializer {
 			context.server().execute(() -> {
 				var result = AllianceManager.get(context.server())
 						.requestJoinAlliance(context.server(), context.player(), payload.allianceId());
+
 				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
 			});
 		});
 
-		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceViewPayload.TYPE, (payload, context) ->
-			context.server().execute(() -> AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player())));
+		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceViewPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.get(context.server()).sendViewScreen(context.server(), context.player());
+			});
+		});
 
-		ServerPlayNetworking.registerGlobalReceiver(RequestInviteAllianceManagementScreenPayload.TYPE, (payload, context) ->
-			context.server().execute(() -> AllianceManager.get(context.server()).sendInviteManagementScreen(context.server(), context.player())));
+		ServerPlayNetworking.registerGlobalReceiver(RequestInviteAllianceManagementScreenPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.get(context.server()).sendInviteManagementScreen(context.server(), context.player());
+			});
+		});
 
 		ServerPlayNetworking.registerGlobalReceiver(SendAllianceInvitesPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
 				var result = AllianceManager.get(context.server())
 						.sendAllianceInvites(context.server(), context.player(), payload.invitedPlayerUuids());
+
 				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
 			});
 		});
@@ -164,6 +191,7 @@ public class Alliesandfoes implements ModInitializer {
 			context.server().execute(() -> {
 				var result = AllianceManager.get(context.server())
 						.respondToInvite(context.server(), context.player(), payload.allianceId(), payload.accept());
+
 				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
 			});
 		});
@@ -172,7 +200,11 @@ public class Alliesandfoes implements ModInitializer {
 			context.server().execute(() -> {
 				var result = AllianceManager.get(context.server())
 						.kickMember(context.server(), context.player(), payload.targetUuid());
-				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
 			});
 		});
 
@@ -180,7 +212,11 @@ public class Alliesandfoes implements ModInitializer {
 			context.server().execute(() -> {
 				var result = AllianceManager.get(context.server())
 						.transferOwnership(context.server(), context.player(), payload.newOwnerUuid());
-				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
 			});
 		});
 
@@ -188,118 +224,172 @@ public class Alliesandfoes implements ModInitializer {
 			context.server().execute(() -> {
 				var result = AllianceManager.get(context.server())
 						.setMemberRole(context.server(), context.player(), payload.targetUuid(), payload.role());
-				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
 			});
 		});
 
+
 		ServerPlayNetworking.registerGlobalReceiver(LeaveAlliancePayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
-				var result = AllianceManager.get(context.server()).leaveAlliance(context.server(), context.player());
-				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
+				var result = AllianceManager.get(context.server())
+						.leaveAlliance(context.server(), context.player());
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
 			});
 		});
 
 		ServerPlayNetworking.registerGlobalReceiver(RespondAllianceJoinRequestPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
-				var result = AllianceManager.get(context.server()).respondToJoinRequest(
-						context.server(), context.player(), payload.allianceId(), payload.requesterUuid(), payload.accept());
-				ServerPlayNetworking.send(context.player(), new AllianceCreateResultPayload(result.success(), result.message()));
+				var result = AllianceManager.get(context.server())
+						.respondToJoinRequest(
+								context.server(),
+								context.player(),
+								payload.allianceId(),
+								payload.requesterUuid(),
+								payload.accept()
+						);
+
+				ServerPlayNetworking.send(
+						context.player(),
+						new AllianceCreateResultPayload(result.success(), result.message())
+				);
 			});
 		});
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestTerritoryPreviewPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
-				TerritoryManager tm = TerritoryManager.get(context.server());
+				TerritoryManager territoryManager = TerritoryManager.get(context.server());
+
 				TerritoryPreviewBatchPayload previewPayload = TerritoryPreviewSyncService.buildPreviewBatch(
-						tm, context.player(), payload, true, true, true);
+						territoryManager,
+						context.player(),
+						payload,
+						true,
+						true,
+						true
+				);
+
 				ServerPlayNetworking.send(context.player(), previewPayload);
 			});
 		});
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestTerritoryActionPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
-				TerritoryManager tm = TerritoryManager.get(context.server());
-				ChunkKey targetChunk = new ChunkKey(payload.dimensionId(), payload.chunkX(), payload.chunkZ());
-				TerritoryManager.ActionResult result;
-				if (payload.actionType() == net.cnn_r.alliesandfoes.network.RequestTerritoryActionPayload.ActionType.CLAIM) {
-					ServerPlayer claimPlayer = context.player();
-					boolean hasWhole = claimPlayer.getInventory().countItem(ModItems.CHUNK_FRAGMENT) >= 1;
-					boolean hasShards = claimPlayer.getInventory().countItem(ModItems.CHUNK_FRAGMENT_SHARD) >= 3;
-					if (!hasWhole && !hasShards) {
-						ServerPlayNetworking.send(claimPlayer, new MapScreenMessagePayload(
-								"You need a Chunk Fragment or 3 Chunk Fragment Shards to claim a chunk."));
-						return;
-					}
-					result = tm.claimChunk(claimPlayer.getUUID(), payload.anchorId(), targetChunk, true);
-					if (result.success()) {
-						if (hasWhole) claimPlayer.getInventory().clearOrCountMatchingItems(
-								s -> s.is(ModItems.CHUNK_FRAGMENT), 1, null);
-						else claimPlayer.getInventory().clearOrCountMatchingItems(
-								s -> s.is(ModItems.CHUNK_FRAGMENT_SHARD), 3, null);
-					}
-				} else {
-					result = tm.unclaimChunk(context.player().getUUID(), payload.anchorId(), targetChunk, true);
-				}
-				ServerPlayNetworking.send(context.player(), new MapScreenMessagePayload(result.message()));
-				TerritoryQueryService qs = new TerritoryQueryService(tm);
-				TerritoryChunkBatchPayload batch = TerritoryMapSyncService.buildChunkBatch(qs, List.of(targetChunk));
+				TerritoryManager territoryManager = TerritoryManager.get(context.server());
+				ChunkKey targetChunk = new ChunkKey(
+						payload.dimensionId(),
+						payload.chunkX(),
+						payload.chunkZ()
+				);
+
+				TerritoryManager.ActionResult result = switch (payload.actionType()) {
+					case CLAIM -> territoryManager.claimChunk(
+							context.player().getUUID(),
+							payload.anchorId(),
+							targetChunk,
+							true
+					);
+					case UNCLAIM -> territoryManager.unclaimChunk(
+							context.player().getUUID(),
+							payload.anchorId(),
+							targetChunk,
+							true
+					);
+				};
+
+				ServerPlayNetworking.send(context.player(),
+						new MapScreenMessagePayload(result.message()));
+
+				TerritoryQueryService queryService = new TerritoryQueryService(territoryManager);
+				TerritoryChunkBatchPayload territoryPayload = TerritoryMapSyncService.buildChunkBatch(
+						queryService,
+						List.of(targetChunk)
+				);
+
 				for (ServerPlayer receiver : context.server().getPlayerList().getPlayers()) {
-					ServerPlayNetworking.send(receiver, batch);
+					ServerPlayNetworking.send(receiver, territoryPayload);
 				}
 			});
 		});
 
-		ServerPlayNetworking.registerGlobalReceiver(BattleRespondPayload.TYPE, (payload, context) -> {
+		ServerPlayNetworking.registerGlobalReceiver(DeclareWarRequestPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
-				net.cnn_r.alliesandfoes.battle.PrizeType prize = null;
-				if (payload.accept()) {
-					net.cnn_r.alliesandfoes.battle.PrizeType[] vals = net.cnn_r.alliesandfoes.battle.PrizeType.values();
-					int ord = payload.prizeOrdinal();
-					if (ord >= 0 && ord < vals.length) prize = vals[ord];
-				}
-				BattleManager.get(context.server()).respond(context.player(), payload.battleId(), payload.accept(), prize);
-			});
-		});
-
-		ServerPlayNetworking.registerGlobalReceiver(BattleBaseChosenPayload.TYPE, (payload, context) ->
-			context.server().execute(() ->
-				BattleManager.get(context.server()).onBaseChosen(context.player(), payload.battleId(), payload.chosenAnchorId())));
-
-		ServerPlayNetworking.registerGlobalReceiver(ShopPurchasePayload.TYPE, (payload, context) ->
-			context.server().execute(() ->
-				ShopService.get(context.server()).purchase(context.player(), payload.battleId(), payload.itemId())));
-
-		ServerPlayNetworking.registerGlobalReceiver(SetTrustPayload.TYPE, (payload, context) -> {
-			context.server().execute(() -> {
-				MinecraftServer server = context.server();
 				ServerPlayer player = context.player();
+				List<ChunkKey> chunks = new ArrayList<>();
+				for (int i = 0; i < payload.chunkXs().length; i++) {
+					chunks.add(new ChunkKey(payload.dimensionId(), payload.chunkXs()[i], payload.chunkZs()[i]));
+				}
+				String error = AllianceWarService.get(context.server())
+						.declareWar(player, payload.targetAllianceId(), chunks);
+				if (error != null) {
+					ServerPlayNetworking.send(player, new MapScreenMessagePayload(error));
+				}
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RespondWarInvitePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				ServerPlayer player = context.player();
+				String error = payload.accept()
+						? AllianceWarService.get(context.server()).acceptWarById(player, payload.warId())
+						: AllianceWarService.get(context.server()).declineWarById(player, payload.warId());
+				if (error != null) {
+					player.sendSystemMessage(Component.literal(error).withStyle(ChatFormatting.RED));
+				}
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestRollbackChunkPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				ServerPlayer player = context.player();
+				MinecraftServer server = context.server();
 				Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
 				if (alliance == null || !alliance.getOwnerUuid().equals(player.getUUID())) return;
 
-				TrustListSavedData trustData = TrustListSavedData.get(server);
-				// Clear existing trust for this alliance
-				for (Alliance other : AllianceManager.get(server).getAlliances()) {
-					if (!other.getId().equals(alliance.getId())) {
-						trustData.untrust(alliance.getId(), other.getId());
-					}
-				}
-				// Apply new trust list
-				for (UUID trustedId : payload.trustedAllianceIds()) {
-					trustData.trust(alliance.getId(), trustedId);
+				AllianceWar war = AllianceWarService.get(server).getWarById(payload.warId());
+				if (war == null || war.status() != net.cnn_r.alliesandfoes.alliance.war.WarStatus.ENDED) return;
+				if (!war.defenderId().equals(alliance.getId())) return;
+
+				ChunkKey chunk = new ChunkKey(payload.dimensionId(), payload.chunkX(), payload.chunkZ());
+				TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
+				if (claim == null || !claim.getAllianceId().equals(alliance.getId())) {
+					ServerPlayNetworking.send(player, new MapScreenMessagePayload("Chunk no longer owned by your alliance."));
+					return;
 				}
 
-				AllianceCommands.sendTrustListSync(server, player, alliance);
+				int cost = AllianceWarService.ROLLBACK_COST_PER_CHUNK;
+				AllianceProgressionService prog = AllianceProgressionService.get(server);
+				if (!prog.canAfford(alliance.getId(), cost)) {
+					ServerPlayNetworking.send(player, new MapScreenMessagePayload(
+							"Need " + cost + " influence. Have: " + prog.getBalance(alliance.getId()) + "."));
+					return;
+				}
+				prog.trySpend(alliance.getId(), cost);
+				WarSnapshotService.get(server).rollbackChunk(payload.warId(), chunk, server);
+				AllianceWarService.get(server).broadcastRollbackEligible(payload.warId());
+
+				TerritoryQueryService qs = new TerritoryQueryService(TerritoryManager.get(server));
+				TerritoryChunkBatchPayload batch = TerritoryMapSyncService.buildChunkBatch(qs, List.of(chunk));
+				for (ServerPlayer p : server.getPlayerList().getPlayers()) ServerPlayNetworking.send(p, batch);
 			});
 		});
 
-		// ── Territory damage protection ───────────────────────────────────
+		// Territory protection: non-members cannot hurt alliance members or their tamed pets
 		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
 			MinecraftServer server = entity.level() instanceof ServerLevel sl ? sl.getServer() : null;
 			if (server == null) return true;
 
 			String dimId = entity.level().dimension().identifier().toString();
 			ChunkKey victimChunk = new ChunkKey(dimId,
-					entity.blockPosition().getX() >> 4, entity.blockPosition().getZ() >> 4);
+					entity.blockPosition().getX() >> 4,
+					entity.blockPosition().getZ() >> 4);
 
 			TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(victimChunk);
 			if (claim == null) return true;
@@ -309,12 +399,12 @@ public class Alliesandfoes implements ModInitializer {
 			if (inActiveWar) return true;
 
 			UUID claimingAllianceId = claim.getAllianceId();
-			boolean victimIsProtected = false;
 
+			boolean victimIsProtected = false;
 			if (entity instanceof ServerPlayer vp) {
 				Alliance va = AllianceManager.get(server).getAllianceFor(vp.getUUID());
 				victimIsProtected = va != null && va.getId().equals(claimingAllianceId);
-			} else if (entity instanceof net.minecraft.world.entity.TamableAnimal tamable && tamable.isTame()) {
+			} else if (entity instanceof TamableAnimal tamable && tamable.isTame()) {
 				var ownerRef = tamable.getOwnerReference();
 				if (ownerRef != null) {
 					Alliance oa = AllianceManager.get(server).getAllianceFor(ownerRef.getUUID());
@@ -334,113 +424,146 @@ public class Alliesandfoes implements ModInitializer {
 			return false;
 		});
 
-		// ── Friendly fire prevention ──────────────────────────────────────
-		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
-			if (!(entity instanceof ServerPlayer victim)) return true;
-			if (!(source.getEntity() instanceof ServerPlayer attacker)) return true;
-			MinecraftServer server = (MinecraftServer) victim.level().getServer();
-			Alliance va = AllianceManager.get(server).getAllianceFor(victim.getUUID());
-			Alliance aa = AllianceManager.get(server).getAllianceFor(attacker.getUUID());
-			if (va == null || aa == null) return true;
-			return !va.getId().equals(aa.getId());
+		ServerPlayNetworking.registerGlobalReceiver(RequestPetRevivePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				ServerPlayer player = context.player();
+				MinecraftServer server = context.server();
+				Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+				if (alliance == null || !alliance.getOwnerUuid().equals(player.getUUID())) return;
+
+				net.cnn_r.alliesandfoes.alliance.war.AllianceWar war =
+						AllianceWarService.get(server).getWarById(payload.warId());
+				if (war == null || !war.defenderId().equals(alliance.getId())) return;
+
+				WarSnapshotService snap = WarSnapshotService.get(server);
+				List<WarSnapshotService.PetDeathRecord> allPets = snap.getPetDeaths(payload.warId());
+				if (allPets.isEmpty()) return;
+
+				List<Integer> selected = payload.selectedIndices().stream()
+						.filter(i -> i >= 0 && i < allPets.size())
+						.distinct()
+						.sorted()
+						.toList();
+				if (selected.isEmpty()) return;
+
+				int cost = selected.size() * AllianceWarService.PET_REVIVE_COST_EACH;
+				AllianceProgressionService prog = AllianceProgressionService.get(server);
+				if (!prog.canAfford(alliance.getId(), cost)) {
+					ServerPlayNetworking.send(player, new MapScreenMessagePayload(
+							"Need " + cost + " influence to revive " + selected.size() + " pet(s)."));
+					return;
+				}
+				prog.trySpend(alliance.getId(), cost);
+
+				// Revive selected pets and remove them from the list (iterate in reverse to preserve indices)
+				List<WarSnapshotService.PetDeathRecord> mutablePets = new java.util.ArrayList<>(allPets);
+				for (int i = selected.size() - 1; i >= 0; i--) {
+					WarSnapshotService.PetDeathRecord pet = mutablePets.remove((int) selected.get(i));
+					ServerPlayer owner = pet.ownerUuid() != null
+							? server.getPlayerList().getPlayer(pet.ownerUuid()) : null;
+					ServerPlayer spawnTarget = owner != null ? owner : player;
+					net.minecraft.server.level.ServerLevel spawnLevel = (net.minecraft.server.level.ServerLevel) spawnTarget.level();
+					net.minecraft.world.level.storage.ValueInput petInput =
+							net.minecraft.world.level.storage.TagValueInput.create(
+									net.minecraft.util.ProblemReporter.DISCARDING,
+									server.registryAccess(), pet.entityNbt());
+					net.minecraft.world.entity.EntityType.loadEntityRecursive(
+							petInput, spawnLevel, net.minecraft.world.entity.EntitySpawnReason.LOAD,
+							e -> {
+								e.setPos(spawnTarget.getX() + 1.5, spawnTarget.getY(), spawnTarget.getZ() + 1.5);
+								if (e instanceof net.minecraft.world.entity.LivingEntity le)
+									le.setHealth(le.getMaxHealth());
+								if (e instanceof net.minecraft.world.entity.Mob mob) {
+									mob.setTarget(null);
+									if (mob instanceof net.minecraft.world.entity.NeutralMob neutral) {
+										neutral.stopBeingAngry();
+									}
+								}
+								spawnLevel.addFreshEntity(e);
+								return e;
+							});
+				}
+				snap.replacePetDeaths(payload.warId(), mutablePets);
+				AllianceWarService.get(server).broadcastDeadPets(payload.warId());
+			});
 		});
 
-		// ── War kill tracking ─────────────────────────────────────────────
-		ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
-			if (!(entity instanceof ServerPlayer victim)) return true;
-
-			MinecraftServer server = (MinecraftServer) victim.level().getServer();
-
-			// Battle death: transfer tokens to killer, clear inventory (nothing drops)
-			UUID battleId = BattleManager.get(server).getBattleForPlayer(victim.getUUID());
-			if (battleId != null) {
-				ServerPlayer killer = source.getEntity() instanceof ServerPlayer kp ? kp : null;
-				if (killer != null) {
-					for (int i = 0; i < victim.getInventory().getContainerSize(); i++) {
-						ItemStack stack = victim.getInventory().getItem(i);
-						if (!stack.isEmpty() && BattleManager.isBattleToken(stack)) {
-							killer.getInventory().add(stack.copy());
-						}
-					}
-				}
-				victim.getInventory().clearContent();
-				BattleManager.get(server).onPlayerKill(battleId, killer, victim);
-				return true;
+		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+			// Founding ritual: soul particles when a ritual mob dies
+			if (entity instanceof net.minecraft.world.entity.Mob && !entity.level().isClientSide()) {
+				ServerLevel sLevel = (ServerLevel) entity.level();
+				FoundingManager.get(sLevel.getServer()).onRitualMobDied(
+						entity.getUUID(), entity.position(), sLevel);
 			}
 
-			// Regular war kill tracking — requires player killer
-			if (!(source.getEntity() instanceof ServerPlayer killer)) return true;
+			MinecraftServer server = entity.level() instanceof ServerLevel sl ? sl.getServer() : null;
+			if (server == null) return;
 
-			Alliance victimAlliance = AllianceManager.get(server).getAllianceFor(victim.getUUID());
-			Alliance killerAlliance = AllianceManager.get(server).getAllianceFor(killer.getUUID());
-			if (victimAlliance == null || killerAlliance == null) return true;
-
-			Optional<AllianceWar> warOpt = AllianceWarService.get(server)
-					.getActiveWarBetween(victimAlliance.getId(), killerAlliance.getId());
-			if (warOpt.isEmpty()) return true;
-
-			AllianceWarService.get(server).saveAndClearInventory(victim);
-			return true;
-		});
-
-		// ── Respawn handling ──────────────────────────────────────────────
-		ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
-			MinecraftServer srv = (MinecraftServer) newPlayer.level().getServer();
-
-			UUID battleId = BattleManager.get(srv).getBattleForPlayer(newPlayer.getUUID());
-			if (battleId != null) {
-				BattleManager.get(srv).onPlayerRespawn(newPlayer);
+			// Tamed pets: record for the active war their owner is defending in
+			if (entity instanceof TamableAnimal tamable && tamable.isTame()) {
+				var ownerRef = tamable.getOwnerReference();
+				if (ownerRef != null) {
+					UUID ownerUuid = ownerRef.getUUID();
+					AllianceWarService.get(server).getActiveWars().stream()
+							.filter(w -> {
+								net.cnn_r.alliesandfoes.alliance.Alliance def =
+										AllianceManager.get(server).getAllianceById(w.defenderId());
+								return def != null && def.getMemberUuids().contains(ownerUuid);
+							})
+							.findFirst()
+							.ifPresent(war ->
+								WarSnapshotService.get(server).recordPetDeath(war.id(), tamable)
+							);
+				}
 				return;
 			}
 
-			List<ItemStack> saved = AllianceWarService.get(srv).popSavedInventory(newPlayer.getUUID());
-			if (saved == null) return;
-			var inv = newPlayer.getInventory();
-			int idx = 0;
-			for (int i = 0; i < 36 && idx < saved.size(); i++, idx++) inv.setItem(i, saved.get(idx));
-			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.FEET, saved.get(idx++));
-			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.LEGS, saved.get(idx++));
-			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.CHEST, saved.get(idx++));
-			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.HEAD, saved.get(idx++));
-			if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.OFFHAND, saved.get(idx));
+			// Named non-tamed mobs: record if they die inside contested territory
+			if (entity instanceof net.minecraft.world.entity.Mob mob && mob.hasCustomName()) {
+				net.cnn_r.alliesandfoes.territory.ChunkKey deathChunk =
+						new net.cnn_r.alliesandfoes.territory.ChunkKey(
+								entity.level().dimension().identifier().toString(),
+								entity.blockPosition().getX() >> 4,
+								entity.blockPosition().getZ() >> 4);
+				AllianceWarService.get(server).getActiveWars().stream()
+						.filter(w -> w.contestedChunks().contains(deathChunk))
+						.findFirst()
+						.ifPresent(war ->
+							WarSnapshotService.get(server).recordPetDeath(war.id(), mob)
+						);
+			}
 		});
 
-		// ── Server tick ───────────────────────────────────────────────────
+
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			List<ServerPlayer> players = server.getPlayerList().getPlayers();
-			if (players.isEmpty()) return;
 
+			if (players.isEmpty()) {
+				return;
+			}
+
+			// Tick war timers and transitions
 			AllianceWarService.get(server).tickWars();
-			BattleManager.get(server).tick(server);
+			FoundingManager.get(server).tick();
 
-			// Player position broadcast
 			List<PlayerPositionsPayload.Entry> entries = new ArrayList<>();
+
 			for (ServerPlayer player : players) {
 				entries.add(new PlayerPositionsPayload.Entry(
-						player.getUUID(), player.getName().getString(),
-						player.getX(), player.getZ(), player.getYRot()));
+						player.getUUID(),
+						player.getName().getString(),
+						player.getX(),
+						player.getZ(),
+						player.getYRot()
+				));
 			}
-			PlayerPositionsPayload posPayload = new PlayerPositionsPayload(entries);
+			PlayerPositionsPayload payload = new PlayerPositionsPayload(entries);
+
 			for (ServerPlayer receiver : players) {
-				ServerPlayNetworking.send(receiver, posPayload);
+				ServerPlayNetworking.send(receiver, payload);
 			}
 
-			// Territory passive regen every 5s
-			if (server.getTickCount() % 100 == 0) {
-				for (ServerPlayer player : players) {
-					Alliance regenAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
-					if (regenAlliance == null) continue;
-					String dimId = ((ServerLevel) player.level()).dimension().identifier().toString();
-					ChunkKey chunk = new ChunkKey(dimId, player.blockPosition().getX() >> 4, player.blockPosition().getZ() >> 4);
-					TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
-					if (claim != null && claim.getAllianceId().equals(regenAlliance.getId())) {
-						player.addEffect(new net.minecraft.world.effect.MobEffectInstance(
-								net.minecraft.world.effect.MobEffects.REGENERATION, 200, 0, false, false));
-					}
-				}
-			}
-
-			// Territory border notifications
+			// Territory border action bar notifications — fires only when territory owner changes
 			for (ServerPlayer player : players) {
 				ChunkPos cp = player.chunkPosition();
 				String dimId = ((ServerLevel) player.level()).dimension().identifier().toString();
@@ -463,65 +586,190 @@ public class Alliesandfoes implements ModInitializer {
 			}
 		});
 
-		// ── Chunk load: structure sync ────────────────────────────────────
-		ServerChunkEvents.CHUNK_LOAD.register((world, chunk, wasAlreadyLoaded) -> {
-			if (!(world instanceof ServerLevel level)) return;
-			ChunkPos pos = chunk.getPos();
-			ChunkStructureData data = StructureChunkValueCalculator.analyze(level, pos);
-			ChunkStructurePayload payload = new ChunkStructurePayload(
-					level.dimension().identifier().toString(), pos.x(), pos.z(),
-					data.getStructureValue(), data.getStructureNames());
-			for (ServerPlayer player : level.players()) {
-				ChunkPos pp = player.chunkPosition();
-				int dx = Math.abs(pp.x() - pos.x()), dz = Math.abs(pp.z() - pos.z());
-				if (Math.max(dx, dz) <= 8) ServerPlayNetworking.send(player, payload);
+		// Save XP before any player death so it can be restored after respawn
+		ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+			if (entity instanceof ServerPlayer player) {
+				savedXpMap.put(player.getUUID(), new XpSnapshot(player.experienceLevel, player.experienceProgress));
 			}
+			return true;
 		});
 
-		// ── Player join ───────────────────────────────────────────────────
-		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-			ServerPlayer player = handler.player;
-			ServerLevel level = player.level();
-			ChunkPos center = player.chunkPosition();
+		// War kill tracking: save victim's inventory, record kill, allow death
+		ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+			if (!(entity instanceof ServerPlayer victim)) return true;
 
-			AllianceManager.get(server).syncPlayer(player);
-			AllianceWarService.get(server).onPlayerJoin(player);
+			MinecraftServer server = (MinecraftServer) victim.level().getServer();
+			AllianceWarService ws = AllianceWarService.get(server);
 
-			Alliance joinAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
-			if (joinAlliance != null) {
-				AllianceInfluenceService.get(server).syncToPlayer(player, joinAlliance.getId());
-				AllianceCommands.sendTrustListSync(server, player, joinAlliance);
+			AllianceWar victimWar = ws.getActiveWarForPlayer(victim.getUUID());
+			if (victimWar == null) return true;
+
+			// Always keep inventory for war participants — self-deaths included
+			ws.saveAndClearInventory(victim);
+
+			// Only award a kill if the damage is attributed to an opposing player
+			ServerPlayer killer = resolveKillerPlayer(source);
+			if (killer != null) {
+				Alliance killerAlliance = AllianceManager.get(server).getAllianceFor(killer.getUUID());
+				if (killerAlliance != null && victimWar.involves(killerAlliance.getId())) {
+					ws.recordKill(victimWar.id(), killer, victim);
+				}
+			}
+			return true;
+		});
+
+		// Friendly fire prevention: same-alliance players and their pets cannot damage each other
+		ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+			MinecraftServer server = entity.level() instanceof ServerLevel sl ? sl.getServer() : null;
+			if (server == null) return true;
+
+			UUID victimAllianceId = null;
+			if (entity instanceof ServerPlayer vp) {
+				Alliance va = AllianceManager.get(server).getAllianceFor(vp.getUUID());
+				if (va != null) victimAllianceId = va.getId();
+			} else if (entity instanceof TamableAnimal pet && pet.isTame()) {
+				var ownerRef = pet.getOwnerReference();
+				if (ownerRef != null) {
+					Alliance oa = AllianceManager.get(server).getAllianceFor(ownerRef.getUUID());
+					if (oa != null) victimAllianceId = oa.getId();
+				}
+			}
+			if (victimAllianceId == null) return true;
+
+			ServerPlayer attackerPlayer = resolveKillerPlayer(source);
+			if (attackerPlayer == null) return true;
+			if (entity == attackerPlayer) return true; // allow self-damage
+
+			Alliance attackerAlliance = AllianceManager.get(server).getAllianceFor(attackerPlayer.getUUID());
+			if (attackerAlliance == null) return true;
+
+			return !victimAllianceId.equals(attackerAlliance.getId());
+		});
+
+		// Restore saved inventory and teleport to war zone after war death respawn
+		ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+			MinecraftServer srv = (MinecraftServer) newPlayer.level().getServer();
+			AllianceWarService ws = AllianceWarService.get(srv);
+
+			List<ItemStack> saved = ws.popSavedInventory(newPlayer.getUUID());
+			if (saved != null) {
+				var inv = newPlayer.getInventory();
+				int idx = 0;
+				for (int i = 0; i < 36 && idx < saved.size(); i++, idx++) inv.setItem(i, saved.get(idx));
+				if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.FEET, saved.get(idx++));
+				if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.LEGS, saved.get(idx++));
+				if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.CHEST, saved.get(idx++));
+				if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.HEAD, saved.get(idx++));
+				if (idx < saved.size()) newPlayer.setItemSlot(EquipmentSlot.OFFHAND, saved.get(idx));
 			}
 
-			// Sync all territory claims
-			TerritoryManager tm = TerritoryManager.get(server);
-			Collection<TerritoryClaim> allClaims = tm.getAllClaims();
-			if (!allClaims.isEmpty()) {
-				TerritoryQueryService qs = new TerritoryQueryService(tm);
-				List<ChunkKey> keys = new ArrayList<>(allClaims.size());
-				for (TerritoryClaim claim : allClaims) keys.add(claim.getChunkKey());
-				ServerPlayNetworking.send(player, TerritoryMapSyncService.buildChunkBatch(qs, keys));
+			// Restore XP — orbs still dropped on death for others to collect
+			XpSnapshot xp = savedXpMap.remove(newPlayer.getUUID());
+			if (xp != null) {
+				newPlayer.setExperienceLevels(xp.level());
+				newPlayer.experienceProgress = xp.progress();
 			}
 
-			// Sync nearby structure data
-			for (int cx = center.x() - 8; cx <= center.x() + 8; cx++) {
-				for (int cz = center.z() - 8; cz <= center.z() + 8; cz++) {
-					ChunkPos pos = new ChunkPos(cx, cz);
-					if (!level.isLoaded(pos.getWorldPosition())) continue;
-					ChunkStructureData data = StructureChunkValueCalculator.analyze(level, pos);
-					ServerPlayNetworking.send(player, new ChunkStructurePayload(
-							level.dimension().identifier().toString(), pos.x(), pos.z(),
-							data.getStructureValue(), data.getStructureNames()));
+			ws.onPlayerRespawn(newPlayer);
+		});
+
+		ServerChunkEvents.CHUNK_LOAD.register((world, chunk, wasAlreadyLoaded) -> {
+			if (!(world instanceof ServerLevel level)) {
+				return;
+			}
+
+			ChunkPos pos = chunk.getPos();
+			var structureData = StructureChunkValueCalculator.analyze(level, pos);
+
+			ChunkStructurePayload chunkPayload = new ChunkStructurePayload(
+					level.dimension().identifier().toString(),
+					pos.x(),
+					pos.z(),
+					structureData.getStructureValue(),
+					structureData.getStructureNames()
+			);
+
+			for (ServerPlayer player : level.players()) {
+				ChunkPos playerPos = player.chunkPosition();
+
+				int dx = Math.abs(playerPos.x() - pos.x());
+				int dz = Math.abs(playerPos.z() - pos.z());
+
+				if (Math.max(dx, dz) <= 8) {
+					ServerPlayNetworking.send(player, chunkPayload);
 				}
 			}
 		});
 
-		// ── Player disconnect ─────────────────────────────────────────────
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+			ServerPlayer player = handler.player;
+
+			ServerLevel level = player.level();
+			ChunkPos center = player.chunkPosition();
+
+			AllianceManager.get(server).syncPlayer(player);
+
+			// Add player to any ongoing war boss bars for their alliance
+			AllianceWarService.get(server).onPlayerJoin(player);
+
+			// Sync alliance influence balance + rollback eligibility
+			Alliance joinAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+			if (joinAlliance != null) {
+				AllianceProgressionService.get(server).syncToPlayer(player, joinAlliance.getId());
+				// Broadcast any rollback-eligible chunks for ended wars this player defended
+				AllianceWarService.get(server).getEndedWarsFor(joinAlliance.getId()).stream()
+						.filter(w -> w.defenderId().equals(joinAlliance.getId()))
+						.forEach(w -> {
+							AllianceWarService.get(server).broadcastRollbackEligible(w.id());
+							AllianceWarService.get(server).broadcastDeadPets(w.id());
+						});
+			}
+
+			TerritoryManager tm = TerritoryManager.get(server);
+			Collection<TerritoryClaim> allClaims = tm.getAllClaims();
+			if (!allClaims.isEmpty()) {
+				TerritoryQueryService queryService = new TerritoryQueryService(tm);
+				List<ChunkKey> allChunkKeys = new ArrayList<>(allClaims.size());
+				for (TerritoryClaim claim : allClaims) {
+					allChunkKeys.add(claim.getChunkKey());
+				}
+				ServerPlayNetworking.send(player,
+						TerritoryMapSyncService.buildChunkBatch(queryService, allChunkKeys));
+			}
+
+			for (int chunkX = center.x() - 8; chunkX <= center.x() + 8; chunkX++) {
+
+				for (int chunkZ = center.z() - 8; chunkZ <= center.z() + 8; chunkZ++) {
+
+					ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+
+					if (!level.isLoaded(pos.getWorldPosition())) {
+
+						continue;
+
+					}
+
+					var structureData = StructureChunkValueCalculator.analyze(level, pos);
+
+					ChunkStructurePayload structPayload = new ChunkStructurePayload(
+							level.dimension().identifier().toString(),
+							pos.x(),
+							pos.z(),
+							structureData.getStructureValue(),
+							structureData.getStructureNames()
+					);
+
+					ServerPlayNetworking.send(player, structPayload);
+
+				}
+
+			}
+
+		});
+
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-			UUID uuid = handler.player.getUUID();
-			playerLastChunkKey.remove(uuid);
-			playerLastTerritoryKey.remove(uuid);
-			hasSeenAllianceTip.remove(uuid);
+			playerLastChunkKey.remove(handler.player.getUUID());
+			playerLastTerritoryKey.remove(handler.player.getUUID());
 		});
 	}
 
@@ -530,17 +778,8 @@ public class Alliesandfoes implements ModInitializer {
 		TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(key);
 
 		if (claim == null) {
-			player.sendSystemMessage(Component.literal("Unclaimed Territory").withStyle(ChatFormatting.GRAY), true);
-			return;
-		}
-
-		Alliance playerAllianceCheck = AllianceManager.get(server).getAllianceFor(player.getUUID());
-		if (playerAllianceCheck == null && !hasSeenAllianceTip.contains(player.getUUID())) {
-			hasSeenAllianceTip.add(player.getUUID());
-			Alliance claimAlliance = AllianceManager.get(server).getAllianceById(claim.getAllianceId());
-			String claimAllianceName = claimAlliance != null ? claimAlliance.getName() : "an alliance";
-			player.sendSystemMessage(Component.literal(
-					"§e[Tip] This territory is claimed by " + claimAllianceName + ". Join an alliance to claim your own land."), true);
+			player.sendSystemMessage(
+					Component.literal("Unclaimed Territory").withStyle(ChatFormatting.GRAY), true);
 			return;
 		}
 
@@ -571,46 +810,18 @@ public class Alliesandfoes implements ModInitializer {
 	}
 
 	private static void registerTerritoryProtection() {
+
+		// Block breaking: blocked in enemy territory unless at war.
+		// Chests in enemy territory during war: cancel the break, spawn abstracted loot.
 		PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) -> {
 			if (!(level instanceof ServerLevel sl)) return true;
 			if (!(player instanceof ServerPlayer sp)) return true;
 			MinecraftServer server = sl.getServer();
 
-			// Battle dimension: BedWars-style block rules
-			if (BattleDimensionManager.isBattleDimension(sl)) {
-				BattleSession battleSession = BattleManager.get(server).findSessionForPlayer(sp.getUUID());
-				if (battleSession == null) return false; // non-participant can't break anything
-
-				// Base generator: only opposing team can break
-				if (state.is(ModBlocks.BASE_GENERATOR)) {
-					if (battleSession.generatorPosA != null && battleSession.generatorPosA.equals(pos)
-							&& battleSession.isOnTeamA(sp.getUUID())) {
-						sp.sendSystemMessage(Component.literal("§cYou can't destroy your own generator."), true);
-						return false;
-					}
-					if (battleSession.generatorPosB != null && battleSession.generatorPosB.equals(pos)
-							&& battleSession.isOnTeamB(sp.getUUID())) {
-						sp.sendSystemMessage(Component.literal("§cYou can't destroy your own generator."), true);
-						return false;
-					}
-					return true;
-				}
-
-				// Original terrain and system-placed blocks (no owner) are unbreakable
-				String battlePosKey = BlockOwnerService.toKey(sl, pos);
-				UUID blockOwner = BlockOwnerSavedData.get(server).getOwner(battlePosKey);
-				if (blockOwner == null) {
-					sp.sendSystemMessage(Component.literal("§cYou can't break the original terrain."), true);
-					return false;
-				}
-				return true; // player-placed block: any participant can break
-			}
-
-			// Block ownership check first
-			String posKey = BlockOwnerService.toKey(sl, pos);
-			if (!BlockOwnerService.get(server).canBreak(server, sp.getUUID(), posKey)) {
-				sp.sendSystemMessage(Component.literal("§cThis block is protected."), true);
-				return false;
+			// Notify FoundingManager when an active anchor is destroyed
+			if (state.getBlock() instanceof TerritoryAnchorBlock
+					&& state.getValue(TerritoryAnchorBlock.ACTIVE)) {
+				FoundingManager.get(server).onAnchorDestroyed(sl, pos);
 			}
 
 			ChunkKey chunk = ChunkKey.of(sl, new ChunkPos(pos.getX() >> 4, pos.getZ() >> 4));
@@ -618,40 +829,64 @@ public class Alliesandfoes implements ModInitializer {
 			if (claim == null) return true;
 
 			if (!isAllowedBlockInteraction(server, player.getUUID(), claim)) {
-				sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED), true);
+				sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED));
 				return false;
 			}
 
-			// At war: handle chest raiding
+			// At war: handle chest raiding and non-chest snapshots
 			Alliance pAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
 			if (pAlliance != null) {
 				Optional<AllianceWar> warOpt = AllianceWarService.get(server)
 						.getActiveWarBetween(claim.getAllianceId(), pAlliance.getId());
-				if (warOpt.isPresent() && blockEntity instanceof Container container) {
-					ItemStack loot = net.cnn_r.alliesandfoes.territory.ChestLootScorer.computeDrop(container, sl.getRandom());
-					if (!loot.isEmpty()) {
-						double x = pos.getX() + 0.5, y = pos.getY() + 0.5, z = pos.getZ() + 0.5;
-						sl.addFreshEntity(new ItemEntity(sl, x, y, z, loot));
-						sp.sendSystemMessage(Component.literal("You raided the chest!").withStyle(ChatFormatting.GOLD), true);
-					} else {
-						sp.sendSystemMessage(Component.literal("The chest was empty.").withStyle(ChatFormatting.GRAY), true);
+				if (warOpt.isPresent()) {
+					AllianceWar war = warOpt.get();
+
+					if (blockEntity instanceof Container container) {
+						// Chest stays in place — cancel the break, spawn proportional loot
+						String posKey = WarSnapshotService.makeKey(sl, pos);
+						if (WarSnapshotService.get(server).isRaided(war.id(), posKey)) {
+							sp.sendSystemMessage(Component.literal("This chest has already been raided.")
+									.withStyle(ChatFormatting.RED));
+						} else {
+							WarSnapshotService.get(server).markRaided(war.id(), posKey);
+							ItemStack loot = ChestLootScorer.computeDrop(container, sl.getRandom());
+							if (!loot.isEmpty()) {
+								double x = pos.getX() + 0.5, y = pos.getY() + 0.5, z = pos.getZ() + 0.5;
+								sl.addFreshEntity(new ItemEntity(sl, x, y, z, loot));
+								sp.sendSystemMessage(Component.literal("You raided the chest!")
+										.withStyle(ChatFormatting.GOLD));
+							} else {
+								sp.sendSystemMessage(Component.literal("The chest was empty.")
+										.withStyle(ChatFormatting.GRAY));
+							}
+						}
+						return false; // Always cancel chest break during war
 					}
-					return false;
+
+					// Non-chest block: snapshot before breaking (for post-war rollback)
+					WarSnapshotService.get(server).snapshotIfFirst(war.id(), sl, pos);
 				}
 			}
 			return true;
 		});
 
-		PlayerBlockBreakEvents.AFTER.register((level, player, pos, state, blockEntity) -> {
-			if (!(level instanceof ServerLevel sl)) return;
-			if (!(player instanceof ServerPlayer)) return;
-			MinecraftServer server = sl.getServer();
-			BlockOwnerService.get(server).onBlockBroken(sl, pos);
-			if (state.is(ModBlocks.BASE_GENERATOR)) {
-				BattleManager.get(server).onBaseGeneratorBroken(sl, pos);
+		// Right-clicking a TerritoryAnchorBlock: start ritual or (if active) glow mobs.
+		UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+			if (!(world instanceof ServerLevel sl)) return InteractionResult.PASS;
+			if (!(player instanceof ServerPlayer sp)) return InteractionResult.PASS;
+			BlockState anchorCheck = world.getBlockState(hitResult.getBlockPos());
+			if (!(anchorCheck.getBlock() instanceof TerritoryAnchorBlock)) return InteractionResult.PASS;
+			if (anchorCheck.getValue(TerritoryAnchorBlock.ACTIVE)) {
+				FoundingManager.get(sl.getServer()).handleAnchorClick(hitResult.getBlockPos(), sl);
+				return InteractionResult.SUCCESS;
+			} else {
+				FoundingManager.get(sl.getServer()).tryStartFounding(sl, hitResult.getBlockPos(), sp);
+				return InteractionResult.SUCCESS;
 			}
 		});
 
+		// Block placement: blocked in enemy territory unless at war + snapshot.
+		// Container opening: always blocked in enemy territory (peace and war).
 		UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
 			if (!(world instanceof ServerLevel sl)) return InteractionResult.PASS;
 			MinecraftServer server = sl.getServer();
@@ -666,7 +901,7 @@ public class Alliesandfoes implements ModInitializer {
 					TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
 					if (claim != null && !isOwnTerritory(server, player.getUUID(), claim)) {
 						if (player instanceof ServerPlayer sp)
-							sp.sendSystemMessage(Component.literal("You cannot open containers in enemy territory.").withStyle(ChatFormatting.RED), true);
+							sp.sendSystemMessage(Component.literal("You cannot open containers in enemy territory.").withStyle(ChatFormatting.RED));
 						return InteractionResult.FAIL;
 					}
 				}
@@ -676,48 +911,21 @@ public class Alliesandfoes implements ModInitializer {
 			BlockPos placePos = targetPos.relative(hitResult.getDirection());
 			ChunkKey chunk = ChunkKey.of(sl, new ChunkPos(placePos.getX() >> 4, placePos.getZ() >> 4));
 			TerritoryClaim claim = TerritoryManager.get(server).getClaimAt(chunk);
+			if (claim == null) return InteractionResult.PASS;
 
-			if (claim != null && !isAllowedBlockInteraction(server, player.getUUID(), claim)) {
+			if (!isAllowedBlockInteraction(server, player.getUUID(), claim)) {
 				if (player instanceof ServerPlayer sp)
-					sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED), true);
+					sp.sendSystemMessage(Component.literal("This territory is protected.").withStyle(ChatFormatting.RED));
 				return InteractionResult.FAIL;
 			}
 
-			if (player instanceof ServerPlayer sp) {
-				BlockOwnerService.get(server).onBlockPlaced(server, sl, placePos, sp.getUUID());
-
-				// Generator pedestal placement: one per alliance, placing a second moves the first
-				if (stack.getItem() == ModItems.GENERATOR_PEDESTAL_ITEM) {
-					Alliance pedestalAlliance = AllianceManager.get(server).getAllianceFor(sp.getUUID());
-					if (pedestalAlliance == null) {
-						sp.sendSystemMessage(Component.literal("§cYou must be in an alliance to place a generator pedestal."), true);
-						sl.setBlock(placePos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 3);
-						return InteractionResult.FAIL;
-					}
-					TerritoryClaim pedestalClaim = TerritoryManager.get(server).getClaimAt(
-							ChunkKey.of(sl, new net.minecraft.world.level.ChunkPos(placePos.getX() >> 4, placePos.getZ() >> 4)));
-					if (pedestalClaim == null || !pedestalClaim.getAllianceId().equals(pedestalAlliance.getId())) {
-						sp.sendSystemMessage(Component.literal("§cYou can only place a generator pedestal in your own territory."), true);
-						sl.setBlock(placePos, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 3);
-						return InteractionResult.FAIL;
-					}
-					// Remove the old pedestal block if one exists
-					GeneratorPedestalSavedData pedestalData = GeneratorPedestalSavedData.get(server);
-					GeneratorPedestalSavedData.PedestalData old = pedestalData.getPedestal(pedestalAlliance.getId());
-					if (old != null) {
-						net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> oldDimKey =
-								net.minecraft.resources.ResourceKey.create(
-										net.minecraft.core.registries.Registries.DIMENSION,
-										net.minecraft.resources.Identifier.parse(old.dimensionId()));
-						ServerLevel oldLevel = server.getLevel(oldDimKey);
-						if (oldLevel != null) oldLevel.setBlock(old.pos(), net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 3);
-					}
-					pedestalData.setPedestal(pedestalAlliance.getId(), placePos,
-							sl.dimension().identifier().toString());
-					sp.sendSystemMessage(Component.literal("§aGenerator pedestal set. Your generator will appear here in battle."), true);
-				}
+			// At war: snapshot the position before placing
+			Alliance pAlliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+			if (pAlliance != null) {
+				AllianceWarService.get(server)
+						.getActiveWarBetween(claim.getAllianceId(), pAlliance.getId())
+						.ifPresent(war -> WarSnapshotService.get(server).snapshotIfFirst(war.id(), sl, placePos));
 			}
-
 			return InteractionResult.PASS;
 		});
 	}

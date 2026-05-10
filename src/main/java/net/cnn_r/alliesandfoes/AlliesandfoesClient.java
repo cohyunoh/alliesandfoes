@@ -1,38 +1,44 @@
 package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
-import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteManagementScreen;
+import net.cnn_r.alliesandfoes.keybind.KeyBindings;
+import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
-import net.cnn_r.alliesandfoes.alliance.screen.BattleInviteScreen;
-import net.cnn_r.alliesandfoes.battle.BattleBaseSelectScreen;
-import net.cnn_r.alliesandfoes.battle.ShopScreen;
-import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.map.MapPersistence;
 import net.cnn_r.alliesandfoes.map.MapRenderMode;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.map.ModeResolver;
 import net.cnn_r.alliesandfoes.map.WorldIdentity;
-import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
+import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.network.*;
-import net.cnn_r.alliesandfoes.protect.TrustListClientState;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
+import net.cnn_r.alliesandfoes.map.MapScreen;
+import net.cnn_r.alliesandfoes.network.WarStateSyncPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.toasts.SystemToast;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.ChunkPos;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class AlliesandfoesClient implements ClientModInitializer {
     private static final int STRUCTURE_REFRESH_RADIUS = 2;
@@ -54,6 +60,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(PlayerPositionsPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 long tick = context.client().level != null ? context.client().level.getGameTime() : 0L;
+
                 for (PlayerPositionsPayload.Entry entry : payload.players()) {
                     MapState.getPlayerMarkerCache().upsert(
                             new PlayerMarker(
@@ -92,9 +99,11 @@ public class AlliesandfoesClient implements ClientModInitializer {
                         for (int chunkX = pos.x() - STRUCTURE_REFRESH_RADIUS; chunkX <= pos.x() + STRUCTURE_REFRESH_RADIUS; chunkX++) {
                             for (int chunkZ = pos.z() - STRUCTURE_REFRESH_RADIUS; chunkZ <= pos.z() + STRUCTURE_REFRESH_RADIUS; chunkZ++) {
                                 ChunkKey nearbyKey = new ChunkKey(payload.dimensionId(), chunkX, chunkZ);
+
                                 if (!MapState.isCurrentlyLoaded(nearbyKey) || scanner.isQueued(new ChunkPos(chunkX, chunkZ))) {
                                     continue;
                                 }
+
                                 var nearbyChunk = context.client().level.getChunk(chunkX, chunkZ);
                                 if (nearbyChunk != null) {
                                     scanner.requestScan(nearbyChunk);
@@ -110,13 +119,18 @@ public class AlliesandfoesClient implements ClientModInitializer {
             context.client().execute(() -> {
                 if (payload.alreadyInAlliance()) {
                     AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "");
+
                     if (context.client().player != null) {
                         context.client().player.sendSystemMessage(
                                 Component.literal("You are already in alliance: " + payload.currentAllianceName()));
                     }
                     return;
                 }
-                context.client().setScreen(new AllianceCreateScreen(context.client().screen, payload.candidates()));
+
+                context.client().setScreen(new AllianceCreateScreen(
+                        context.client().screen,
+                        payload.candidates()
+                ));
             });
         });
 
@@ -124,35 +138,45 @@ public class AlliesandfoesClient implements ClientModInitializer {
             context.client().execute(() -> {
                 if (payload.alreadyInAlliance()) {
                     AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "");
+
                     if (context.client().player != null) {
                         context.client().player.sendSystemMessage(
                                 Component.literal("You are already in alliance: " + payload.currentAllianceName()));
                     }
                     return;
                 }
-                context.client().setScreen(new AllianceJoinScreen(context.client().screen, payload.alliances()));
+
+                context.client().setScreen(new AllianceJoinScreen(
+                        context.client().screen,
+                        payload.alliances()
+                ));
             });
         });
 
         ClientPlayNetworking.registerGlobalReceiver(AllianceJoinRequestPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 AllianceClientState.addJoinRequest(payload);
-                if (context.client().player != null) {
-                    context.client().player.sendSystemMessage(
-                            Component.literal(payload.requesterName() + " wants to join " + payload.allianceName() + "."));
-                }
+
                 SystemToast.add(
                         context.client().getToastManager(),
                         SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
                         Component.literal("Alliance Join Request"),
                         Component.literal(payload.requesterName() + " wants to join " + payload.allianceName())
                 );
+
+                context.client().gui.setOverlayMessage(
+                        Component.literal(payload.requesterName() + " wants to join your alliance — Press M to manage")
+                                .withStyle(ChatFormatting.GREEN), false);
             });
         });
 
         ClientPlayNetworking.registerGlobalReceiver(AllianceStatePayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
-                AllianceClientState.setAllianceState(payload.inAlliance(), payload.allianceName(), payload.memberRole());
+                AllianceClientState.setAllianceState(
+                        payload.inAlliance(),
+                        payload.allianceName(),
+                        payload.memberRole()
+                );
                 if (payload.ownerUuid() != null && context.client().player != null) {
                     AllianceClientState.setAllianceDetails(
                             payload.inAlliance(),
@@ -169,6 +193,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 if (context.client().player != null) {
                     context.client().player.sendSystemMessage(Component.literal(payload.message()));
                 }
+
                 if (!payload.success() && "Transfer ownership before leaving your alliance.".equals(payload.message())) {
                     SystemToast.add(
                             context.client().getToastManager(),
@@ -177,11 +202,12 @@ public class AlliesandfoesClient implements ClientModInitializer {
                             Component.literal(payload.message())
                     );
                 }
+
                 if (payload.success()) {
-                    if (context.client().screen instanceof AllianceCreateScreen s) {
-                        s.onClose();
-                    } else if (context.client().screen instanceof AllianceJoinScreen s) {
-                        s.onClose();
+                    if (context.client().screen instanceof AllianceCreateScreen allianceCreateScreen) {
+                        allianceCreateScreen.onClose();
+                    } else if (context.client().screen instanceof AllianceJoinScreen allianceJoinScreen) {
+                        allianceJoinScreen.onClose();
                     }
                 }
             });
@@ -196,17 +222,23 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     }
                     return;
                 }
+
                 Screen parent = context.client().screen;
-                if (parent instanceof AllianceInviteManagementScreen s) {
-                    parent = s.getParentScreen();
+                if (parent instanceof AllianceInviteManagementScreen inviteManagementScreen) {
+                    parent = inviteManagementScreen.getParentScreen();
                 }
-                context.client().setScreen(new AllianceInviteManagementScreen(parent, payload));
+
+                context.client().setScreen(new AllianceInviteManagementScreen(
+                        parent,
+                        payload
+                ));
             });
         });
 
         ClientPlayNetworking.registerGlobalReceiver(AllianceInvitePayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 AllianceClientState.addPendingInvite(payload);
+
                 SystemToast.add(
                         context.client().getToastManager(),
                         SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
@@ -237,136 +269,43 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     if (context.client().screen instanceof AllianceViewScreen existing) {
                         existing.replacePayload(payload);
                     } else {
-                        context.client().setScreen(new AllianceViewScreen(context.client().screen, payload));
+                        context.client().setScreen(new AllianceViewScreen(
+                                context.client().screen,
+                                payload
+                        ));
                     }
                     return;
                 }
 
-                showAllianceUpdateToast(context.client(), payload, wasInAlliance, previousAllianceName);
-            });
-        });
-
-        ClientPlayNetworking.registerGlobalReceiver(TerritoryChunkBatchPayload.TYPE, (payload, context) -> {
-            context.client().execute(() -> {
-                for (TerritoryChunkDataPayload chunkData : payload.chunks()) {
-                    ChunkKey chunkKey = new ChunkKey(chunkData.dimensionId(), chunkData.chunkX(), chunkData.chunkZ());
-                    MapState.getTerritoryChunkSyncCache().put(chunkKey, chunkData);
-                }
-            });
-        });
-
-        ClientPlayNetworking.registerGlobalReceiver(TerritoryPreviewBatchPayload.TYPE, (payload, context) -> {
-            context.client().execute(() -> {
-                for (TerritoryPreviewChunkPayload chunkData : payload.chunks()) {
-                    ChunkKey chunkKey = new ChunkKey(chunkData.dimensionId(), chunkData.chunkX(), chunkData.chunkZ());
-                    MapState.getTerritoryPreviewSyncCache().put(chunkKey, chunkData);
-                }
-            });
-        });
-
-        ClientPlayNetworking.registerGlobalReceiver(WarStateSyncPayload.TYPE, (payload, context) ->
-            context.client().execute(() -> MapState.getWarSyncCache().update(payload.wars())));
-
-        ClientPlayNetworking.registerGlobalReceiver(MapScreenMessagePayload.TYPE, (payload, context) ->
-            context.client().execute(() -> {
-                MapState.setPendingMapMessage(payload.message());
-                SystemToast.add(
-                        context.client().getToastManager(),
-                        SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-                        Component.literal("Alliance"),
-                        Component.literal(payload.message())
+                showAllianceUpdateToast(
+                        context.client(),
+                        payload,
+                        wasInAlliance,
+                        previousAllianceName
                 );
-            }));
-
-        ClientPlayNetworking.registerGlobalReceiver(AllianceInfluenceSyncPayload.TYPE, (payload, context) ->
-            context.client().execute(() -> MapState.setAllianceInfluenceBalance(payload.balance())));
-
-        ClientPlayNetworking.registerGlobalReceiver(BattleChallengePayload.TYPE, (payload, context) ->
-            context.client().execute(() ->
-                Minecraft.getInstance().setScreen(new BattleInviteScreen(payload))));
-
-        ClientPlayNetworking.registerGlobalReceiver(BattleBaseSelectPayload.TYPE, (payload, context) ->
-            context.client().execute(() ->
-                Minecraft.getInstance().setScreen(new BattleBaseSelectScreen(payload))));
-
-        ClientPlayNetworking.registerGlobalReceiver(ShopOpenPayload.TYPE, (payload, context) ->
-            context.client().execute(() ->
-                Minecraft.getInstance().setScreen(new ShopScreen(payload.battleId()))));
-
-        ClientPlayNetworking.registerGlobalReceiver(TrustListSyncPayload.TYPE, (payload, context) ->
-            context.client().execute(() -> TrustListClientState.INSTANCE.update(payload)));
-
-        ClientPlayNetworking.registerGlobalReceiver(BattleStartPayload.TYPE, (payload, context) ->
-            context.client().execute(() -> {
-                if (context.client().player != null) {
-                    String team = payload.isTeamA() ? "A" : "B";
-                    context.client().player.sendSystemMessage(
-                            Component.literal("§6⚔ Battle has begun! You are on Team " + team + "."));
-                }
-            }));
-
-        ClientPlayNetworking.registerGlobalReceiver(BattleEndPayload.TYPE, (payload, context) ->
-            context.client().execute(() -> {
-                SystemToast.add(
-                        context.client().getToastManager(),
-                        SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-                        Component.literal("⚔ Battle Over"),
-                        Component.literal(payload.winnerName() + " wins! Prize: " + payload.winnerPrize())
-                );
-                if (context.client().player != null) {
-                    context.client().player.sendSystemMessage(
-                            Component.literal("§6Battle ended. Winner: " + payload.winnerName()));
-                }
-            }));
-
-        KeyBindings.register();
-
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-            MapState.clearAll();
-            MapState.setCurrentWorldId(null);
-            TrustListClientState.INSTANCE.reset();
-            lastNetherPlayerY = Integer.MIN_VALUE;
+            });
         });
 
-        ClientPlayConnectionEvents.INIT.register((handler, client) -> {
-            MapState.clearAll();
-            MapState.setCurrentWorldId(WorldIdentity.current(client));
-            TrustListClientState.INSTANCE.reset();
-        });
-
-        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            WorldIdentity worldId = WorldIdentity.current(client);
-            MapState.setCurrentWorldId(worldId);
-            Thread t = new Thread(() -> {
-                MapPersistence.load(worldId,
-                        MapState.getChunkCache(),
-                        MapState.getNetherChunkCache(),
-                        MapState.getEndChunkCache(),
-                        MapState.getChunkValueCache());
-                MapState.markMapDirty();
-            }, "map-persistence-preload");
-            t.setDaemon(true);
-            t.start();
-        });
-
-        ClientChunkEvents.CHUNK_LOAD.register((world, chunk) -> MapState.onChunkLoaded(chunk));
-        ClientChunkEvents.CHUNK_UNLOAD.register((world, chunk) -> MapState.onChunkUnloaded(chunk.getPos()));
-
+        // Update the Y level and render mode used for chunk scanning each tick.
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             LocalPlayer player = client.player;
             if (player != null && client.level != null) {
                 int playerY = player.getBlockY();
                 MapState.setPlayerScanY(playerY);
 
+                // Update world identity each tick; detect dimension changes.
                 WorldIdentity newWorldId = WorldIdentity.current(client);
                 WorldIdentity oldWorldId = MapState.getCurrentWorldId();
                 if (oldWorldId == null || !oldWorldId.equals(newWorldId)) {
                     MapState.setCurrentWorldId(newWorldId);
-                    if (oldWorldId != null && !oldWorldId.dimensionId().equals(newWorldId.dimensionId())) {
+                    if (oldWorldId != null
+                            && !oldWorldId.dimensionId().equals(newWorldId.dimensionId())) {
+                        // Dimension changed — reset mode and indoor state
                         MapState.resetMode();
                     }
                 }
 
+                // Resolve the current render mode from dimension only.
                 MapRenderMode resolved = ModeResolver.resolve(client.level, player);
                 MapState.setCurrentMode(resolved);
 
@@ -383,6 +322,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     lastNetherPlayerY = Integer.MIN_VALUE;
                 }
 
+                // Periodically rescan nearby chunks to pick up placed/broken blocks.
                 nearbyRescanTicker++;
                 if (nearbyRescanTicker >= NEARBY_RESCAN_INTERVAL_TICKS) {
                     nearbyRescanTicker = 0;
@@ -390,8 +330,216 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 }
 
                 MapState.flushBlockDirtyChunks();
+
+                // Persistent action bar: show invite prompt while any invite is pending,
+                // unless the map screen is open (player is already handling it).
+                boolean hasPendingInvite = AllianceClientState.hasPendingWarInvites()
+                        || AllianceClientState.hasPendingInvites();
+                boolean mapOpen = client.screen instanceof MapScreen;
+                if (hasPendingInvite && !mapOpen) {
+                    client.gui.setOverlayMessage(
+                            Component.literal("Press M to View Invite").withStyle(ChatFormatting.GOLD), false);
+                }
             }
         });
+
+        // War scoreboard overlay: shown on top of the vanilla tab list when Tab is held during a war.
+        HudElementRegistry.addLast(
+                Identifier.parse("alliesandfoes:war_scoreboard"),
+                (context, tickCounter) -> {
+                    Minecraft client = Minecraft.getInstance();
+                    if (!client.options.keyPlayerList.isDown() || client.player == null) return;
+                    WarStateSyncPayload.WarEntry activeWar = findActiveWarForLocalPlayer(client);
+                    if (activeWar == null) return;
+                    renderWarScoreboard(context, activeWar, client);
+                });
+
+        ClientChunkEvents.CHUNK_LOAD.register((world, chunk) -> {
+            MapState.onChunkLoaded(chunk);
+        });
+
+        ClientChunkEvents.CHUNK_UNLOAD.register((world, chunk) -> {
+            MapState.onChunkUnloaded(chunk.getPos());
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(TerritoryChunkBatchPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                for (TerritoryChunkDataPayload chunkData : payload.chunks()) {
+                    ChunkKey chunkKey = new ChunkKey(
+                            chunkData.dimensionId(),
+                            chunkData.chunkX(),
+                            chunkData.chunkZ()
+                    );
+
+                    MapState.getTerritoryChunkSyncCache().put(chunkKey, chunkData);
+                }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(TerritoryPreviewBatchPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                for (TerritoryPreviewChunkPayload chunkData : payload.chunks()) {
+                    ChunkKey chunkKey = new ChunkKey(
+                            chunkData.dimensionId(),
+                            chunkData.chunkX(),
+                            chunkData.chunkZ()
+                    );
+
+                    MapState.getTerritoryPreviewSyncCache().put(chunkKey, chunkData);
+                }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(WarStateSyncPayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> MapState.getWarSyncCache().update(payload.wars()));
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(WarInvitePayload.TYPE, (payload, context) -> {
+            context.client().execute(() -> {
+                AllianceClientState.addPendingWarInvite(payload.warId());
+                SystemToast.add(
+                        context.client().getToastManager(),
+                        SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+                        Component.literal(payload.attackerAllianceName() + " Has Wagered War!"),
+                        Component.empty()
+                );
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(MapScreenMessagePayload.TYPE, (payload, context) ->
+            context.client().execute(() -> MapState.setPendingMapMessage(payload.message())));
+
+        ClientPlayNetworking.registerGlobalReceiver(AllianceInfluenceSyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> MapState.setAllianceInfluenceBalance(payload.balance())));
+
+        ClientPlayNetworking.registerGlobalReceiver(RollbackEligibleSyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> {
+                List<ChunkKey> chunks = new ArrayList<>();
+                for (int i = 0; i < payload.dimensionIds().size(); i++)
+                    chunks.add(new ChunkKey(payload.dimensionIds().get(i),
+                                            payload.chunkXs().get(i), payload.chunkZs().get(i)));
+                MapState.setRollbackEligible(payload.warId(), chunks, payload.costPerChunk());
+            }));
+
+        ClientPlayNetworking.registerGlobalReceiver(DeadPetListSyncPayload.TYPE, (payload, context) ->
+            context.client().execute(() ->
+                MapState.setDeadPets(payload.warId(), payload.petDescriptions(), payload.totalCost())));
+
+        KeyBindings.register();
+
+        // Clear all client-side caches when leaving a world so stale data
+        // from a previous world never bleeds into the next one.
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            MapState.clearAll();
+            MapState.setCurrentWorldId(null);
+            AllianceClientState.clearPendingWarInvites();
+            lastNetherPlayerY = Integer.MIN_VALUE;
+        });
+
+        // Also clear at the very start of a new connection (before any world
+        // data arrives) to catch any stale writes that leaked past the DISCONNECT
+        // clear from the previous world's background scanner thread.
+        ClientPlayConnectionEvents.INIT.register((handler, client) -> {
+            MapState.clearAll();
+            // Set world identity eagerly so the scanner captures it immediately;
+            // dimension defaults to overworld until the first tick with a live level.
+            MapState.setCurrentWorldId(WorldIdentity.current(client));
+        });
+
+        // Pre-load the disk cache as soon as the player enters the world so that
+        // the map screen renders instantly on first open rather than showing blank.
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            WorldIdentity worldId = WorldIdentity.current(client);
+            MapState.setCurrentWorldId(worldId);
+            Thread t = new Thread(() -> {
+                MapPersistence.load(worldId,
+                        MapState.getChunkCache(),
+                        MapState.getNetherChunkCache(),
+                        MapState.getEndChunkCache(),
+                        MapState.getChunkValueCache());
+                MapState.markMapDirty();
+            }, "map-persistence-preload");
+            t.setDaemon(true);
+            t.start();
+        });
+    }
+
+    private static WarStateSyncPayload.WarEntry findActiveWarForLocalPlayer(Minecraft client) {
+        if (client.player == null) return null;
+        String myAllianceName = AllianceClientState.getAllianceName();
+        if (myAllianceName.isBlank()) return null;
+        for (WarStateSyncPayload.WarEntry entry : MapState.getWarSyncCache().getWars()) {
+            if (!"ACTIVE".equals(entry.status())) continue;
+            if (myAllianceName.equals(entry.attackerName()) || myAllianceName.equals(entry.defenderName())) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private static void renderWarScoreboard(GuiGraphicsExtractor context, WarStateSyncPayload.WarEntry war, Minecraft client) {
+        net.minecraft.client.gui.Font font = client.font;
+        int screenW = client.getWindow().getGuiScaledWidth();
+
+        List<WarStateSyncPayload.PlayerStat> attackers = new ArrayList<>();
+        List<WarStateSyncPayload.PlayerStat> defenders = new ArrayList<>();
+        for (WarStateSyncPayload.PlayerStat ps : war.playerStats()) {
+            if (ps.allianceId().equals(war.attackerAllianceId())) attackers.add(ps);
+            else defenders.add(ps);
+        }
+
+        int lineH = font.lineHeight + 2;
+        int pad = 6;
+        int totalLines = 1 + 1 + attackers.size() + 1 + 1 + defenders.size();
+        int panelW = 240;
+        int panelH = totalLines * lineH + pad * 2 + 4;
+        int px = (screenW - panelW) / 2;
+        int onlineCount = client.getConnection() != null
+                ? client.getConnection().getListedOnlinePlayers().size() : 1;
+        int py = 10 + Math.min(onlineCount, 20) * 9 + 25;
+
+        context.fill(px - pad, py - pad, px + panelW + pad, py + panelH + pad, 0xBB000000);
+
+        int curY = py;
+        String title = "⚔ " + war.attackerName() + " vs " + war.defenderName();
+        context.text(font, title, px + (panelW - font.width(title)) / 2, curY, 0xFFFFDD);
+        curY += lineH + 2;
+
+        // Attacker section
+        context.text(font, war.attackerName(), px, curY, 0xFF6666);
+        curY += lineH;
+        int nameCol = px, killCol = px + 148, deathCol = px + 172, kdrCol = px + 198;
+        context.text(font, "Player", nameCol, curY, 0x888888);
+        context.text(font, "K", killCol, curY, 0x888888);
+        context.text(font, "D", deathCol, curY, 0x888888);
+        context.text(font, "KDR", kdrCol, curY, 0x888888);
+        curY += lineH;
+        for (WarStateSyncPayload.PlayerStat ps : attackers) {
+            float kdr = ps.deaths() == 0 ? ps.kills() : (float) ps.kills() / ps.deaths();
+            context.text(font, ps.name(), nameCol, curY, 0xFFFFFF);
+            context.text(font, String.valueOf(ps.kills()), killCol, curY, 0x55FF55);
+            context.text(font, String.valueOf(ps.deaths()), deathCol, curY, 0xFF5555);
+            context.text(font, String.format("%.1f", kdr), kdrCol, curY, 0xFFAA00);
+            curY += lineH;
+        }
+        curY += 2;
+
+        // Defender section
+        context.text(font, war.defenderName(), px, curY, 0x6688FF);
+        curY += lineH;
+        context.text(font, "Player", nameCol, curY, 0x888888);
+        context.text(font, "K", killCol, curY, 0x888888);
+        context.text(font, "D", deathCol, curY, 0x888888);
+        context.text(font, "KDR", kdrCol, curY, 0x888888);
+        curY += lineH;
+        for (WarStateSyncPayload.PlayerStat ps : defenders) {
+            float kdr = ps.deaths() == 0 ? ps.kills() : (float) ps.kills() / ps.deaths();
+            context.text(font, ps.name(), nameCol, curY, 0xFFFFFF);
+            context.text(font, String.valueOf(ps.kills()), killCol, curY, 0x55FF55);
+            context.text(font, String.valueOf(ps.deaths()), deathCol, curY, 0xFF5555);
+            context.text(font, String.format("%.1f", kdr), kdrCol, curY, 0xFFAA00);
+            curY += lineH;
+        }
     }
 
     private static void showAllianceUpdateToast(
@@ -400,9 +548,13 @@ public class AlliesandfoesClient implements ClientModInitializer {
             boolean wasInAlliance,
             String previousAllianceName
     ) {
-        if (client.player == null) return;
+        if (client.player == null) {
+            return;
+        }
 
+        Component title = Component.literal("Alliance Updated");
         Component body;
+
         if (!payload.inAlliance()) {
             if (wasInAlliance && previousAllianceName != null && !previousAllianceName.isEmpty()) {
                 body = Component.literal("You are no longer in " + previousAllianceName);
@@ -420,7 +572,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
         SystemToast.add(
                 client.getToastManager(),
                 SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-                Component.literal("Alliance Updated"),
+                title,
                 body
         );
     }
@@ -431,9 +583,22 @@ public class AlliesandfoesClient implements ClientModInitializer {
             java.util.UUID anchorId,
             java.util.List<RequestTerritoryPreviewPayload.ChunkCoord> chunks
     ) {
-        ClientPlayNetworking.send(new RequestTerritoryPreviewPayload(previewType, dimensionId, anchorId, chunks));
+        ClientPlayNetworking.send(new RequestTerritoryPreviewPayload(
+                previewType,
+                dimensionId,
+                anchorId,
+                chunks
+        ));
     }
-
+    /**
+     * Sends a map-driven territory action request to the server.
+     *
+     * @param actionType action type
+     * @param dimensionId target dimension id
+     * @param anchorId selected anchor id
+     * @param chunkX target chunk x
+     * @param chunkZ target chunk z
+     */
     public static void requestTerritoryAction(
             RequestTerritoryActionPayload.ActionType actionType,
             String dimensionId,
@@ -441,14 +606,20 @@ public class AlliesandfoesClient implements ClientModInitializer {
             int chunkX,
             int chunkZ
     ) {
-        ClientPlayNetworking.send(new RequestTerritoryActionPayload(actionType, dimensionId, anchorId, chunkX, chunkZ));
+        ClientPlayNetworking.send(new RequestTerritoryActionPayload(
+                actionType,
+                dimensionId,
+                anchorId,
+                chunkX,
+                chunkZ
+        ));
     }
 
     private static final int CAVE_SCAN_RADIUS = 2;
     private static final int NETHER_Y_RESCAN_THRESHOLD = 8;
     private static int lastNetherPlayerY = Integer.MIN_VALUE;
 
-    private static final int NEARBY_RESCAN_INTERVAL_TICKS = 80;
+    private static final int NEARBY_RESCAN_INTERVAL_TICKS = 80; // ~4 seconds
     private static final int NEARBY_RESCAN_RADIUS = 1;
     private static int nearbyRescanTicker = 0;
 
@@ -470,6 +641,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 scanner.requestScan(level.getChunk(cx, cz));
             }
         }
+
     }
 
     private static void maybeScanNearbyCaveChunks(Minecraft client, LocalPlayer player) {
@@ -504,4 +676,5 @@ public class AlliesandfoesClient implements ClientModInitializer {
             }
         }
     }
+
 }

@@ -22,6 +22,8 @@ public record WarStateSyncPayload(List<WarEntry> wars) implements CustomPacketPa
         return TYPE;
     }
 
+    public record PlayerStat(UUID uuid, String name, int kills, int deaths, UUID allianceId) {}
+
     public record WarEntry(
             UUID warId,
             UUID attackerAllianceId,
@@ -33,7 +35,8 @@ public record WarStateSyncPayload(List<WarEntry> wars) implements CustomPacketPa
             int defenderKills,
             String dimensionId,
             int[] contestedChunkXs,
-            int[] contestedChunkZs
+            int[] contestedChunkZs,
+            List<PlayerStat> playerStats
     ) {}
 
     private static void write(FriendlyByteBuf buf, WarStateSyncPayload p) {
@@ -53,6 +56,14 @@ public record WarStateSyncPayload(List<WarEntry> wars) implements CustomPacketPa
             for (int i = 0; i < count; i++) {
                 buf.writeInt(e.contestedChunkXs()[i]);
                 buf.writeInt(e.contestedChunkZs()[i]);
+            }
+            buf.writeVarInt(e.playerStats().size());
+            for (PlayerStat ps : e.playerStats()) {
+                buf.writeUUID(ps.uuid());
+                buf.writeUtf(ps.name());
+                buf.writeInt(ps.kills());
+                buf.writeInt(ps.deaths());
+                buf.writeUUID(ps.allianceId());
             }
         }
     }
@@ -77,9 +88,15 @@ public record WarStateSyncPayload(List<WarEntry> wars) implements CustomPacketPa
                 xs[i] = buf.readInt();
                 zs[i] = buf.readInt();
             }
+            int statCount = buf.readVarInt();
+            List<PlayerStat> playerStats = new ArrayList<>(statCount);
+            for (int i = 0; i < statCount; i++) {
+                playerStats.add(new PlayerStat(
+                        buf.readUUID(), buf.readUtf(), buf.readInt(), buf.readInt(), buf.readUUID()));
+            }
             wars.add(new WarEntry(warId, attackerAllianceId, defenderAllianceId,
                     attackerName, defenderName, status,
-                    attackerKills, defenderKills, dimensionId, xs, zs));
+                    attackerKills, defenderKills, dimensionId, xs, zs, playerStats));
         }
         return new WarStateSyncPayload(wars);
     }

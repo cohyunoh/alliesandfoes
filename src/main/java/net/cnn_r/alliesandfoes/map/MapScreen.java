@@ -4,6 +4,7 @@ import net.cnn_r.alliesandfoes.AlliesandfoesClient;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinRequestScreen;
+import net.cnn_r.alliesandfoes.alliance.screen.WarInviteScreen;
 import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
@@ -13,6 +14,7 @@ import net.cnn_r.alliesandfoes.map.data.ChunkValueData;
 import net.cnn_r.alliesandfoes.map.data.PlayerMarker;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
+import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
 import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
@@ -38,6 +40,7 @@ import net.cnn_r.alliesandfoes.map.cache.WarSyncCache;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -131,15 +134,40 @@ public class MapScreen extends Screen {
     private boolean showStructureIntel = false;
     private ChunkStructureSyncCache chunkStructureSyncCache;
 
-    private final java.util.LinkedHashMap<ChunkKey, Integer> selectedClaimChunks = new java.util.LinkedHashMap<>();
+    private enum WarDeclarationMode { NONE, SELECTING }
+    private WarDeclarationMode warDeclarationMode = WarDeclarationMode.NONE;
+    private final LinkedHashSet<ChunkPos> selectedEnemyChunks = new LinkedHashSet<>();
+    private UUID targetEnemyAllianceId = null;
+    private String targetEnemyAllianceName = null;
+    private Button declareWarButton;
+    private Button respondWarButton;
+    private Button warInviteButton;
     private Button confirmTerritoryButton;
+    private boolean warReviewMode = false;
+
+    private enum RepairMode { NONE, SELECTING }
+    private RepairMode repairMode = RepairMode.NONE;
+    private final LinkedHashSet<ChunkKey> selectedRepairChunks = new LinkedHashSet<>();
+    private final java.util.LinkedHashMap<ChunkKey, Integer> selectedClaimChunks = new java.util.LinkedHashMap<>();
+    private Button repairModeButton;
+    private Button confirmRepairButton;
+
+    private Button petReviveButton;
+    private boolean petRevivePanelOpen = false;
+    private Button confirmPetReviveButton;
+    private final java.util.Set<Integer> selectedPetIndices = new java.util.LinkedHashSet<>();
+
+    private Button reloadMapButton;
 
     private boolean anchorCycleMode = false;
     private Button anchorCyclePrevButton;
     private Button anchorCycleNextButton;
 
-    private static final int CHUNK_VALUE_DEBUG_BG_COLOR = 0xB0000000;
-    private static final int CHUNK_VALUE_DEBUG_MIN_WIDTH = 170;
+    private static final Identifier ROLLBACK_FIRE_TEXTURE =
+            Identifier.fromNamespaceAndPath("alliesandfoes", "textures/map/rollback_fire.png");
+    private WarStateSyncPayload.WarEntry reviewingWar = null;
+    private Button warReviewAcceptButton;
+    private Button warReviewDenyButton;
 
     private ChunkPos lastRequestedPreviewChunk;
     private long lastPreviewRequestMillis;
@@ -148,6 +176,9 @@ public class MapScreen extends Screen {
     private record AnchorEntry(UUID anchorId, String anchorName, int chunkX, int chunkZ) {}
     private final List<AnchorEntry> anchorCycleList = new ArrayList<>();
     private int anchorCycleIndex = -1;
+
+    private static final int CHUNK_VALUE_DEBUG_BG_COLOR = 0xB0000000;
+    private static final int CHUNK_VALUE_DEBUG_MIN_WIDTH = 170;
 
     public MapScreen() {
         super(Component.literal("World Map"));
@@ -255,11 +286,112 @@ public class MapScreen extends Screen {
         }).bounds((this.width - 100) / 2, this.height - 28, 100, 20).build();
         this.confirmTerritoryButton.visible = false;
 
+        this.declareWarButton = Button.builder(Component.literal("Declare War ⚔"), btn -> {
+            if (this.warDeclarationMode != WarDeclarationMode.SELECTING
+                    || this.selectedEnemyChunks.isEmpty()
+                    || this.targetEnemyAllianceId == null
+                    || this.minecraft == null || this.minecraft.level == null) return;
+            int[] xs = this.selectedEnemyChunks.stream().mapToInt(ChunkPos::x).toArray();
+            int[] zs = this.selectedEnemyChunks.stream().mapToInt(ChunkPos::z).toArray();
+            ClientPlayNetworking.send(new DeclareWarRequestPayload(
+                    this.targetEnemyAllianceId,
+                    this.minecraft.level.dimension().identifier().toString(),
+                    xs, zs
+            ));
+            this.exitWarDeclarationMode();
+            this.showScreenMessage(Component.literal("War declaration sent!").withStyle(ChatFormatting.RED), 2500);
+        }).bounds((this.width - 120) / 2, this.height - 28, 120, 20).build();
+        this.declareWarButton.visible = false;
+
+        this.respondWarButton = Button.builder(Component.literal("⚔ Respond"), btn -> openWarInviteReviewScreen())
+                .bounds((this.width - 120) / 2, this.height - 28, 120, 20).build();
+        this.respondWarButton.visible = false;
+
+        this.warInviteButton = Button.builder(getWarInviteButtonText(),
+                btn -> openWarInviteReviewScreen())
+                .bounds(TOP_BUTTON_X,
+                        TOP_BUTTON_Y + (TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING) * 3,
+                        TOP_BUTTON_WIDTH, TOP_BUTTON_HEIGHT)
+                .build();
+        this.warInviteButton.visible = false;
+
+        this.warReviewAcceptButton = Button.builder(Component.literal("Accept ⚔"),
+                btn -> respondToReviewingWar(true))
+                .bounds((this.width / 2) + 4, this.height - 32, 100, 22).build();
+        this.warReviewAcceptButton.visible = false;
+
+        this.warReviewDenyButton = Button.builder(Component.literal("Decline"),
+                btn -> respondToReviewingWar(false))
+                .bounds((this.width / 2) - 104, this.height - 32, 100, 22).build();
+        this.warReviewDenyButton.visible = false;
+
+        this.repairModeButton = Button.builder(Component.literal("⚙ Repair"), btn -> {
+            if (this.repairMode == RepairMode.SELECTING) {
+                this.repairMode = RepairMode.NONE;
+                this.selectedRepairChunks.clear();
+                this.showScreenMessage(Component.literal("Exited Repair Mode").withColor(0xFFFFFFFF), 1500);
+            } else {
+                this.warDeclarationMode = WarDeclarationMode.NONE;
+                this.selectedEnemyChunks.clear();
+                this.territoryPreviewMode = TerritoryPreviewMode.NONE;
+                this.repairMode = RepairMode.SELECTING;
+                this.showScreenMessage(Component.literal(
+                        "⚙ Repair Mode — click damaged chunks to select, then Confirm").withColor(0xFFFFCC44), 3000);
+            }
+        }).bounds(TOP_BUTTON_X, TOP_BUTTON_Y, TOP_BUTTON_WIDTH, TOP_BUTTON_HEIGHT).build();
+        this.repairModeButton.visible = false;
+
+        this.confirmRepairButton = Button.builder(Component.literal("Repair"), btn -> {
+            if (MapState.getRollbackWarId() != null && !this.selectedRepairChunks.isEmpty()) {
+                for (ChunkKey ck : this.selectedRepairChunks) {
+                    ClientPlayNetworking.send(new RequestRollbackChunkPayload(
+                            MapState.getRollbackWarId(), ck.getDimensionId(),
+                            ck.getChunkX(), ck.getChunkZ()));
+                }
+                this.selectedRepairChunks.clear();
+                this.repairMode = RepairMode.NONE;
+            }
+        }).bounds((this.width - 140) / 2, this.height - 28, 140, 20).build();
+        this.confirmRepairButton.visible = false;
+
+        this.petReviveButton = Button.builder(Component.literal("Revive Pets"), btn ->
+                this.petRevivePanelOpen = !this.petRevivePanelOpen
+        ).bounds(TOP_BUTTON_X, TOP_BUTTON_Y, TOP_BUTTON_WIDTH, TOP_BUTTON_HEIGHT).build();
+        this.petReviveButton.visible = false;
+
+        this.confirmPetReviveButton = Button.builder(Component.literal("Revive Selected"), btn -> {
+            if (MapState.getDeadPetsWarId() != null && !this.selectedPetIndices.isEmpty()) {
+                ClientPlayNetworking.send(new RequestPetRevivePayload(
+                        MapState.getDeadPetsWarId(), new java.util.ArrayList<>(this.selectedPetIndices)));
+                this.selectedPetIndices.clear();
+                this.petRevivePanelOpen = false;
+            }
+        }).bounds(this.width / 2 - 80, this.height / 2 + 40, 160, 20).build();
+        this.confirmPetReviveButton.visible = false;
+
         this.addRenderableWidget(this.allianceButton);
         this.addRenderableWidget(this.joinAllianceButton);
         this.addRenderableWidget(this.inviteButton);
         this.addRenderableWidget(this.requestsButton);
         this.addRenderableWidget(this.confirmTerritoryButton);
+        this.addRenderableWidget(this.declareWarButton);
+        this.addRenderableWidget(this.respondWarButton);
+        this.addRenderableWidget(this.warInviteButton);
+        this.addRenderableWidget(this.warReviewAcceptButton);
+        this.addRenderableWidget(this.warReviewDenyButton);
+        this.addRenderableWidget(this.repairModeButton);
+        this.addRenderableWidget(this.confirmRepairButton);
+        this.addRenderableWidget(this.petReviveButton);
+        this.addRenderableWidget(this.confirmPetReviveButton);
+
+        this.reloadMapButton = Button.builder(Component.literal("↺"), btn -> {
+            MapState.reloadCurrentDimension();
+            this.lastValidSurface.clear();
+            this.textureDirty = true;
+            showScreenMessage(Component.literal("Map reloading...").withStyle(ChatFormatting.GRAY), 1500);
+            this.setFocused(null);
+        }).bounds(6, this.height - 30, 28, 28).build();
+        this.addRenderableWidget(this.reloadMapButton);
 
         int cycBtnW = 30, cycBtnH = 20;
         int cycBtnY = this.height / 2 - cycBtnH / 2;
@@ -295,6 +427,47 @@ public class MapScreen extends Screen {
             this.confirmTerritoryButton.setWidth(140);
             this.confirmTerritoryButton.visible = isClaimOrUnclaim;
             this.confirmTerritoryButton.active = canConfirm;
+        }
+        if (this.declareWarButton != null) {
+            this.declareWarButton.visible = (this.warDeclarationMode == WarDeclarationMode.SELECTING
+                    && !this.selectedEnemyChunks.isEmpty());
+            this.declareWarButton.setX((this.width - 120) / 2);
+            this.declareWarButton.setY(this.height - 28);
+        }
+        if (this.respondWarButton != null) {
+            this.respondWarButton.visible = false; // replaced by warInviteButton
+        }
+        if (this.confirmRepairButton != null) {
+            boolean showRepairConfirm = this.repairMode == RepairMode.SELECTING && !this.selectedRepairChunks.isEmpty();
+            int repairCost = this.selectedRepairChunks.size() * MapState.getRollbackCostPerChunk();
+            this.confirmRepairButton.setMessage(Component.literal(
+                    "Repair " + this.selectedRepairChunks.size() + " — " + repairCost + " inf"));
+            this.confirmRepairButton.setX((this.width - 140) / 2);
+            this.confirmRepairButton.setY(this.height - 28);
+            this.confirmRepairButton.setWidth(140);
+            this.confirmRepairButton.visible = showRepairConfirm;
+            if (showRepairConfirm && this.confirmTerritoryButton != null)
+                this.confirmTerritoryButton.visible = false;
+        }
+        if (this.confirmPetReviveButton != null) {
+            int selCost = this.selectedPetIndices.size() * AllianceWarService.PET_REVIVE_COST_EACH;
+            this.confirmPetReviveButton.setMessage(Component.literal(
+                    "Revive Selected (" + this.selectedPetIndices.size() + ") — " + selCost + " inf"));
+            this.confirmPetReviveButton.setX(this.width / 2 - 80);
+            this.confirmPetReviveButton.setY(this.height / 2 + 40);
+            this.confirmPetReviveButton.active = !this.selectedPetIndices.isEmpty();
+            this.confirmPetReviveButton.visible = this.petRevivePanelOpen && MapState.hasDeadPets();
+        }
+        if (this.warReviewAcceptButton != null) {
+            this.warReviewAcceptButton.setX((this.width / 2) + 4);
+            this.warReviewAcceptButton.setY(this.height - 32);
+        }
+        if (this.warReviewDenyButton != null) {
+            this.warReviewDenyButton.setX((this.width / 2) - 104);
+            this.warReviewDenyButton.setY(this.height - 32);
+        }
+        if (this.reloadMapButton != null) {
+            this.reloadMapButton.setY(this.height - 28);
         }
     }
 
@@ -333,6 +506,43 @@ public class MapScreen extends Screen {
             this.requestsButton.visible = inAlliance && hasJoinRequests;
             this.requestsButton.active = inAlliance && hasJoinRequests;
         }
+
+        int nextSlot = 1; // allianceButton is always slot 0
+        if (inAlliance) {
+            if (hasJoinRequests) nextSlot++;
+        } else {
+            nextSlot++; // joinAllianceButton
+            if (hasPendingInvites) nextSlot++;
+        }
+
+        if (this.warInviteButton != null && !this.warReviewMode) {
+            boolean hasPendingWarInvites = AllianceClientState.isOwner() && AllianceClientState.hasPendingWarInvites();
+            this.warInviteButton.setMessage(getWarInviteButtonText());
+            this.warInviteButton.setX(TOP_BUTTON_X);
+            this.warInviteButton.setY(TOP_BUTTON_Y + (TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING) * nextSlot);
+            this.warInviteButton.visible = hasPendingWarInvites;
+            this.warInviteButton.active = hasPendingWarInvites;
+            if (hasPendingWarInvites) nextSlot++;
+        }
+
+        if (this.repairModeButton != null) {
+            boolean hasRepairChunks = AllianceClientState.isOwner() && !MapState.getRollbackEligibleChunks().isEmpty();
+            this.repairModeButton.setMessage(Component.literal(
+                    this.repairMode == RepairMode.SELECTING ? "⚙ Exit Repair" : "⚙ Repair"));
+            this.repairModeButton.setX(TOP_BUTTON_X);
+            this.repairModeButton.setY(TOP_BUTTON_Y + (TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING) * nextSlot);
+            this.repairModeButton.visible = hasRepairChunks;
+            this.repairModeButton.active = hasRepairChunks;
+            if (hasRepairChunks) nextSlot++;
+        }
+
+        if (this.petReviveButton != null) {
+            boolean hasPets = AllianceClientState.isOwner() && MapState.hasDeadPets();
+            this.petReviveButton.setX(TOP_BUTTON_X);
+            this.petReviveButton.setY(TOP_BUTTON_Y + (TOP_BUTTON_HEIGHT + TOP_BUTTON_SPACING) * nextSlot);
+            this.petReviveButton.visible = hasPets;
+            this.petReviveButton.active = hasPets;
+        }
     }
 
     private Component getAllianceButtonText() {
@@ -355,6 +565,11 @@ public class MapScreen extends Screen {
         }
 
         return Component.literal("Requests (" + count + ")");
+    }
+
+    private Component getWarInviteButtonText() {
+        int count = AllianceClientState.getPendingWarInviteIds().size();
+        return Component.literal(count > 1 ? "War Invites (" + count + ")" : "War Invite ⚔");
     }
 
     @Override
@@ -407,6 +622,7 @@ public class MapScreen extends Screen {
         this.requestHoveredTerritoryPreview();
 
         this.renderChunkOverlays(context);
+        this.renderRollbackOverlay(context);
         this.renderVisiblePlayers(context, level);
 
         super.extractRenderState(context, mouseX, mouseY, delta);
@@ -416,11 +632,16 @@ public class MapScreen extends Screen {
 
         this.renderAnchorCycleBanner(context);
         this.renderTerritoryPreviewStatus(context);
+        this.renderWarDeclarationStatus(context);
         this.renderWarStatusPanel(context);
         this.renderChunkValueDebugPanel(context);
         this.renderMapControls(context);
 
         this.renderInfluenceBar(context);
+
+        if (this.petRevivePanelOpen && MapState.hasDeadPets()) {
+            this.renderPetRevivePanel(context);
+        }
 
         this.renderScreenMessage(context);
 
@@ -430,6 +651,7 @@ public class MapScreen extends Screen {
     private void renderTopButtonGlows(GuiGraphicsExtractor context, float delta) {
         renderInviteButtonGlow(context, delta);
         renderRequestsButtonGlow(context, delta);
+        renderWarInviteButtonGlow(context, delta);
     }
 
     private void renderInviteButtonGlow(GuiGraphicsExtractor context, float delta) {
@@ -448,7 +670,15 @@ public class MapScreen extends Screen {
         renderButtonGlow(context, this.requestsButton, delta);
     }
 
+    private void renderWarInviteButtonGlow(GuiGraphicsExtractor context, float delta) {
+        if (this.warInviteButton == null || !this.warInviteButton.visible) {
+            return;
+        }
+        renderButtonGlow(context, this.warInviteButton, delta);
+    }
+
     private static final int INFLUENCE_BAR_DISPLAY_MAX = 1000;
+    private static final int ROLLBACK_FIRE_COLOR = 0xBBFF6600;
 
     private void renderInfluenceBar(GuiGraphicsExtractor context) {
         if (!AllianceClientState.isInAlliance()) return;
@@ -459,9 +689,13 @@ public class MapScreen extends Screen {
         int barY = 20;
         int balance = MapState.getAllianceInfluenceBalance();
 
-        // Compute pending cost for display (claim territory only)
+        // Compute pending cost for display
         int pendingCost = 0;
-        if (this.territoryPreviewMode == TerritoryPreviewMode.CLAIM) {
+        if (this.warDeclarationMode == WarDeclarationMode.SELECTING && !this.selectedEnemyChunks.isEmpty()) {
+            pendingCost = this.selectedEnemyChunks.size() * net.cnn_r.alliesandfoes.alliance.war.AllianceWarService.CHUNK_CONTEST_COST;
+        } else if (this.repairMode == RepairMode.SELECTING && !this.selectedRepairChunks.isEmpty()) {
+            pendingCost = this.selectedRepairChunks.size() * MapState.getRollbackCostPerChunk();
+        } else if (this.territoryPreviewMode == TerritoryPreviewMode.CLAIM) {
             if (!this.selectedClaimChunks.isEmpty()) {
                 pendingCost = this.selectedClaimChunks.values().stream().mapToInt(Integer::intValue).sum();
             } else if (this.hoveredChunk != null) {
@@ -504,6 +738,47 @@ public class MapScreen extends Screen {
         int labelY = barY + barHeight / 2 - 4;
         context.fill(labelX - 2, labelY - 2, labelX + this.font.width(label) + 2, labelY + 10, 0x80000000);
         context.text(this.font, label, labelX, labelY, pendingCost > 0 ? 0xFFFF9999 : 0xFFCCDDFF);
+    }
+
+    private void renderRollbackOverlay(GuiGraphicsExtractor context) {
+        if (!AllianceClientState.isOwner()) return;
+        if (MapState.getRollbackEligibleChunks().isEmpty()) return;
+
+        double scale = BLOCK_PIXEL_SIZE * this.renderer.getZoom();
+        int textureCenter = this.mapTexture.getSize() / 2;
+        int mapLeft = this.renderer.getMapLeft(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int mapTop = this.renderer.getMapTop(this.width, this.height, BLOCK_PIXEL_SIZE);
+        int drawWidth = this.renderer.getDrawWidth(BLOCK_PIXEL_SIZE);
+        int drawHeight = this.renderer.getDrawHeight(BLOCK_PIXEL_SIZE);
+
+        long tick = this.minecraft != null && this.minecraft.level != null
+                ? this.minecraft.level.getGameTime() : 0L;
+        int frame = (int)((tick / 3) % 8);
+        float vOffset = frame * 16f;
+
+        context.enableScissor(mapLeft, mapTop, mapLeft + drawWidth, mapTop + drawHeight);
+        for (ChunkKey chunk : MapState.getRollbackEligibleChunks()) {
+            if (!chunk.getDimensionId().equals(this.dimensionId)) continue;
+            int chunkMinWorldX = chunk.getChunkX() << 4;
+            int chunkMinWorldZ = chunk.getChunkZ() << 4;
+            double texX = textureCenter + (chunkMinWorldX - this.cameraBlockX);
+            double texY = textureCenter + (chunkMinWorldZ - this.cameraBlockZ);
+            int x1 = mapLeft + (int) Math.round(texX * scale);
+            int y1 = mapTop + (int) Math.round(texY * scale);
+            int size = Math.max(1, (int) Math.round(16 * scale));
+            boolean isSelected = this.selectedRepairChunks.contains(chunk);
+            if (isSelected) {
+                context.fill(x1, y1, x1 + size, y1 + size, 0xBBFFCC00);
+            } else {
+                context.blit(RenderPipelines.GUI_TEXTURED, ROLLBACK_FIRE_TEXTURE,
+                        x1, y1,
+                        0.0f, vOffset,
+                        size, size,
+                        16, 16,
+                        16, 128);
+            }
+        }
+        context.disableScissor();
     }
 
     private void renderScreenMessage(GuiGraphicsExtractor context) {
@@ -559,11 +834,80 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
+        // Pet revive panel rows take priority over all widgets — prevents button-overlap issue
+        if (this.petRevivePanelOpen && MapState.hasDeadPets() && click.button() == 0) {
+            List<String> pets = MapState.getDeadPetDescriptions();
+            for (int i = 0; i < pets.size(); i++) {
+                int[] bounds = getPetRevivePanelRowBounds(i);
+                if (click.x() >= bounds[0] && click.x() <= bounds[2]
+                        && click.y() >= bounds[1] && click.y() <= bounds[3]) {
+                    if (this.selectedPetIndices.contains(i)) this.selectedPetIndices.remove(i);
+                    else this.selectedPetIndices.add(i);
+                    return true;
+                }
+            }
+        }
+
         if (super.mouseClicked(click, doubled)) {
             return true;
         }
 
+        // In war review mode only Accept/Deny buttons work; block all map clicks
+        if (this.warReviewMode) {
+            return true;
+        }
+
         this.hoveredChunk = this.getChunkAtMouse((int) click.x(), (int) click.y());
+
+        // Left click in REPAIR mode: toggle damaged chunk selection
+        if (click.button() == 0 && isMouseOverMap(click.x(), click.y())
+                && this.repairMode == RepairMode.SELECTING && this.hoveredChunk != null) {
+            ChunkKey hk = new ChunkKey(this.dimensionId, this.hoveredChunk.x(), this.hoveredChunk.z());
+            if (MapState.getRollbackEligibleChunks().contains(hk)) {
+                if (this.selectedRepairChunks.contains(hk)) this.selectedRepairChunks.remove(hk);
+                else this.selectedRepairChunks.add(hk);
+            }
+            return true;
+        }
+
+        // Left click in war SELECTING mode: always toggle entire anchor group
+        if (click.button() == 0 && isMouseOverMap(click.x(), click.y())
+                && this.warDeclarationMode == WarDeclarationMode.SELECTING) {
+            if (this.hoveredChunk != null) {
+                TerritoryChunkDataPayload td = this.getTerritoryData(this.hoveredChunk);
+                if (td != null && td.claimed() && td.allianceId() != null
+                        && td.anchorId() != null
+                        && AllianceClientState.isInAlliance()
+                        && !AllianceClientState.getAllianceName().equals(td.allianceName())) {
+                    if (this.targetEnemyAllianceId != null && !td.allianceId().equals(this.targetEnemyAllianceId)) {
+                        this.showScreenMessage(Component.literal("Can only contest one alliance at a time."), 1500);
+                    } else {
+                        if (this.targetEnemyAllianceId == null) {
+                            this.targetEnemyAllianceId = td.allianceId();
+                            this.targetEnemyAllianceName = td.allianceName();
+                        }
+                        UUID anchorId = td.anchorId();
+                        List<TerritoryChunkDataPayload> anchorChunks = MapState.getTerritoryChunkSyncCache().getAll()
+                                .stream()
+                                .filter(c -> anchorId.equals(c.anchorId()))
+                                .toList();
+                        boolean allSelected = anchorChunks.stream()
+                                .allMatch(c -> this.selectedEnemyChunks.contains(new ChunkPos(c.chunkX(), c.chunkZ())));
+                        for (TerritoryChunkDataPayload c : anchorChunks) {
+                            ChunkPos cp = new ChunkPos(c.chunkX(), c.chunkZ());
+                            if (allSelected) this.selectedEnemyChunks.remove(cp);
+                            else this.selectedEnemyChunks.add(cp);
+                        }
+                        if (!allSelected) {
+                            this.showScreenMessage(Component.literal(
+                                    "⚔ Targeting " + td.allianceName() + " — Left-click more anchors, Declare War to confirm")
+                                    .withStyle(ChatFormatting.RED), 3000);
+                        }
+                    }
+                }
+            }
+            return true;
+        }
 
         // Left click = execute map action when a valid preview is active.
         if (click.button() == 0 && isMouseOverMap(click.x(), click.y())) {
@@ -626,6 +970,8 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean mouseDragged(MouseButtonEvent click, double offsetX, double offsetY) {
+        if (this.warReviewMode) return false;
+
         if (super.mouseDragged(click, offsetX, offsetY)) {
             return true;
         }
@@ -642,6 +988,7 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (this.warReviewMode) return true;
         float oldZoom = this.renderer.getZoom();
         float zoomFactor = verticalAmount > 0 ? 1.15f : 1.0f / 1.15f;
         float newZoom = Math.max(0.5f, Math.min(6.0f, oldZoom * zoomFactor));
@@ -682,6 +1029,15 @@ public class MapScreen extends Screen {
         int key = input.key();
         int modifiers = input.modifiers();
 
+        // In war review mode, only ESC is allowed
+        if (this.warReviewMode) {
+            if (key == 256) { // ESC
+                exitWarReviewMode();
+                return true;
+            }
+            return true;
+        }
+
         // In anchor cycle mode: arrows cycle, ESC exits, C/U exit and fall through to claim/unclaim
         if (this.anchorCycleMode) {
             if (key == 256) { exitAnchorCycleMode(); return true; }
@@ -698,6 +1054,22 @@ public class MapScreen extends Screen {
 
         switch (key) {
             case 256 -> { // ESC
+                if (this.petRevivePanelOpen) {
+                    this.petRevivePanelOpen = false;
+                    this.selectedPetIndices.clear();
+                    return true;
+                }
+                if (this.repairMode != RepairMode.NONE) {
+                    this.repairMode = RepairMode.NONE;
+                    this.selectedRepairChunks.clear();
+                    this.showScreenMessage(Component.literal("Exited Repair Mode").withColor(0xFFFFFFFF), 1500);
+                    return true;
+                }
+                if (this.warDeclarationMode != WarDeclarationMode.NONE) {
+                    this.exitWarDeclarationMode();
+                    this.showScreenMessage(Component.literal("Exited War Declaration Mode").withColor(0xFFFFFFFF), 2000);
+                    return true;
+                }
                 if (this.territoryPreviewMode != TerritoryPreviewMode.NONE) {
                     String exitedModeMessage = switch (this.territoryPreviewMode) {
                         case FOUND -> "Exited Found Mode";
@@ -753,7 +1125,7 @@ public class MapScreen extends Screen {
                 }
 
                 if (this.selectedAnchorId == null) {
-                    this.showScreenMessage(Component.literal("Left-click a territory chunk to select it first."), 2500);
+                    this.showScreenMessage(Component.literal("Right-click an anchor chunk to select it first."), 2500);
                     return true;
                 }
 
@@ -807,6 +1179,25 @@ public class MapScreen extends Screen {
                 );
                 return true;
             }
+            case 87 -> { // W — War declaration mode
+                if (!AllianceClientState.isOwner()) {
+                    this.showScreenMessage(Component.literal("Only the Founder can declare war."), 2000);
+                    return true;
+                }
+                if (this.warDeclarationMode == WarDeclarationMode.SELECTING) {
+                    this.exitWarDeclarationMode();
+                    this.showScreenMessage(Component.literal("Exited War Declaration Mode").withColor(0xFFFFFFFF), 2000);
+                } else {
+                    if (this.territoryPreviewMode != TerritoryPreviewMode.NONE) {
+                        this.territoryPreviewMode = TerritoryPreviewMode.NONE;
+                        this.clearTerritoryPreviewState();
+                    }
+                    this.warDeclarationMode = WarDeclarationMode.SELECTING;
+                    this.showScreenMessage(Component.literal("⚔ War Declaration Mode ON")
+                            .withStyle(ChatFormatting.RED), 1500);
+                }
+                return true;
+            }
             case 91, 93 -> { // [ or ] — enter anchor cycle mode
                 if (AllianceClientState.isInAlliance()) {
                     enterAnchorCycleMode();
@@ -823,7 +1214,7 @@ public class MapScreen extends Screen {
                 }
 
                 if (this.selectedAnchorId == null) {
-                    this.showScreenMessage(Component.literal("Left-click a territory chunk to select it first."), 2500);
+                    this.showScreenMessage(Component.literal("Right-click an anchor chunk to select it first."), 2500);
                     return true;
                 }
 
@@ -857,6 +1248,7 @@ public class MapScreen extends Screen {
     @Override
     public void removed() {
         this.clearTerritoryPreviewState();
+        this.exitWarDeclarationMode();
         super.removed();
         MapPersistence.save(getWorldIdentity(), this.cache, this.netherCache, this.endCache, this.chunkValueCache);
     }
@@ -915,6 +1307,7 @@ public class MapScreen extends Screen {
 
         for (ChunkKey key : keys) {
             if (!key.getDimensionId().equals(this.dimensionId)) continue;
+            if (!MapState.isCurrentlyLoaded(key)) continue;
 
             int[] pixels = switch (mode) {
                 case NETHER -> this.netherCache.get(key);
@@ -944,7 +1337,7 @@ public class MapScreen extends Screen {
     }
 
     private void rebuildVisibleTexture() {
-        this.mapTexture.clear(0xFF2A1F14);
+        this.mapTexture.clear(0xFF101010);
 
         int centerWorldX = (int) Math.floor(this.cameraBlockX);
         int centerWorldZ = (int) Math.floor(this.cameraBlockZ);
@@ -962,6 +1355,7 @@ public class MapScreen extends Screen {
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 ChunkKey key = new ChunkKey(this.dimensionId, chunkX, chunkZ);
+                if (!MapState.isCurrentlyLoaded(key)) continue;
                 long packedKey = ((long) chunkX << 32) | (chunkZ & 0xFFFFFFFFL);
 
                 int[] surfaceColors = this.cache.get(key);
@@ -1014,6 +1408,7 @@ public class MapScreen extends Screen {
 
         this.mapTexture.upload();
     }
+
 
     private void renderChunkOverlays(GuiGraphicsExtractor context) {
         int centerWorldX = (int) Math.floor(this.cameraBlockX);
@@ -1111,6 +1506,12 @@ public class MapScreen extends Screen {
             context.fill(x1, y1, x2, y2, territoryFill);
         }
 
+        // War declaration: orange overlay for selected enemy chunks
+        if (this.warDeclarationMode == WarDeclarationMode.SELECTING
+                && this.selectedEnemyChunks.contains(pos)) {
+            context.fill(x1, y1, x2, y2, 0x66FF8800);
+        }
+
         // Claim/unclaim selection: green for claim, red for unclaim
         if (!this.selectedClaimChunks.isEmpty()) {
             ChunkKey ck = new ChunkKey(this.dimensionId, pos.x(), pos.z());
@@ -1122,6 +1523,24 @@ public class MapScreen extends Screen {
 
         // War contested chunks: colored border overlays
         String myAllianceName = AllianceClientState.isInAlliance() ? AllianceClientState.getAllianceName() : null;
+        // War review mode: draw strong pulsing fill + border for the reviewed war's contested chunks
+        if (this.warReviewMode && this.reviewingWar != null
+                && this.reviewingWar.dimensionId().equals(this.dimensionId)) {
+            for (int wi = 0; wi < this.reviewingWar.contestedChunkXs().length; wi++) {
+                if (this.reviewingWar.contestedChunkXs()[wi] == pos.x()
+                        && this.reviewingWar.contestedChunkZs()[wi] == pos.z()) {
+                    float pulse = (float)(Math.sin(System.currentTimeMillis() / 400.0 * Math.PI) * 0.5 + 0.5);
+                    int fillAlpha = 0x88 + (int)(0x55 * pulse);
+                    int borderAlpha = 0xCC + (int)(0x33 * pulse);
+                    context.fill(x1, y1, x2, y2, (fillAlpha << 24) | 0xFF8800);
+                    context.fill(x1, y1, x2, y1 + 3, (borderAlpha << 24) | 0xFFAA00);
+                    context.fill(x1, y2 - 3, x2, y2, (borderAlpha << 24) | 0xFFAA00);
+                    context.fill(x1, y1 + 3, x1 + 3, y2 - 3, (borderAlpha << 24) | 0xFFAA00);
+                    context.fill(x2 - 3, y1 + 3, x2, y2 - 3, (borderAlpha << 24) | 0xFFAA00);
+                    break;
+                }
+            }
+        }
 
         for (WarStateSyncPayload.WarEntry entry : MapState.getWarSyncCache().getWars()) {
             if (!entry.dimensionId().equals(this.dimensionId)) continue;
@@ -1278,6 +1697,7 @@ public class MapScreen extends Screen {
                 continue;
             }
 
+            ChunkPos playerChunk = new ChunkPos(playerChunkX, playerChunkZ);
             ChunkKey playerChunkKey = new ChunkKey(this.dimensionId, playerChunkX, playerChunkZ);
 
             if (!this.cache.hasChunk(playerChunkKey)) {
@@ -1394,6 +1814,9 @@ public class MapScreen extends Screen {
             return;
         }
 
+        boolean isDamaged = AllianceClientState.isOwner()
+                && MapState.getRollbackEligibleChunks().contains(hoveredKey);
+
         boolean isPreviewing = this.territoryPreviewMode != TerritoryPreviewMode.NONE;
 
         List<FormattedCharSequence> lines = new ArrayList<>();
@@ -1452,6 +1875,15 @@ public class MapScreen extends Screen {
                                 .append(Component.literal("Not cached").withColor(0xAAAAAA))
                                 .getVisualOrderText()
                 );
+            }
+
+            if (isDamaged) {
+                lines.add(Component.literal("Status: ⚠ Damaged").withColor(0xFFFF6600).getVisualOrderText());
+                if (this.repairMode == RepairMode.SELECTING) {
+                    boolean isSelected = this.selectedRepairChunks.contains(hoveredKey);
+                    lines.add(Component.literal(isSelected ? "✓ Selected for repair" : "Click to select for repair")
+                            .withColor(isSelected ? 0xFF88FF88 : 0xFFCCCCCC).getVisualOrderText());
+                }
             }
         }
         TerritoryPreviewChunkPayload previewData = this.getTerritoryPreviewData(this.hoveredChunk);
@@ -2058,6 +2490,22 @@ public class MapScreen extends Screen {
      * visually noisy or obscuring the map.
      */
     private void renderTerritoryModeGlow(GuiGraphicsExtractor context) {
+        if (this.warDeclarationMode == WarDeclarationMode.SELECTING) {
+            int rgb = 0xAA2222;
+            int outerColor = ((MODE_GLOW_ALPHA) << 24) | rgb;
+            int innerColor = ((MODE_GLOW_ALPHA / 2) << 24) | rgb;
+            int w = this.width; int h = this.height; int t = MODE_GLOW_THICKNESS;
+            context.fill(0, 0, w, t, outerColor);
+            context.fill(0, h - t, w, h, outerColor);
+            context.fill(0, 0, t, h, outerColor);
+            context.fill(w - t, 0, w, h, outerColor);
+            context.fill(t, t, w - t, t * 2, innerColor);
+            context.fill(t, h - (t * 2), w - t, h - t, innerColor);
+            context.fill(t, t, t * 2, h - t, innerColor);
+            context.fill(w - (t * 2), t, w - t, h - t, innerColor);
+            return;
+        }
+
         if (this.territoryPreviewMode == TerritoryPreviewMode.NONE) {
             return;
         }
@@ -2137,12 +2585,21 @@ public class MapScreen extends Screen {
      * - how to exit the mode
      */
     private void renderMapControls(GuiGraphicsExtractor context) {
+        if (this.warReviewMode) return;
+
         List<String> lines = new ArrayList<>();
 
         TerritoryPreviewMode mode = this.territoryPreviewMode;
+        boolean inWarMode = this.warDeclarationMode == WarDeclarationMode.SELECTING;
         boolean inTerritoryMode = mode != TerritoryPreviewMode.NONE;
 
-        if (inTerritoryMode) {
+        if (inWarMode) {
+            lines.add("WAR DECLARATION MODE");
+            lines.add("W: Exit War Mode");
+            lines.add("L-Click: Select Chunks");
+            lines.add("ESC: Cancel");
+            lines.add("R: Recenter");
+        } else if (inTerritoryMode) {
             switch (mode) {
                 case FOUND -> {
                     lines.add("FOUND MODE");
@@ -2189,6 +2646,10 @@ public class MapScreen extends Screen {
                 }
             }
 
+            if (AllianceClientState.isOwner()) {
+                lines.add("W: Declare War");
+            }
+
             if (AllianceClientState.isInAlliance()) {
                 lines.add("[: Anchor Cycle Mode");
             }
@@ -2211,7 +2672,9 @@ public class MapScreen extends Screen {
         for (int i = 0; i < lines.size(); i++) {
             int color = 0xFFFFFFFF;
 
-            if (i == 0 && inTerritoryMode) {
+            if (i == 0 && inWarMode) {
+                color = 0xFFFF4444;
+            } else if (i == 0 && inTerritoryMode) {
                 color = switch (mode) {
                     case FOUND -> 0xFFFFFF66;
                     case CLAIM -> 0xFF66FF66;
@@ -2230,9 +2693,6 @@ public class MapScreen extends Screen {
         }
     }
 
-    /**
-     * Returns the current camera center chunk.
-     */
     private ChunkPos getCameraCenterChunk() {
         int blockX = (int) Math.floor(this.cameraBlockX);
         int blockZ = (int) Math.floor(this.cameraBlockZ);
@@ -2270,7 +2730,7 @@ public class MapScreen extends Screen {
                     context,
                     lines,
                     12,
-                    12,
+                    this.getChunkValueDebugPanelY(lines.size()),
                     CHUNK_VALUE_DEBUG_BG_COLOR,
                     0xFF9FE3FF
             );
@@ -2313,7 +2773,7 @@ public class MapScreen extends Screen {
                 context,
                 lines,
                 12,
-                12,
+                this.getChunkValueDebugPanelY(lines.size()),
                 CHUNK_VALUE_DEBUG_BG_COLOR,
                 0xFF9FE3FF
         );
@@ -2351,6 +2811,64 @@ public class MapScreen extends Screen {
                     color
             );
         }
+    }
+
+    private int getChunkValueDebugPanelY(int lineCount) {
+        return 12;
+    }
+
+    private boolean isHoveringPendingWarChunk() {
+        if (this.hoveredChunk == null) return false;
+        String allianceName = AllianceClientState.getAllianceName();
+        if (allianceName == null) return false;
+        for (WarStateSyncPayload.WarEntry entry : MapState.getWarSyncCache().getWars()) {
+            if (!"PENDING".equals(entry.status())) continue;
+            if (!allianceName.equals(entry.defenderName())) continue;
+            for (int i = 0; i < entry.contestedChunkXs().length; i++) {
+                if (entry.contestedChunkXs()[i] == this.hoveredChunk.x()
+                        && entry.contestedChunkZs()[i] == this.hoveredChunk.z()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void openWarInviteReviewScreen() {
+        if (this.minecraft != null) {
+            this.minecraft.setScreen(new WarInviteScreen(this, this::enterWarReviewMode));
+        }
+    }
+
+    private void enterWarReviewMode(WarStateSyncPayload.WarEntry entry) {
+        this.warReviewMode = true;
+        this.reviewingWar = entry;
+        this.followPlayer = false;
+        int count = entry.contestedChunkXs().length;
+        if (count > 0) {
+            int sumX = 0, sumZ = 0;
+            for (int i = 0; i < count; i++) {
+                sumX += entry.contestedChunkXs()[i];
+                sumZ += entry.contestedChunkZs()[i];
+            }
+            this.cameraBlockX = ((double) sumX / count) * 16 + 8;
+            this.cameraBlockZ = ((double) sumZ / count) * 16 + 8;
+            this.renderer.setZoom(Math.min(3.0f, 48f / Math.max(1, count)));
+        }
+        if (this.warReviewAcceptButton != null) this.warReviewAcceptButton.visible = true;
+        if (this.warReviewDenyButton != null) this.warReviewDenyButton.visible = true;
+        hideTopButtons(true);
+        showScreenMessage(Component.literal("⚔ Review contested chunks — Accept or Decline")
+                .withStyle(ChatFormatting.RED), 8000);
+    }
+
+    private void exitWarReviewMode() {
+        this.warReviewMode = false;
+        this.reviewingWar = null;
+        if (this.warReviewAcceptButton != null) this.warReviewAcceptButton.visible = false;
+        if (this.warReviewDenyButton != null) this.warReviewDenyButton.visible = false;
+        hideTopButtons(false);
+        refreshTopButtons();
     }
 
     private void enterAnchorCycleMode() {
@@ -2395,6 +2913,24 @@ public class MapScreen extends Screen {
         if (this.joinAllianceButton != null) this.joinAllianceButton.visible = show;
         if (this.inviteButton != null) this.inviteButton.visible = show;
         if (this.requestsButton != null) this.requestsButton.visible = show;
+        if (this.warInviteButton != null) this.warInviteButton.visible = show;
+        if (this.declareWarButton != null && hide) this.declareWarButton.visible = false;
+    }
+
+    private void respondToReviewingWar(boolean accept) {
+        if (this.reviewingWar == null) { exitWarReviewMode(); return; }
+        ClientPlayNetworking.send(new RespondWarInvitePayload(this.reviewingWar.warId(), accept));
+        AllianceClientState.removePendingWarInvite(this.reviewingWar.warId());
+        exitWarReviewMode();
+        showScreenMessage(Component.literal(accept ? "War accepted!" : "War declined.")
+                .withStyle(accept ? ChatFormatting.RED : ChatFormatting.GRAY), 2500);
+    }
+
+    private void exitWarDeclarationMode() {
+        this.warDeclarationMode = WarDeclarationMode.NONE;
+        this.selectedEnemyChunks.clear();
+        this.targetEnemyAllianceId = null;
+        this.targetEnemyAllianceName = null;
     }
 
     private void renderAnchorCycleBanner(GuiGraphicsExtractor context) {
@@ -2419,6 +2955,55 @@ public class MapScreen extends Screen {
         context.fill(x, y + boxHeight - 1, x + boxWidth, y + boxHeight, 0xFF99EEFF);
         context.text(this.font, title, x + (boxWidth - titleWidth) / 2, y + 4,  0xFF99EEFF);
         context.text(this.font, hint,  x + (boxWidth - hintWidth)  / 2, y + 15, 0xFFAAAAAA);
+    }
+
+    private void renderPetRevivePanel(GuiGraphicsExtractor context) {
+        List<String> pets = MapState.getDeadPetDescriptions();
+        int lineH = 11;
+        int panelW = 260;
+        int panelH = 36 + pets.size() * lineH;
+        int px = (this.width - panelW) / 2;
+        int py = (this.height - panelH) / 2 - 20;
+
+        context.fill(px, py, px + panelW, py + panelH, 0xCC000000);
+        context.fill(px, py, px + panelW, py + 1, 0xFF888888);
+        context.fill(px, py + panelH - 1, px + panelW, py + panelH, 0xFF888888);
+        context.fill(px, py, px + 1, py + panelH, 0xFF888888);
+        context.fill(px + panelW - 1, py, px + panelW, py + panelH, 0xFF888888);
+
+        context.text(this.font, "Dead Pets — click to select", px + 8, py + 7, 0xFFFFAA44);
+        for (int i = 0; i < pets.size(); i++) {
+            boolean sel = this.selectedPetIndices.contains(i);
+            String checkbox = sel ? "[x] " : "[ ] ";
+            int rowColor = sel ? 0xFF99FF99 : 0xFFDDDDDD;
+            context.text(this.font, checkbox + pets.get(i), px + 8, py + 20 + i * lineH, rowColor);
+        }
+    }
+
+    /** Returns the bounding box of a pet row in the revive panel, or null if panel is not open. */
+    private int[] getPetRevivePanelRowBounds(int petIndex) {
+        List<String> pets = MapState.getDeadPetDescriptions();
+        int lineH = 11;
+        int panelW = 260;
+        int panelH = 36 + pets.size() * lineH;
+        int px = (this.width - panelW) / 2;
+        int py = (this.height - panelH) / 2 - 20;
+        int rowY = py + 20 + petIndex * lineH;
+        return new int[]{px, rowY, px + panelW, rowY + lineH};
+    }
+
+    private void renderWarDeclarationStatus(GuiGraphicsExtractor context) {
+        if (this.warReviewMode) return;
+        if (this.warDeclarationMode != WarDeclarationMode.SELECTING) return;
+
+        String title = "⚔ War Declaration Mode";
+        int boxWidth = this.font.width(title) + 12;
+        int boxHeight = 18;
+        int x = (this.width - boxWidth) / 2;
+        int y = 12;
+
+        context.fill(x, y, x + boxWidth, y + boxHeight, 0xA0000000);
+        context.text(this.font, title, x + 6, y + 5, 0xFFFF4444);
     }
 
     private void renderWarStatusPanel(GuiGraphicsExtractor context) {
@@ -2503,4 +3088,6 @@ public class MapScreen extends Screen {
                 && mouseX < mapLeft + drawWidth
                 && mouseY < mapTop + drawHeight;
     }
+
+
 }
