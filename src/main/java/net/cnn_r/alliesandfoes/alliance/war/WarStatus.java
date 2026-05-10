@@ -2,7 +2,7 @@ package net.cnn_r.alliesandfoes.alliance.war;
 
 public enum WarStatus {
     PENDING,
-    COPYING,
+    PREPARATION,
     ACTIVE,
     ENDED
 }

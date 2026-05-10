@@ -15,17 +15,21 @@ import net.cnn_r.alliesandfoes.network.WarInvitePayload;
 import net.cnn_r.alliesandfoes.network.WarStateSyncPayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Relative;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.bossevents.CustomBossEvent;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.BossEvent;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 import net.minecraft.nbt.CompoundTag;
 
@@ -69,22 +73,37 @@ public class AllianceWarService {
     private int prepTicks   = PREPARATION_TICKS;
     private int activeTicks = ACTIVE_TICKS;
 
-    // Per-war boss bars
-    private final Map<UUID, CustomBossEvent> warBossBars = new HashMap<>();
+    // Per-war boss bars — one per side so each team sees their own score first
+    private final Map<UUID, CustomBossEvent> attackerBars = new HashMap<>();
+    private final Map<UUID, CustomBossEvent> defenderBars = new HashMap<>();
 
     // Saved inventories for war deaths (UUID → [36 main + 4 armor + 1 offhand] stacks)
     private final Map<UUID, List<ItemStack>> savedInventories = new HashMap<>();
+
+    // Pre-war positions for attackers: warId → playerUuid → saved pos
+    private record SavedPos(double x, double y, double z, float yaw, float pitch, String dimId) {}
+    private final Map<UUID, Map<UUID, SavedPos>> savedWarPositions = new HashMap<>();
 
     // Per-war per-player stats: warId → playerUuid → [kills, deaths]
     private final Map<UUID, Map<UUID, int[]>> warPlayerStats = new HashMap<>();
 
     private AllianceWarService(MinecraftServer server) {
         this.server = server;
-        this.wars.addAll(AllianceWarSavedData.get(server).createLiveWars());
+        long gameTime = server.overworld().getGameTime();
+        for (AllianceWar war : AllianceWarSavedData.get(server).createLiveWars()) {
+            // Anchor all active timers to the current game time on load. statusChangedAtTick
+            // was previously written with server.getTickCount() (resets each launch), so any
+            // loaded war would have a stale stamp that makes elapsed time wildly wrong.
+            if (war.status() != WarStatus.ENDED) {
+                this.wars.add(war.withStatus(war.status(), gameTime));
+            } else {
+                this.wars.add(war);
+            }
+        }
         WarSnapshotSavedData.get(server).loadIntoService(WarSnapshotService.get(server));
         // Clean up any stale boss bars persisted from a previous session
         for (AllianceWar war : this.wars) {
-            removeStaleBar(war.id());
+            removeStaleBars(war.id());
         }
     }
 
@@ -103,7 +122,7 @@ public class AllianceWarService {
     // =========================================================================
 
     public void tickWars() {
-        long currentTick = server.getTickCount();
+        long currentTick = server.overworld().getGameTime();
         boolean needsSave = false;
 
         List<AllianceWar> snapshot = new ArrayList<>(this.wars);
@@ -117,12 +136,11 @@ public class AllianceWarService {
                     updateWar(war, active);
                     needsSave = true;
 
-                    CustomBossEvent bar = getOrCreateBossBar(active);
-                    bar.setColor(BossEvent.BossBarColor.RED);
-                    bar.setOverlay(BossEvent.BossBarOverlay.NOTCHED_20);
-                    refreshBarPlayers(active, bar);
+                    createBossBars(active);
+                    refreshWarBarPlayers(active);
                     updateBossBar(active, activeTicks);
 
+                    teleportAttackersToContestBorder(active);
                     notifyBothAlliances(active,
                             "[WAR] The battle has begun! 20 minutes remaining. Fight!", ChatFormatting.RED);
                 } else if (currentTick % 20 == 0) {
@@ -165,11 +183,32 @@ public class AllianceWarService {
                 xs[i] = chunks.get(i).getChunkX();
                 zs[i] = chunks.get(i).getChunkZ();
             }
+            List<WarStateSyncPayload.PlayerStat> playerStats = new ArrayList<>();
+            Map<UUID, int[]> statsMap = warPlayerStats.getOrDefault(war.id(), Map.of());
+            if (attacker != null) {
+                for (UUID memberUuid : attacker.getMemberUuids()) {
+                    ServerPlayer sp = server.getPlayerList().getPlayer(memberUuid);
+                    if (sp == null) continue;
+                    int[] s = statsMap.getOrDefault(memberUuid, new int[2]);
+                    playerStats.add(new WarStateSyncPayload.PlayerStat(
+                            memberUuid, sp.getName().getString(), s[0], s[1], war.attackerId()));
+                }
+            }
+            if (defender != null) {
+                for (UUID memberUuid : defender.getMemberUuids()) {
+                    ServerPlayer sp = server.getPlayerList().getPlayer(memberUuid);
+                    if (sp == null) continue;
+                    int[] s = statsMap.getOrDefault(memberUuid, new int[2]);
+                    playerStats.add(new WarStateSyncPayload.PlayerStat(
+                            memberUuid, sp.getName().getString(), s[0], s[1], war.defenderId()));
+                }
+            }
+
             entries.add(new WarStateSyncPayload.WarEntry(
                     war.id(), war.attackerId(), war.defenderId(),
                     attackerName, defenderName, war.status().name(),
                     war.getKills(war.attackerId()), war.getKills(war.defenderId()),
-                    dimId, xs, zs
+                    dimId, xs, zs, playerStats
             ));
         }
         WarStateSyncPayload payload = new WarStateSyncPayload(entries);
@@ -215,6 +254,64 @@ public class AllianceWarService {
             }
         }
         return Optional.empty();
+    }
+
+    /** Returns the active war involving the player's alliance, or null if none. */
+    public AllianceWar getActiveWarForPlayer(UUID playerUuid) {
+        Alliance alliance = AllianceManager.get(server).getAllianceFor(playerUuid);
+        if (alliance == null) return null;
+        for (AllianceWar war : this.wars) {
+            if (war.status() == WarStatus.ACTIVE && war.involves(alliance.getId())) return war;
+        }
+        return null;
+    }
+
+    /** Returns a spawn position near the anchor chunk of the contested territory (for defenders). */
+    public BlockPos getDefenderRespawnPos(AllianceWar war, ServerLevel level) {
+        TerritoryManager tm = TerritoryManager.get(server);
+        for (ChunkKey chunk : war.contestedChunks()) {
+            TerritoryClaim claim = tm.getClaimAt(chunk);
+            if (claim != null && claim.isAnchorChunk()) {
+                int bx = chunk.getChunkX() * 16 + 8;
+                int bz = chunk.getChunkZ() * 16 + 8;
+                return level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                        new BlockPos(bx, 64, bz));
+            }
+        }
+        if (!war.contestedChunks().isEmpty()) {
+            ChunkKey chunk = war.contestedChunks().iterator().next();
+            int bx = chunk.getChunkX() * 16 + 8;
+            int bz = chunk.getChunkZ() * 16 + 8;
+            return level.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    new BlockPos(bx, 64, bz));
+        }
+        return null;
+    }
+
+    /** Returns a random border position of the contested territory (for attackers on respawn). */
+    public BlockPos getBorderRespawnPos(AllianceWar war, ServerLevel level) {
+        List<BlockPos> positions = getContestBorderPositions(war, level);
+        if (positions.isEmpty()) return null;
+        return positions.get(server.overworld().getRandom().nextInt(positions.size()));
+    }
+
+    /** Teleports a respawning player to the appropriate war zone position. */
+    public void onPlayerRespawn(ServerPlayer player) {
+        AllianceWar war = getActiveWarForPlayer(player.getUUID());
+        if (war == null) return;
+        Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
+        if (alliance == null || war.contestedChunks().isEmpty()) return;
+
+        String dimId = war.contestedChunks().iterator().next().getDimensionId();
+        ServerLevel warLevel = resolveLevel(dimId);
+        if (warLevel == null) return;
+
+        boolean isDefender = war.defenderId().equals(alliance.getId());
+        BlockPos spawn = isDefender ? getDefenderRespawnPos(war, warLevel) : getBorderRespawnPos(war, warLevel);
+        if (spawn == null) return;
+
+        player.teleportTo(warLevel, spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5,
+                Set.of(), player.getYRot(), 0f, true);
     }
 
     public AllianceWar findWarById(UUID warId) {
@@ -284,7 +381,7 @@ public class AllianceWarService {
         if (war == null) return;
         List<WarSnapshotService.PetDeathRecord> pets = WarSnapshotService.get(server).getPetDeaths(warId);
         int total = pets.size() * PET_REVIVE_COST_EACH;
-        List<String> descriptions = pets.stream().map(p -> describeEntity(p.entityNbt())).toList();
+        List<String> descriptions = pets.stream().map(AllianceWarService::describeRecord).toList();
         DeadPetListSyncPayload payload = new DeadPetListSyncPayload(warId, descriptions, total);
         Alliance defender = AllianceManager.get(server).getAllianceById(war.defenderId());
         if (defender == null) return;
@@ -294,18 +391,16 @@ public class AllianceWarService {
         }
     }
 
-    private static String describeEntity(CompoundTag nbt) {
-        String id = nbt.getString("id").orElse("unknown");
+    private static String describeRecord(WarSnapshotService.PetDeathRecord record) {
+        String id = record.entityNbt().getString("id").orElse("unknown");
         String path = id.contains(":") ? id.substring(id.indexOf(':') + 1) : id;
-        String base = Arrays.stream(path.split("_"))
+        String typeName = Arrays.stream(path.split("_"))
                 .map(w -> w.isEmpty() ? w : Character.toUpperCase(w.charAt(0)) + w.substring(1))
                 .collect(Collectors.joining(" "));
-        String customNameTag = nbt.getString("CustomName").orElse("");
-        if (!customNameTag.isBlank()) {
-            String plain = customNameTag.replaceAll("\\{.*?\"text\":\"(.*?)\".*?\\}", "$1");
-            if (!plain.equals(customNameTag) && !plain.isBlank()) base += " — " + plain;
+        if (record.customName() != null && !record.customName().isBlank()) {
+            return record.customName() + " (" + typeName + ")";
         }
-        return base;
+        return typeName;
     }
 
     // =========================================================================
@@ -370,7 +465,7 @@ public class AllianceWarService {
 
         AllianceWar war = new AllianceWar(
                 UUID.randomUUID(), actorAllianceId, targetAllianceId, WarStatus.PENDING,
-                Collections.unmodifiableSet(contestedSet), Map.of(), server.getTickCount()
+                Collections.unmodifiableSet(contestedSet), Map.of(), server.overworld().getGameTime()
         );
         this.wars.add(war);
         this.save();
@@ -400,15 +495,13 @@ public class AllianceWarService {
         AllianceProgressionService.get(server).add(actorAlliance.getId(), DEFENDER_ACCEPT_BONUS);
 
         Alliance attackerAlliance = AllianceManager.get(server).getAllianceById(attackerAllianceId);
-        AllianceWar prep = pending.withStatus(WarStatus.PREPARATION, server.getTickCount());
+        AllianceWar prep = pending.withStatus(WarStatus.PREPARATION, server.overworld().getGameTime());
         updateWar(pending, prep);
         this.save();
 
-        // Create preparation boss bar
-        CustomBossEvent bar = getOrCreateBossBar(prep);
-        bar.setColor(BossEvent.BossBarColor.YELLOW);
-        bar.setOverlay(BossEvent.BossBarOverlay.PROGRESS);
-        refreshBarPlayers(prep, bar);
+        // Create preparation boss bars
+        createBossBars(prep);
+        refreshWarBarPlayers(prep);
         updateBossBar(prep, prepTicks);
 
         String attackerName = attackerAlliance != null ? attackerAlliance.getName() : "Unknown";
@@ -499,9 +592,9 @@ public class AllianceWarService {
         if (this.peaceProposals.contains(enemyProposalKey)) {
             this.peaceProposals.remove(enemyProposalKey);
             // Both agreed — end the war without transfers (voluntary peace)
-            AllianceWar ended = ongoingWar.withStatus(WarStatus.ENDED, server.getTickCount());
+            AllianceWar ended = ongoingWar.withStatus(WarStatus.ENDED, server.overworld().getGameTime());
             updateWar(ongoingWar, ended);
-            removeBossBar(ongoingWar.id());
+            removeBossBars(ongoingWar.id());
             this.save();
 
             notifyAlliance(actorAlliance, Component.literal(
@@ -568,7 +661,7 @@ public class AllianceWarService {
         save();
 
         // Immediately refresh boss bar with new kill scores
-        long elapsed    = server.getTickCount() - updated.statusChangedAtTick();
+        long elapsed    = server.overworld().getGameTime() - updated.statusChangedAtTick();
         long remaining  = activeTicks - elapsed;
         updateBossBar(updated, Math.max(0, remaining));
     }
@@ -614,7 +707,7 @@ public class AllianceWarService {
         for (AllianceWar war : this.wars) {
             if ((war.status() == WarStatus.PREPARATION || war.status() == WarStatus.ACTIVE)
                     && war.involves(alliance.getId())) {
-                getOrCreateBossBar(war).addPlayer(player);
+                refreshWarBarPlayers(war);
             }
         }
         // Re-send pending war invites to the defending Founder in case they were offline when war was declared
@@ -684,31 +777,46 @@ public class AllianceWarService {
                     ChatFormatting.GREEN);
         }
 
-        AllianceWar ended = war.withStatus(WarStatus.ENDED, server.getTickCount());
+        returnAttackersHome(war);
+        AllianceWar ended = war.withStatus(WarStatus.ENDED, server.overworld().getGameTime());
         updateWar(war, ended);
-        removeBossBar(war.id());
+        removeBossBars(war.id());
         warPlayerStats.remove(war.id());
 
         broadcastRollbackEligible(war.id());
         broadcastDeadPets(war.id());
     }
 
-    private CustomBossEvent getOrCreateBossBar(AllianceWar war) {
-        if (warBossBars.containsKey(war.id())) return warBossBars.get(war.id());
-        Identifier barId = Identifier.parse("alliesandfoes:war_" + war.id().toString().replace("-", ""));
-        CustomBossEvent existing = server.getCustomBossEvents().get(barId);
-        if (existing != null) server.getCustomBossEvents().remove(existing);
-        CustomBossEvent bar = server.getCustomBossEvents().create(server.overworld().getRandom(), barId, Component.literal("War"));
-        bar.setCreateWorldFog(false);
-        bar.setDarkenScreen(false);
-        bar.setPlayBossMusic(false);
-        warBossBars.put(war.id(), bar);
-        return bar;
+    private void createBossBars(AllianceWar war) {
+        String base = war.id().toString().replace("-", "");
+        Identifier aId = Identifier.parse("alliesandfoes:war_" + base + "_a");
+        Identifier dId = Identifier.parse("alliesandfoes:war_" + base + "_d");
+
+        CustomBossEvent aStale = server.getCustomBossEvents().get(aId);
+        if (aStale != null) { aStale.removeAllPlayers(); server.getCustomBossEvents().remove(aStale); }
+        CustomBossEvent aBar = server.getCustomBossEvents().create(server.overworld().getRandom(), aId, Component.literal("War"));
+        aBar.setColor(BossEvent.BossBarColor.RED);
+        aBar.setOverlay(BossEvent.BossBarOverlay.NOTCHED_20);
+        aBar.setCreateWorldFog(false);
+        aBar.setDarkenScreen(false);
+        aBar.setPlayBossMusic(false);
+        attackerBars.put(war.id(), aBar);
+
+        CustomBossEvent dStale = server.getCustomBossEvents().get(dId);
+        if (dStale != null) { dStale.removeAllPlayers(); server.getCustomBossEvents().remove(dStale); }
+        CustomBossEvent dBar = server.getCustomBossEvents().create(server.overworld().getRandom(), dId, Component.literal("War"));
+        dBar.setColor(BossEvent.BossBarColor.RED);
+        dBar.setOverlay(BossEvent.BossBarOverlay.NOTCHED_20);
+        dBar.setCreateWorldFog(false);
+        dBar.setDarkenScreen(false);
+        dBar.setPlayBossMusic(false);
+        defenderBars.put(war.id(), dBar);
     }
 
     private void updateBossBar(AllianceWar war, long ticksRemaining) {
-        CustomBossEvent bar = warBossBars.get(war.id());
-        if (bar == null) return;
+        CustomBossEvent aBar = attackerBars.get(war.id());
+        CustomBossEvent dBar = defenderBars.get(war.id());
+        if (aBar == null && dBar == null) return;
 
         Alliance a = AllianceManager.get(server).getAllianceById(war.attackerId());
         Alliance d = AllianceManager.get(server).getAllianceById(war.defenderId());
@@ -719,51 +827,56 @@ public class AllianceWarService {
         long mins    = seconds / 60;
         long secs    = seconds % 60;
 
-        Component name;
-        float progress;
         if (war.status() == WarStatus.PREPARATION) {
-            name     = Component.literal(String.format("⚔ %s vs %s — begins in %d:%02d", aName, dName, mins, secs));
-            progress = Math.max(0f, (float) ticksRemaining / prepTicks);
+            Component prep = Component.literal(
+                    String.format("⚔ %s vs %s — begins in %d:%02d", aName, dName, mins, secs));
+            float prog = Math.max(0f, (float) ticksRemaining / prepTicks);
+            if (aBar != null) { aBar.setName(prep); aBar.setProgress(prog); }
+            if (dBar != null) { dBar.setName(prep); dBar.setProgress(prog); }
         } else {
             int aKills = war.getKills(war.attackerId());
             int dKills = war.getKills(war.defenderId());
-            name     = Component.literal(String.format("⚔ %s  %d — %d  %s  |  %d:%02d",
-                    aName, aKills, dKills, dName, mins, secs));
-            progress = Math.max(0f, (float) ticksRemaining / activeTicks);
-        }
-        bar.setName(name);
-        bar.setProgress(progress);
-    }
-
-    private void refreshBarPlayers(AllianceWar war, CustomBossEvent bar) {
-        bar.removeAllPlayers();
-        addAllianceToBar(war.attackerId(), bar);
-        addAllianceToBar(war.defenderId(), bar);
-    }
-
-    private void addAllianceToBar(UUID allianceId, CustomBossEvent bar) {
-        Alliance a = AllianceManager.get(server).getAllianceById(allianceId);
-        if (a == null) return;
-        for (UUID memberId : a.getMemberUuids()) {
-            ServerPlayer p = server.getPlayerList().getPlayer(memberId);
-            if (p != null) bar.addPlayer(p);
+            float prog = Math.max(0f, (float) ticksRemaining / activeTicks);
+            if (aBar != null) {
+                aBar.setName(Component.literal(String.format("⚔ %s  %d — %d  %s  |  %d:%02d",
+                        aName, aKills, dKills, dName, mins, secs)));
+                aBar.setProgress(prog);
+            }
+            if (dBar != null) {
+                dBar.setName(Component.literal(String.format("⚔ %s  %d — %d  %s  |  %d:%02d",
+                        dName, dKills, aKills, aName, mins, secs)));
+                dBar.setProgress(prog);
+            }
         }
     }
 
-    private void removeBossBar(UUID warId) {
-        CustomBossEvent bar = warBossBars.remove(warId);
-        if (bar != null) {
-            bar.removeAllPlayers();
-            server.getCustomBossEvents().remove(bar);
+    private void refreshWarBarPlayers(AllianceWar war) {
+        CustomBossEvent aBar = attackerBars.get(war.id());
+        CustomBossEvent dBar = defenderBars.get(war.id());
+        if (aBar != null) aBar.removeAllPlayers();
+        if (dBar != null) dBar.removeAllPlayers();
+
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            Alliance pa = AllianceManager.get(server).getAllianceFor(p.getUUID());
+            if (pa == null) continue;
+            if (pa.getId().equals(war.attackerId()) && aBar != null) aBar.addPlayer(p);
+            else if (pa.getId().equals(war.defenderId()) && dBar != null) dBar.addPlayer(p);
         }
     }
 
-    private void removeStaleBar(UUID warId) {
-        Identifier barId = Identifier.parse("alliesandfoes:war_" + warId.toString().replace("-", ""));
-        CustomBossEvent existing = server.getCustomBossEvents().get(barId);
-        if (existing != null) {
-            existing.removeAllPlayers();
-            server.getCustomBossEvents().remove(existing);
+    private void removeBossBars(UUID warId) {
+        CustomBossEvent aBar = attackerBars.remove(warId);
+        if (aBar != null) { aBar.removeAllPlayers(); server.getCustomBossEvents().remove(aBar); }
+        CustomBossEvent dBar = defenderBars.remove(warId);
+        if (dBar != null) { dBar.removeAllPlayers(); server.getCustomBossEvents().remove(dBar); }
+    }
+
+    private void removeStaleBars(UUID warId) {
+        String base = warId.toString().replace("-", "");
+        for (String suffix : new String[]{"_a", "_d", ""}) {
+            Identifier id = Identifier.parse("alliesandfoes:war_" + base + suffix);
+            CustomBossEvent existing = server.getCustomBossEvents().get(id);
+            if (existing != null) { existing.removeAllPlayers(); server.getCustomBossEvents().remove(existing); }
         }
     }
 
@@ -801,6 +914,71 @@ public class AllianceWarService {
     private void addStat(UUID warId, UUID playerUuid, int statIdx, int delta) {
         warPlayerStats.computeIfAbsent(warId, k -> new HashMap<>())
                 .computeIfAbsent(playerUuid, k -> new int[2])[statIdx] += delta;
+    }
+
+    private List<BlockPos> getContestBorderPositions(AllianceWar war, ServerLevel level) {
+        Set<ChunkKey> contested = war.contestedChunks();
+        List<BlockPos> borderPositions = new ArrayList<>();
+        for (ChunkKey chunk : contested) {
+            boolean onEdge = false;
+            for (ChunkKey neighbor : chunk.getCardinalNeighbors()) {
+                if (!contested.contains(neighbor)) { onEdge = true; break; }
+            }
+            if (!onEdge) continue;
+            int bx = chunk.getChunkX() * 16 + 8;
+            int bz = chunk.getChunkZ() * 16 + 8;
+            borderPositions.add(level.getHeightmapPos(
+                    Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, new BlockPos(bx, 64, bz)));
+        }
+        return borderPositions;
+    }
+
+    private void teleportAttackersToContestBorder(AllianceWar war) {
+        Alliance attackerAlliance = AllianceManager.get(server).getAllianceById(war.attackerId());
+        if (attackerAlliance == null || war.contestedChunks().isEmpty()) return;
+
+        String dimId = war.contestedChunks().iterator().next().getDimensionId();
+        ServerLevel level = resolveLevel(dimId);
+        if (level == null) return;
+
+        List<BlockPos> borderPositions = getContestBorderPositions(war, level);
+        if (borderPositions.isEmpty()) return;
+
+        Map<UUID, SavedPos> positions =
+                savedWarPositions.computeIfAbsent(war.id(), k -> new HashMap<>());
+        List<UUID> members = new ArrayList<>(attackerAlliance.getMemberUuids());
+        for (int i = 0; i < members.size(); i++) {
+            ServerPlayer p = server.getPlayerList().getPlayer(members.get(i));
+            if (p == null) continue;
+            positions.put(p.getUUID(), new SavedPos(
+                    p.getX(), p.getY(), p.getZ(),
+                    p.getYRot(), p.getXRot(),
+                    p.level().dimension().identifier().toString()));
+            BlockPos dest = borderPositions.get(i % borderPositions.size());
+            p.teleportTo(level, dest.getX() + 0.5, dest.getY(), dest.getZ() + 0.5,
+                    Set.of(), p.getYRot(), 0f, true);
+        }
+    }
+
+    private void returnAttackersHome(AllianceWar war) {
+        Map<UUID, SavedPos> positions = savedWarPositions.remove(war.id());
+        if (positions == null) return;
+        for (Map.Entry<UUID, SavedPos> entry : positions.entrySet()) {
+            ServerPlayer p = server.getPlayerList().getPlayer(entry.getKey());
+            if (p == null) continue;
+            SavedPos pos = entry.getValue();
+            ServerLevel level = resolveLevel(pos.dimId());
+            if (level == null) continue;
+            p.teleportTo(level, pos.x(), pos.y(), pos.z(),
+                    Set.of(), pos.yaw(), pos.pitch(), true);
+        }
+    }
+
+    private ServerLevel resolveLevel(String dimId) {
+        for (ServerLevel l : server.getAllLevels()) {
+            if (l.dimension().identifier().toString().equals(dimId)) return l;
+        }
+        return null;
     }
 
     public void save() {

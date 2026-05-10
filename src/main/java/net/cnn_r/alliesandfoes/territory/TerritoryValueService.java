@@ -67,12 +67,6 @@ public class TerritoryValueService {
         return this.cachedChunkValues.size();
     }
 
-    public int[] evaluateComponents(ChunkKey chunkKey) {
-        if (chunkKey == null) return new int[]{0, 0, 0, 0};
-        return this.chunkValueEvaluator.evaluateComponents(
-                chunkKey.getDimensionId(), chunkKey.getChunkX(), chunkKey.getChunkZ());
-    }
-
     protected int computeInitialChunkValue(ChunkKey chunkKey) {
         if (chunkKey == null) {
             throw new IllegalArgumentException("chunkKey cannot be null");

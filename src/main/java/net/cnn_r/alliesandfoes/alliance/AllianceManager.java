@@ -53,10 +53,6 @@ public class AllianceManager {
         return this.alliancesById.get(allianceId);
     }
 
-    public java.util.Collection<Alliance> getAlliances() {
-        return java.util.Collections.unmodifiableCollection(alliancesById.values());
-    }
-
     public Alliance getAllianceByName(String name) {
         if (name == null) return null;
         UUID id = this.allianceNameToId.get(name.toLowerCase(Locale.ROOT));
@@ -346,7 +342,7 @@ public class AllianceManager {
 
             if (owner != null) {
                 owner.sendSystemMessage(
-                        Component.literal(player.getGameProfile().name() + " joined alliance: " + alliance.getName()), true);
+                        Component.literal(player.getGameProfile().name() + " joined alliance: " + alliance.getName()));
             }
 
             return ActionResult.success("You joined alliance: " + alliance.getName());
@@ -356,7 +352,7 @@ public class AllianceManager {
 
         if (owner != null) {
             owner.sendSystemMessage(
-                    Component.literal(player.getGameProfile().name() + " declined your alliance invite."), true);
+                    Component.literal(player.getGameProfile().name() + " declined your alliance invite."));
         }
 
         return ActionResult.success("Alliance invite declined.");
@@ -396,7 +392,7 @@ public class AllianceManager {
 
             if (requester != null) {
                 requester.sendSystemMessage(
-                        Component.literal("Your request to join " + alliance.getName() + " was accepted."), true);
+                        Component.literal("Your request to join " + alliance.getName() + " was accepted."));
             }
 
             return ActionResult.success("Join request accepted.");
@@ -406,7 +402,7 @@ public class AllianceManager {
 
         if (requester != null) {
             requester.sendSystemMessage(
-                    Component.literal("Your request to join " + alliance.getName() + " was declined."), true);
+                    Component.literal("Your request to join " + alliance.getName() + " was declined."));
         }
 
         return ActionResult.success("Join request declined.");
@@ -553,7 +549,7 @@ public class AllianceManager {
         ServerPlayer owner = server.getPlayerList().getPlayer(alliance.getOwnerUuid());
         if (owner != null) {
             owner.sendSystemMessage(
-                    Component.literal(player.getGameProfile().name() + " left the alliance."), true);
+                    Component.literal(player.getGameProfile().name() + " left the alliance."));
         }
 
         return ActionResult.success("You left the alliance.");
@@ -585,7 +581,7 @@ public class AllianceManager {
         if (target != null) {
             this.refreshRemovedPlayer(server, target);
             target.sendSystemMessage(
-                    Component.literal("You were removed from alliance: " + alliance.getName()), true);
+                    Component.literal("You were removed from alliance: " + alliance.getName()));
         }
 
         this.refreshAllianceMembers(server, alliance);
@@ -615,7 +611,7 @@ public class AllianceManager {
         ServerPlayer newOwner = server.getPlayerList().getPlayer(newOwnerUuid);
         if (newOwner != null) {
             newOwner.sendSystemMessage(
-                    Component.literal("You are now the owner of alliance: " + alliance.getName()), true);
+                    Component.literal("You are now the owner of alliance: " + alliance.getName()));
         }
 
         this.sendViewScreen(server, actor);
@@ -648,7 +644,7 @@ public class AllianceManager {
         ServerPlayer target = server.getPlayerList().getPlayer(targetUuid);
         if (target != null) {
             target.sendSystemMessage(
-                    Component.literal("Your alliance role is now: " + sanitizedRole), true);
+                    Component.literal("Your alliance role is now: " + sanitizedRole));
         }
 
         this.sendViewScreen(server, actor);
@@ -697,35 +693,8 @@ public class AllianceManager {
         }
     }
 
-    public void save(MinecraftServer ignored) {
-        this.save();
-    }
-
     private void save() {
         AllianceSavedData.get(this.server).saveFromLiveAlliances(this.alliancesById.values());
-    }
-
-    public void disbandAlliance(MinecraftServer server, ServerPlayer founder) {
-        Alliance alliance = this.getAllianceFor(founder.getUUID());
-        if (alliance == null) return;
-
-        UUID allianceId = alliance.getId();
-
-        net.cnn_r.alliesandfoes.protect.BlockOwnerSavedData.get(server).clearAlliance(allianceId);
-        net.cnn_r.alliesandfoes.protect.TrustListSavedData.get(server).removeAlliance(allianceId);
-
-        for (UUID memberId : new java.util.ArrayList<>(alliance.getMemberUuids())) {
-            this.playerToAllianceId.remove(memberId);
-            ServerPlayer member = server.getPlayerList().getPlayer(memberId);
-            if (member != null) {
-                member.sendSystemMessage(Component.literal("Your alliance has been disbanded."), true);
-                ServerPlayNetworking.send(member, new net.cnn_r.alliesandfoes.network.AllianceStatePayload(false, "", "", null));
-            }
-        }
-
-        this.alliancesById.remove(allianceId);
-        this.allianceNameToId.remove(alliance.getName().toLowerCase(java.util.Locale.ROOT));
-        this.save();
     }
 
     public record CreationResult(boolean success, String message, Alliance alliance) {

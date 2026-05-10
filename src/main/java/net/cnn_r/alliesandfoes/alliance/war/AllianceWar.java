@@ -15,32 +15,17 @@ public record AllianceWar(
         WarStatus status,
         Set<ChunkKey> contestedChunks,
         Map<UUID, Integer> killScores,
-        long statusChangedAtTick,
-        UUID winnerAllianceId,
-        int prizeAOrdinal,
-        int prizeBOrdinal
+        long statusChangedAtTick
 ) {
-    public static AllianceWar create(UUID attackerId, UUID defenderId, Set<ChunkKey> chunks) {
-        return new AllianceWar(UUID.randomUUID(), attackerId, defenderId,
-                WarStatus.PENDING, chunks, Map.of(), 0L, null, -1, -1);
-    }
-
     public AllianceWar withStatus(WarStatus newStatus, long atTick) {
-        return new AllianceWar(id, attackerId, defenderId, newStatus, contestedChunks,
-                killScores, atTick, winnerAllianceId, prizeAOrdinal, prizeBOrdinal);
+        return new AllianceWar(id, attackerId, defenderId, newStatus, contestedChunks, killScores, atTick);
     }
 
     public AllianceWar withKill(UUID allianceId) {
         Map<UUID, Integer> updated = new HashMap<>(killScores);
         updated.merge(allianceId, 1, Integer::sum);
         return new AllianceWar(id, attackerId, defenderId, status, contestedChunks,
-                Collections.unmodifiableMap(updated), statusChangedAtTick,
-                winnerAllianceId, prizeAOrdinal, prizeBOrdinal);
-    }
-
-    public AllianceWar withWinner(UUID winner) {
-        return new AllianceWar(id, attackerId, defenderId, WarStatus.ENDED, contestedChunks,
-                killScores, statusChangedAtTick, winner, prizeAOrdinal, prizeBOrdinal);
+                Collections.unmodifiableMap(updated), statusChangedAtTick);
     }
 
     public int getKills(UUID allianceId) {

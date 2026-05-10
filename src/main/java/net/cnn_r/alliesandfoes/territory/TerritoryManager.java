@@ -53,7 +53,8 @@ public class TerritoryManager {
 
         this.valueService = new TerritoryValueService(this.cachedChunkValues, chunkValueEvaluator);
         this.costService = new TerritoryCostService();
-        this.paymentService = new AllianceInfluenceTerritoryPaymentService(server);
+        // Territory costs now come from alliance progression instead of player inventory.
+        this.paymentService = new AllianceProgressionTerritoryPaymentService(server);
 
         this.loadFromSavedData();
     }
@@ -90,7 +91,6 @@ public class TerritoryManager {
         AnchorTier resolvedTier = tier == null ? AnchorTier.getDefault() : tier;
         int foundingChunkValue = this.valueService.getOrCreateChunkValue(targetChunk);
         int foundingCost = this.costService.getFoundingCost(foundingChunkValue);
-
 
         PaymentResult affordabilityResult = this.paymentService.canPayFoundingCost(
                 playerUuid,
@@ -184,8 +184,27 @@ public class TerritoryManager {
         }
 
         int chunkValue = this.valueService.getOrCreateChunkValue(targetChunk);
+        int expansionCost = this.costService.getExpansionCost(chunkValue);
 
-        UUID allianceId = alliance.getId();
+        PaymentResult affordabilityResult = this.paymentService.canPayExpansionCost(
+                playerUuid,
+                anchorId,
+                targetChunk,
+                expansionCost
+        );
+        if (!affordabilityResult.allowed()) {
+            return ActionResult.failure(affordabilityResult.failureReason());
+        }
+
+        PaymentResult paymentResult = this.paymentService.payExpansionCost(
+                playerUuid,
+                anchorId,
+                targetChunk,
+                expansionCost
+        );
+        if (!paymentResult.allowed()) {
+            return ActionResult.failure(paymentResult.failureReason());
+        }
 
         TerritoryClaim claim = TerritoryClaim.createExpansionClaim(
                 targetChunk,
@@ -203,7 +222,7 @@ public class TerritoryManager {
                 "Territory claimed.",
                 anchor,
                 claim,
-                0
+                expansionCost
         );
     }
 
@@ -557,51 +576,6 @@ public class TerritoryManager {
         return null;
     }
     
-    /**
-     * Returns the anchor whose origin is exactly this chunk, or null if none.
-     */
-    public TerritoryAnchor getAnchorAtChunk(ChunkKey chunkKey) {
-        TerritoryClaim claim = this.getClaimAt(chunkKey);
-        if (claim == null || !claim.isAnchorChunk()) return null;
-        return this.getAnchorById(claim.getAnchorId());
-    }
-
-    /**
-     * Updates an existing anchor's tier in-place. Replaces the entry in the live map and persists.
-     */
-    public boolean updateAnchorTier(UUID anchorId, AnchorTier newTier) {
-        TerritoryAnchor old = this.anchorsById.get(anchorId);
-        if (old == null || newTier == null) return false;
-
-        TerritoryAnchor updated = old.withTier(newTier);
-        this.anchorsById.put(anchorId, updated);
-
-        List<TerritoryAnchor> allianceList = this.anchorsByAllianceId.get(old.getAllianceId());
-        if (allianceList != null) {
-            allianceList.replaceAll(a -> a.getAnchorId().equals(anchorId) ? updated : a);
-        }
-
-        this.save();
-        return true;
-    }
-
-    public boolean updateAnchorName(UUID anchorId, String newName) {
-        if (newName == null || newName.isBlank() || newName.length() > 32) return false;
-        TerritoryAnchor old = this.anchorsById.get(anchorId);
-        if (old == null) return false;
-
-        TerritoryAnchor updated = old.withName(newName.strip());
-        this.anchorsById.put(anchorId, updated);
-
-        List<TerritoryAnchor> allianceList = this.anchorsByAllianceId.get(old.getAllianceId());
-        if (allianceList != null) {
-            allianceList.replaceAll(a -> a.getAnchorId().equals(anchorId) ? updated : a);
-        }
-
-        this.save();
-        return true;
-    }
-
     public record ActionResult(
             boolean success,
             String message,

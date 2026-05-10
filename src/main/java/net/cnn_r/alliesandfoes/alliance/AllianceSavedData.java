@@ -2,7 +2,6 @@ package net.cnn_r.alliesandfoes.alliance;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.resources.Identifier;
@@ -51,12 +50,7 @@ public class AllianceSavedData extends SavedData {
             UUID_SET_CODEC.fieldOf("members").forGetter(StoredAlliance::members),
             ROLE_MAP_CODEC.fieldOf("roles").forGetter(StoredAlliance::roles),
             UUID_SET_CODEC.fieldOf("pending_invites").forGetter(StoredAlliance::pendingInvites),
-            UUID_SET_CODEC.fieldOf("pending_join_requests").forGetter(StoredAlliance::pendingJoinRequests),
-            Codec.BOOL.optionalFieldOf("has_home", false).forGetter(StoredAlliance::hasHome),
-            Codec.INT.optionalFieldOf("home_x", 0).forGetter(StoredAlliance::homeX),
-            Codec.INT.optionalFieldOf("home_y", 64).forGetter(StoredAlliance::homeY),
-            Codec.INT.optionalFieldOf("home_z", 0).forGetter(StoredAlliance::homeZ),
-            Codec.STRING.optionalFieldOf("home_dim", "minecraft:overworld").forGetter(StoredAlliance::homeDimensionId)
+            UUID_SET_CODEC.fieldOf("pending_join_requests").forGetter(StoredAlliance::pendingJoinRequests)
     ).apply(instance, StoredAlliance::new));
 
     private static final Codec<AllianceSavedData> CODEC = STORED_ALLIANCE_CODEC.listOf().xmap(
@@ -92,17 +86,21 @@ public class AllianceSavedData extends SavedData {
 
     public List<Alliance> createLiveAlliances() {
         List<Alliance> alliances = new ArrayList<>(this.storedAlliances.size());
+
         for (StoredAlliance storedAlliance : this.storedAlliances) {
             alliances.add(storedAlliance.toLiveAlliance());
         }
+
         return alliances;
     }
 
     public void saveFromLiveAlliances(Collection<Alliance> alliances) {
         List<StoredAlliance> snapshot = new ArrayList<>(alliances.size());
+
         for (Alliance alliance : alliances) {
             snapshot.add(StoredAlliance.fromLiveAlliance(alliance));
         }
+
         this.storedAlliances = snapshot;
         this.setDirty();
     }
@@ -114,20 +112,13 @@ public class AllianceSavedData extends SavedData {
             LinkedHashSet<UUID> members,
             LinkedHashMap<UUID, String> roles,
             LinkedHashSet<UUID> pendingInvites,
-            LinkedHashSet<UUID> pendingJoinRequests,
-            boolean hasHome,
-            int homeX,
-            int homeY,
-            int homeZ,
-            String homeDimensionId
+            LinkedHashSet<UUID> pendingJoinRequests
     ) {
         public static StoredAlliance fromLiveAlliance(Alliance alliance) {
             LinkedHashSet<UUID> members = new LinkedHashSet<>(alliance.getMemberUuids());
             LinkedHashMap<UUID, String> roles = new LinkedHashMap<>(alliance.getMemberRoles());
             LinkedHashSet<UUID> pendingInvites = new LinkedHashSet<>(alliance.getPendingInviteUuids());
             LinkedHashSet<UUID> pendingJoinRequests = new LinkedHashSet<>(alliance.getPendingJoinRequestUuids());
-            BlockPos home = alliance.getHomeSpawn();
-            boolean hasHome = home != null;
 
             return new StoredAlliance(
                     alliance.getId(),
@@ -136,12 +127,7 @@ public class AllianceSavedData extends SavedData {
                     members,
                     roles,
                     pendingInvites,
-                    pendingJoinRequests,
-                    hasHome,
-                    hasHome ? home.getX() : 0,
-                    hasHome ? home.getY() : 64,
-                    hasHome ? home.getZ() : 0,
-                    hasHome ? alliance.getHomeDimensionId() : "minecraft:overworld"
+                    pendingJoinRequests
             );
         }
 
@@ -156,6 +142,7 @@ public class AllianceSavedData extends SavedData {
 
             for (Map.Entry<UUID, String> entry : this.roles.entrySet()) {
                 UUID memberUuid = entry.getKey();
+
                 if (alliance.hasMember(memberUuid)) {
                     alliance.setRole(memberUuid, entry.getValue());
                 }
@@ -167,10 +154,6 @@ public class AllianceSavedData extends SavedData {
 
             for (UUID requesterUuid : this.pendingJoinRequests) {
                 alliance.addPendingJoinRequest(requesterUuid);
-            }
-
-            if (hasHome) {
-                alliance.setHomeSpawn(new BlockPos(homeX, homeY, homeZ), homeDimensionId);
             }
 
             return alliance;

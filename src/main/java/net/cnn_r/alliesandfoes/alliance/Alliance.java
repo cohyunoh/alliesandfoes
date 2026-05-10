@@ -1,7 +1,5 @@
 package net.cnn_r.alliesandfoes.alliance;
 
-import net.minecraft.core.BlockPos;
-
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -11,6 +9,7 @@ import java.util.UUID;
 public class Alliance {
     public static final String DEFAULT_MEMBER_ROLE = "Member";
     public static final String OWNER_ROLE = "Founder";
+    public static final String EXPLORER_ROLE = "Explorer";
 
     private final UUID id;
     private final String name;
@@ -19,9 +18,6 @@ public class Alliance {
     private final Set<UUID> pendingInviteUuids = new LinkedHashSet<>();
     private final Map<UUID, String> memberRoles = new LinkedHashMap<>();
     private final Set<UUID> pendingJoinRequestUuids = new LinkedHashSet<>();
-
-    private BlockPos homeSpawn = null;
-    private String homeDimensionId = null;
 
     public Alliance(UUID id, String name, UUID ownerUuid) {
         this.id = id;
@@ -139,13 +135,6 @@ public class Alliance {
 
         String role = sanitizeRole(rawRole);
         memberRoles.put(uuid, role);
-    }
-
-    public BlockPos getHomeSpawn() { return homeSpawn; }
-    public String getHomeDimensionId() { return homeDimensionId; }
-    public void setHomeSpawn(BlockPos pos, String dimId) {
-        this.homeSpawn = pos;
-        this.homeDimensionId = dimId;
     }
 
     public static String sanitizeRole(String rawRole) {

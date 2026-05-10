@@ -4,10 +4,10 @@ import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkStructureSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
-import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
-import net.cnn_r.alliesandfoes.map.cache.TerritoryPreviewSyncCache;
 import net.cnn_r.alliesandfoes.map.cache.WarSyncCache;
 import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
+import net.cnn_r.alliesandfoes.map.cache.TerritoryChunkSyncCache;
+import net.cnn_r.alliesandfoes.map.cache.TerritoryPreviewSyncCache;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -57,6 +58,15 @@ public class MapState {
 
     private static volatile String pendingMapMessage = null;
     private static volatile int allianceInfluenceBalance = 0;
+    private static volatile int allianceTierBonus = 0;
+
+    private static volatile UUID rollbackWarId = null;
+    private static final Set<ChunkKey> rollbackEligibleChunks = ConcurrentHashMap.newKeySet();
+    private static volatile int rollbackCostPerChunk = 10;
+
+    private static volatile UUID deadPetsWarId = null;
+    private static volatile List<String> deadPetDescriptions = List.of();
+    private static volatile int petReviveTotalCost = 0;
 
     public static ChunkCache getChunkCache() {
         if (chunkCache == null) chunkCache = new ChunkCache();
@@ -109,6 +119,8 @@ public class MapState {
         ChunkScanner s = getScanner();
         if (s == null) return;
 
+        // Immediately queue dimension-specific scan so nether/end chunks don't
+        // wait for the per-tick maybeScanNearbyCaveChunks radius.
         if (currentMode == MapRenderMode.NETHER) {
             if (!getNetherChunkCache().hasChunk(key) && !s.isNetherQueued(pos)) {
                 s.requestNetherScan(chunk);
@@ -304,6 +316,9 @@ public class MapState {
         }
     }
 
+    /** Clears the entire nether cache and immediately re-queues every loaded chunk for
+     *  re-scan. Called on significant player Y changes. Full cache clear ensures all
+     *  displayed chunks reflect the same Y level — no mixed-perspective artifacts. */
     public static void clearAndRescanAllNetherChunks() {
         ChunkScanner s = getScanner();
         ClientLevel level = Minecraft.getInstance().level;
@@ -376,6 +391,43 @@ public class MapState {
     public static void setAllianceInfluenceBalance(int balance) { allianceInfluenceBalance = balance; }
 
     // -------------------------------------------------------------------------
+    // Alliance tier bonus (additive Explorer tier bonus from alliance XP)
+    // -------------------------------------------------------------------------
+
+    public static int getAllianceTierBonus() { return allianceTierBonus; }
+    public static void setAllianceTierBonus(int bonus) { allianceTierBonus = bonus; }
+
+    // -------------------------------------------------------------------------
+    // Rollback eligible chunks
+    // -------------------------------------------------------------------------
+
+    public static void setRollbackEligible(UUID warId, List<ChunkKey> chunks, int cost) {
+        rollbackWarId = warId;
+        rollbackEligibleChunks.clear();
+        rollbackEligibleChunks.addAll(chunks);
+        rollbackCostPerChunk = cost;
+    }
+
+    public static Set<ChunkKey> getRollbackEligibleChunks() { return rollbackEligibleChunks; }
+    public static UUID getRollbackWarId()                   { return rollbackWarId; }
+    public static int getRollbackCostPerChunk()             { return rollbackCostPerChunk; }
+
+    // -------------------------------------------------------------------------
+    // Dead pets state
+    // -------------------------------------------------------------------------
+
+    public static void setDeadPets(UUID warId, List<String> descriptions, int cost) {
+        deadPetsWarId = warId;
+        deadPetDescriptions = List.copyOf(descriptions);
+        petReviveTotalCost = cost;
+    }
+
+    public static boolean hasDeadPets()                      { return !deadPetDescriptions.isEmpty(); }
+    public static List<String> getDeadPetDescriptions()      { return deadPetDescriptions; }
+    public static UUID getDeadPetsWarId()                    { return deadPetsWarId; }
+    public static int getPetReviveTotalCost()                { return petReviveTotalCost; }
+
+    // -------------------------------------------------------------------------
 
     public static void clearAll() {
         if (scanner != null) {
@@ -400,6 +452,11 @@ public class MapState {
         recentlyScanned.clear();
         currentMode = MapRenderMode.SURFACE;
         currentWorldId = null;
-        allianceInfluenceBalance = 0;
+        rollbackWarId = null;
+        rollbackEligibleChunks.clear();
+        rollbackCostPerChunk = 10;
+        deadPetsWarId = null;
+        deadPetDescriptions = List.of();
+        petReviveTotalCost = 0;
     }
 }
