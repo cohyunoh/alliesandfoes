@@ -58,9 +58,11 @@ import net.minecraft.world.entity.TamableAnimal;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public class Alliesandfoes implements ModInitializer {
@@ -557,10 +559,18 @@ public class Alliesandfoes implements ModInitializer {
 						player.getYRot()
 				));
 			}
-			PlayerPositionsPayload payload = new PlayerPositionsPayload(entries);
 
+			AllianceManager am = AllianceManager.get(server);
 			for (ServerPlayer receiver : players) {
-				ServerPlayNetworking.send(receiver, payload);
+				Alliance receiverAlliance = am.getAllianceFor(receiver.getUUID());
+				Set<UUID> visible = new HashSet<>();
+				visible.add(receiver.getUUID());
+				if (receiverAlliance != null) visible.addAll(receiverAlliance.getMemberUuids());
+				List<PlayerPositionsPayload.Entry> filtered = new ArrayList<>();
+				for (PlayerPositionsPayload.Entry e : entries) {
+					if (visible.contains(e.uuid())) filtered.add(e);
+				}
+				ServerPlayNetworking.send(receiver, new PlayerPositionsPayload(filtered));
 			}
 
 			// Territory border action bar notifications — fires only when territory owner changes

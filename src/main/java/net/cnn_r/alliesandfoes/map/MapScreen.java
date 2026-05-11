@@ -60,7 +60,7 @@ public class MapScreen extends Screen {
     private static final float STRUCTURE_HEATMAP_ZOOM_THRESHOLD = 0.85f;
     private static final float CAVE_DEFAULT_ZOOM = 4.0f;
 
-    private static final int TOP_BUTTON_X = 20;
+    private static final int TOP_BUTTON_X = 12;
     private static final int TOP_BUTTON_Y = 20;
     private static final int TOP_BUTTON_WIDTH = 120;
     private static final int TOP_BUTTON_HEIGHT = 20;
@@ -384,13 +384,13 @@ public class MapScreen extends Screen {
         this.addRenderableWidget(this.petReviveButton);
         this.addRenderableWidget(this.confirmPetReviveButton);
 
-        this.reloadMapButton = Button.builder(Component.literal("↺"), btn -> {
+        this.reloadMapButton = Button.builder(Component.empty(), btn -> {
             MapState.reloadCurrentDimension();
             this.lastValidSurface.clear();
             this.textureDirty = true;
             showScreenMessage(Component.literal("Map reloading...").withStyle(ChatFormatting.GRAY), 1500);
             this.setFocused(null);
-        }).bounds(6, this.height - 30, 28, 28).build();
+        }).bounds(TOP_BUTTON_X, this.height - 40, 28, 28).build();
         this.addRenderableWidget(this.reloadMapButton);
 
         int cycBtnW = 30, cycBtnH = 20;
@@ -467,7 +467,7 @@ public class MapScreen extends Screen {
             this.warReviewDenyButton.setY(this.height - 32);
         }
         if (this.reloadMapButton != null) {
-            this.reloadMapButton.setY(this.height - 28);
+            this.reloadMapButton.setY(this.height - 40);
         }
     }
 
@@ -646,6 +646,17 @@ public class MapScreen extends Screen {
         this.renderScreenMessage(context);
 
         this.renderHoveredChunkTooltip(context, mouseX, mouseY);
+
+        // Draw ↺ at 2× scale over the (now label-less) reload button.
+        if (this.reloadMapButton != null) {
+            int cx = this.reloadMapButton.getX() + this.reloadMapButton.getWidth() / 2;
+            int cy = this.reloadMapButton.getY() + this.reloadMapButton.getHeight() / 2;
+            context.pose().pushMatrix();
+            context.pose().translate(cx, cy);
+            context.pose().scale(2f, 2f);
+            context.centeredText(this.font, "↺", 0, -5, 0xFFFFFFFF);
+            context.pose().popMatrix();
+        }
     }
 
     private void renderTopButtonGlows(GuiGraphicsExtractor context, float delta) {
@@ -683,10 +694,10 @@ public class MapScreen extends Screen {
     private void renderInfluenceBar(GuiGraphicsExtractor context) {
         if (!AllianceClientState.isInAlliance()) return;
 
-        int barWidth = 12;
-        int barHeight = this.height - 40;
-        int barX = this.width - barWidth - 4;
-        int barY = 20;
+        int barX = 12;
+        int barY = 6;
+        int barWidth = this.width - 24;
+        int barHeight = 8;
         int balance = MapState.getAllianceInfluenceBalance();
 
         // Compute pending cost for display
@@ -704,39 +715,38 @@ public class MapScreen extends Screen {
             }
         }
 
+        // Background
         context.fill(barX, barY, barX + barWidth, barY + barHeight, 0xA0000000);
 
+        // Fill left to right
         float fill = Math.min(balance, INFLUENCE_BAR_DISPLAY_MAX) / (float) INFLUENCE_BAR_DISPLAY_MAX;
-        int fillHeight = (int) (barHeight * fill);
-        if (fillHeight > 0) {
-            int fillTop = barY + barHeight - fillHeight;
-            context.fill(barX, fillTop, barX + barWidth, barY + barHeight, 0xAA4488FF);
+        int fillWidth = (int) (barWidth * fill);
+        if (fillWidth > 0) {
+            context.fill(barX, barY, barX + fillWidth, barY + barHeight, 0xAA4488FF);
         }
 
         // Cost deduction preview: red overlay showing what would be spent
         if (pendingCost > 0) {
             float afterFill = Math.min(Math.max(balance - pendingCost, 0), INFLUENCE_BAR_DISPLAY_MAX) / (float) INFLUENCE_BAR_DISPLAY_MAX;
-            int afterFillHeight = (int) (barHeight * afterFill);
-            int currentFillTop = barY + barHeight - fillHeight;
-            int afterFillTop = barY + barHeight - afterFillHeight;
-            if (afterFillTop < currentFillTop + fillHeight) {
-                context.fill(barX, afterFillTop, barX + barWidth, currentFillTop + fillHeight, 0xAAFF3333);
+            int afterFillWidth = (int) (barWidth * afterFill);
+            if (afterFillWidth < fillWidth) {
+                context.fill(barX + afterFillWidth, barY, barX + fillWidth, barY + barHeight, 0xAAFF3333);
             }
-            // Dotted line at projected level
-            int projY = afterFillTop;
-            context.fill(barX, projY, barX + barWidth, projY + 1, 0xFFFF6666);
+            // Vertical marker at projected level
+            context.fill(barX + afterFillWidth, barY, barX + afterFillWidth + 1, barY + barHeight, 0xFFFF6666);
         }
 
-        context.fill(barX, barY, barX + 1, barY + barHeight, 0xFF6699CC);
-        context.fill(barX + barWidth - 1, barY, barX + barWidth, barY + barHeight, 0xFF6699CC);
+        // Top and bottom borders
+        context.fill(barX, barY, barX + barWidth, barY + 1, 0xFF6699CC);
+        context.fill(barX, barY + barHeight - 1, barX + barWidth, barY + barHeight, 0xFF6699CC);
 
-        // Label to the left of the bar, vertically centered
+        // Label below the bar, centered
         String label = pendingCost > 0
                 ? "⚗ " + balance + " (-" + pendingCost + ")"
                 : "⚗ " + balance;
-        int labelX = barX - this.font.width(label) - 4;
-        int labelY = barY + barHeight / 2 - 4;
-        context.fill(labelX - 2, labelY - 2, labelX + this.font.width(label) + 2, labelY + 10, 0x80000000);
+        int labelX = barX + (barWidth - this.font.width(label)) / 2;
+        int labelY = barY + barHeight + 3;
+        context.fill(labelX - 2, labelY - 1, labelX + this.font.width(label) + 2, labelY + this.font.lineHeight + 1, 0x80000000);
         context.text(this.font, label, labelX, labelY, pendingCost > 0 ? 0xFFFF9999 : 0xFFCCDDFF);
     }
 
@@ -882,27 +892,20 @@ public class MapScreen extends Screen {
                     if (this.targetEnemyAllianceId != null && !td.allianceId().equals(this.targetEnemyAllianceId)) {
                         this.showScreenMessage(Component.literal("Can only contest one alliance at a time."), 1500);
                     } else {
-                        if (this.targetEnemyAllianceId == null) {
-                            this.targetEnemyAllianceId = td.allianceId();
-                            this.targetEnemyAllianceName = td.allianceName();
-                        }
+                        this.targetEnemyAllianceId = td.allianceId();
+                        this.targetEnemyAllianceName = td.allianceName();
                         UUID anchorId = td.anchorId();
                         List<TerritoryChunkDataPayload> anchorChunks = MapState.getTerritoryChunkSyncCache().getAll()
                                 .stream()
                                 .filter(c -> anchorId.equals(c.anchorId()))
                                 .toList();
-                        boolean allSelected = anchorChunks.stream()
-                                .allMatch(c -> this.selectedEnemyChunks.contains(new ChunkPos(c.chunkX(), c.chunkZ())));
+                        this.selectedEnemyChunks.clear();
                         for (TerritoryChunkDataPayload c : anchorChunks) {
-                            ChunkPos cp = new ChunkPos(c.chunkX(), c.chunkZ());
-                            if (allSelected) this.selectedEnemyChunks.remove(cp);
-                            else this.selectedEnemyChunks.add(cp);
+                            this.selectedEnemyChunks.add(new ChunkPos(c.chunkX(), c.chunkZ()));
                         }
-                        if (!allSelected) {
-                            this.showScreenMessage(Component.literal(
-                                    "⚔ Targeting " + td.allianceName() + " — Left-click more anchors, Declare War to confirm")
-                                    .withStyle(ChatFormatting.RED), 3000);
-                        }
+                        this.showScreenMessage(Component.literal(
+                                "⚔ Targeting " + td.allianceName() + " — Press 'Declare War' to confirm")
+                                .withStyle(ChatFormatting.RED), 3000);
                     }
                 }
             }
@@ -1182,6 +1185,10 @@ public class MapScreen extends Screen {
             case 87 -> { // W — War declaration mode
                 if (!AllianceClientState.isOwner()) {
                     this.showScreenMessage(Component.literal("Only the Founder can declare war."), 2000);
+                    return true;
+                }
+                if (this.selectedAnchorId != null) {
+                    this.showScreenMessage(Component.literal("Deselect anchor (ESC) before declaring war."), 2000);
                     return true;
                 }
                 if (this.warDeclarationMode == WarDeclarationMode.SELECTING) {
@@ -1836,11 +1843,13 @@ public class MapScreen extends Screen {
 
         if (territoryData != null) {
             if (territoryData.claimed()) {
-                lines.add(
-                        Component.literal("Territory: ")
-                                .append(Component.literal(territoryData.anchorChunk() ? "Anchor Chunk" : "Claimed").withColor(0x99EEFF))
-                                .getVisualOrderText()
-                );
+                if (this.territoryPreviewMode != TerritoryPreviewMode.UNCLAIM) {
+                    lines.add(
+                            Component.literal("Territory: ")
+                                    .append(Component.literal(territoryData.anchorChunk() ? "Anchor Chunk" : "Claimed").withColor(0x99EEFF))
+                                    .getVisualOrderText()
+                    );
+                }
 
                 if (AllianceMapIntelPolicy.canViewTerritoryIdentity()) {
                     if (territoryData.allianceName() != null && !territoryData.allianceName().isBlank()) {
@@ -1855,35 +1864,37 @@ public class MapScreen extends Screen {
                         lines.add(Component.literal("Anchor: " + territoryData.anchorId()).getVisualOrderText());
                     }
                 }
+
+                if (isDamaged) {
+                    lines.add(Component.literal("Status: ⚠ Damaged").withColor(0xFFFF6600).getVisualOrderText());
+                    if (this.repairMode == RepairMode.SELECTING) {
+                        boolean isSelected = this.selectedRepairChunks.contains(hoveredKey);
+                        lines.add(Component.literal(isSelected ? "✓ Selected for repair" : "Click to select for repair")
+                                .withColor(isSelected ? 0xFF88FF88 : 0xFFCCCCCC).getVisualOrderText());
+                    }
+                }
+
+                // In FOUND/CLAIM mode, claimed chunks can't be acted on — stop here.
+                // In UNCLAIM mode, claimed chunks are the target, so fall through to show preview data.
+                if (isPreviewing && this.territoryPreviewMode != TerritoryPreviewMode.UNCLAIM) {
+                    context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
+                    return;
+                }
+
+                // Not in preview mode: also show the stored territory value.
+                if (territoryData.chunkValue() >= 0 && !isPreviewing) {
+                    lines.add(
+                            Component.literal("Territory Value: ")
+                                    .append(Component.literal(String.valueOf(territoryData.chunkValue())).withColor(getOverallValueColor(territoryData.chunkValue())))
+                                    .getVisualOrderText()
+                    );
+                }
             } else {
                 lines.add(
                         Component.literal("Territory: ")
                                 .append(Component.literal("Unclaimed").withColor(0xAAAAAA))
                                 .getVisualOrderText()
                 );
-            }
-
-            if (territoryData.chunkValue() >= 0) {
-                lines.add(
-                        Component.literal("Territory Value: ")
-                                .append(Component.literal(String.valueOf(territoryData.chunkValue())).withColor(getOverallValueColor(territoryData.chunkValue())))
-                                .getVisualOrderText()
-                );
-            } else {
-                lines.add(
-                        Component.literal("Territory Value: ")
-                                .append(Component.literal("Not cached").withColor(0xAAAAAA))
-                                .getVisualOrderText()
-                );
-            }
-
-            if (isDamaged) {
-                lines.add(Component.literal("Status: ⚠ Damaged").withColor(0xFFFF6600).getVisualOrderText());
-                if (this.repairMode == RepairMode.SELECTING) {
-                    boolean isSelected = this.selectedRepairChunks.contains(hoveredKey);
-                    lines.add(Component.literal(isSelected ? "✓ Selected for repair" : "Click to select for repair")
-                            .withColor(isSelected ? 0xFF88FF88 : 0xFFCCCCCC).getVisualOrderText());
-                }
             }
         }
         TerritoryPreviewChunkPayload previewData = this.getTerritoryPreviewData(this.hoveredChunk);
@@ -1897,46 +1908,49 @@ public class MapScreen extends Screen {
                     .withColor(previewData.valid() ? 0x55FF55 : 0xFF5555)
                     .getVisualOrderText());
 
-            if (previewData.chunkValue() > 0) {
-                lines.add(
-                        Component.literal("Chunk Value: ")
-                                .append(Component.literal(String.valueOf(previewData.chunkValue()))
-                                        .withColor(getOverallValueColor(previewData.chunkValue())))
-                                .getVisualOrderText()
-                );
-            }
+            if (previewData.valid()) {
+                // Only show cost/value/capacity for actionable (valid) chunks.
+                if (previewData.chunkValue() > 0) {
+                    lines.add(
+                            Component.literal("Chunk Value: ")
+                                    .append(Component.literal(String.valueOf(previewData.chunkValue()))
+                                            .withColor(getOverallValueColor(previewData.chunkValue())))
+                                    .getVisualOrderText()
+                    );
+                }
 
-            if (previewData.previewType() != TerritoryPreviewChunkPayload.PreviewType.UNCLAIM) {
-                lines.add(Component.literal("Cost: " + previewData.cost()).getVisualOrderText());
-            }
+                if (previewData.previewType() != TerritoryPreviewChunkPayload.PreviewType.UNCLAIM) {
+                    lines.add(Component.literal("Cost: " + previewData.cost()).getVisualOrderText());
+                }
 
-            if (previewData.maxCapacity() > 0 && this.territoryPreviewMode == TerritoryPreviewMode.CLAIM) {
-                lines.add(Component.literal(
-                        "Capacity: "
-                                + previewData.currentUsedCapacity()
-                                + "/"
-                                + previewData.maxCapacity()
-                ).getVisualOrderText());
+                if (previewData.maxCapacity() > 0
+                        && (this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
+                            || this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM)) {
+                    int usedAfter = previewData.maxCapacity() - previewData.remainingCapacityAfterAction();
+                    lines.add(Component.literal(
+                            "Cap: " + previewData.currentUsedCapacity() + "/" + previewData.maxCapacity()
+                            + " → " + usedAfter + "/" + previewData.maxCapacity()
+                    ).getVisualOrderText());
+                }
 
-                lines.add(Component.literal(
-                        "Remaining After: " + previewData.remainingCapacityAfterAction()
-                ).getVisualOrderText());
-            }
-
-            if (!previewData.reason().isEmpty()) {
-                lines.add(Component.literal(previewData.reason()).withColor(0xFFAA55).getVisualOrderText());
-            }
-
-            boolean isSelectedForAction = this.selectedClaimChunks.containsKey(hoveredKey);
-            if (isSelectedForAction) {
-                String selLabel = this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
-                        ? "✓ Selected for claim" : "✓ Selected for unclaim";
-                lines.add(Component.literal(selLabel).withColor(0xFF88FF88).getVisualOrderText());
-            } else if (previewData.valid() && (this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
-                    || this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM)) {
-                String hint = this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
-                        ? "Click to select for claim" : "Click to select for unclaim";
-                lines.add(Component.literal(hint).withColor(0xFFCCCCCC).getVisualOrderText());
+                boolean isSelectedForAction = this.selectedClaimChunks.containsKey(hoveredKey);
+                if (isSelectedForAction) {
+                    String selLabel = this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
+                            ? "✓ Selected for claim" : "✓ Selected for unclaim";
+                    lines.add(Component.literal(selLabel).withColor(0xFF88FF88).getVisualOrderText());
+                } else if (this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
+                        || this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM) {
+                    String hint = this.territoryPreviewMode == TerritoryPreviewMode.CLAIM
+                            ? "Click to select for claim" : "Click to select for unclaim";
+                    lines.add(Component.literal(hint).withColor(0xFFCCCCCC).getVisualOrderText());
+                }
+            } else {
+                // Invalid chunk: only show the reason, nothing actionable to display.
+                if (!previewData.reason().isEmpty()) {
+                    for (String part : previewData.reason().split("\n")) {
+                        lines.add(Component.literal(part).withColor(0xFFAA55).getVisualOrderText());
+                    }
+                }
             }
 
             if (isPreviewing) {
@@ -1948,8 +1962,6 @@ public class MapScreen extends Screen {
                     || this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM)
                     && this.selectedAnchorId == null) {
                 lines.add(Component.literal("Select an anchor with Right Click").withColor(0xFFAA55).getVisualOrderText());
-            } else {
-                lines.add(Component.literal("Checking...").withColor(0xAAAAAA).getVisualOrderText());
             }
 
             context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
@@ -2437,9 +2449,8 @@ public class MapScreen extends Screen {
                     || this.territoryPreviewMode == TerritoryPreviewMode.UNCLAIM)
                     && this.selectedAnchorId == null) {
                 lines.add("Select an anchor with Right Click");
-            } else {
-                lines.add("Checking...");
             }
+            // Silently wait while preview data loads — no "Checking..." text
         } else {
             lines.add("Hover a chunk for preview");
         }
@@ -2454,7 +2465,7 @@ public class MapScreen extends Screen {
         int boxHeight = lines.size() * lineHeight + 8;
 
         int x = this.width - boxWidth - 12;
-        int y = 12;
+        int y = TOP_BUTTON_Y;
 
         context.fill(x, y, x + boxWidth, y + boxHeight, 0xA0000000);
 
@@ -2611,7 +2622,6 @@ public class MapScreen extends Screen {
                     lines.add("CLAIM MODE");
                     lines.add("C: Exit Claim Mode");
                     lines.add("Left Click: Claim Chunk");
-                    lines.add("Right Click: Select Anchor");
                     lines.add("ESC: Cancel");
                     lines.add("R: Recenter");
                 }
@@ -2619,7 +2629,6 @@ public class MapScreen extends Screen {
                     lines.add("UNCLAIM MODE");
                     lines.add("U: Exit Unclaim Mode");
                     lines.add("Left Click: Unclaim Chunk");
-                    lines.add("Right Click: Select Anchor");
                     lines.add("ESC: Cancel");
                     lines.add("R: Recenter");
                 }
@@ -2646,7 +2655,7 @@ public class MapScreen extends Screen {
                 }
             }
 
-            if (AllianceClientState.isOwner()) {
+            if (AllianceClientState.isOwner() && this.selectedAnchorId == null) {
                 lines.add("W: Declare War");
             }
 

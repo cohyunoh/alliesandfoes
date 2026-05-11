@@ -48,7 +48,7 @@ public final class TerritoryClaimRules {
         }
 
         if (!hasValidAdjacency) {
-            return RuleResult.deny("Chunk must be adjacent to existing territory of this anchor.");
+            return RuleResult.deny("Chunk must be adjacent");
         }
 
         // Ambiguity check (same alliance, different anchors)
@@ -149,10 +149,7 @@ public final class TerritoryClaimRules {
             int maxCapacity,
             int remainingCapacity
     ) {
-        return "Anchor cannot support this chunk. "
-                + "Chunk value: " + chunkValue
-                + ", used: " + currentUsed + "/" + maxCapacity
-                + ", remaining: " + remainingCapacity + ".";
+        return "Cap full — needs " + chunkValue + " (used: " + currentUsed + "/" + maxCapacity + ", free: " + remainingCapacity + ")";
     }
 
     // =========================

@@ -39,6 +39,7 @@ import net.minecraft.world.level.ChunkPos;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public class AlliesandfoesClient implements ClientModInitializer {
     private static final int STRUCTURE_REFRESH_RADIUS = 2;
@@ -466,12 +467,18 @@ public class AlliesandfoesClient implements ClientModInitializer {
 
     private static WarStateSyncPayload.WarEntry findActiveWarForLocalPlayer(Minecraft client) {
         if (client.player == null) return null;
+        UUID myUuid = client.player.getUUID();
         String myAllianceName = AllianceClientState.getAllianceName();
-        if (myAllianceName.isBlank()) return null;
         for (WarStateSyncPayload.WarEntry entry : MapState.getWarSyncCache().getWars()) {
             if (!"ACTIVE".equals(entry.status())) continue;
-            if (myAllianceName.equals(entry.attackerName()) || myAllianceName.equals(entry.defenderName())) {
+            // Primary: match by synced alliance name.
+            if (!myAllianceName.isBlank()
+                    && (myAllianceName.equals(entry.attackerName()) || myAllianceName.equals(entry.defenderName()))) {
                 return entry;
+            }
+            // Fallback: check if local player UUID appears in the per-player stats list.
+            for (WarStateSyncPayload.PlayerStat ps : entry.playerStats()) {
+                if (myUuid.equals(ps.uuid())) return entry;
             }
         }
         return null;
@@ -488,56 +495,66 @@ public class AlliesandfoesClient implements ClientModInitializer {
             else defenders.add(ps);
         }
 
+        // Show the local player's alliance on top.
+        String myName = AllianceClientState.getAllianceName();
+        boolean iAmAttacker = myName.equals(war.attackerName());
+        List<WarStateSyncPayload.PlayerStat> myTeam    = iAmAttacker ? attackers : defenders;
+        List<WarStateSyncPayload.PlayerStat> enemyTeam = iAmAttacker ? defenders : attackers;
+        String myTeamName    = iAmAttacker ? war.attackerName() : war.defenderName();
+        String enemyTeamName = iAmAttacker ? war.defenderName() : war.attackerName();
+
         int lineH = font.lineHeight + 2;
         int pad = 6;
-        int totalLines = 1 + 1 + attackers.size() + 1 + 1 + defenders.size();
+        int totalLines = 1 + 1 + 1 + myTeam.size() + 1 + 1 + enemyTeam.size();
         int panelW = 240;
-        int panelH = totalLines * lineH + pad * 2 + 4;
+        int panelH = totalLines * lineH + pad * 2 + 8; // +4 extra for divider
         int px = (screenW - panelW) / 2;
-        int onlineCount = client.getConnection() != null
-                ? client.getConnection().getListedOnlinePlayers().size() : 1;
-        int py = 10 + Math.min(onlineCount, 20) * 9 + 25;
+        int screenH = client.getWindow().getGuiScaledHeight();
+        int py = screenH / 3;
 
         context.fill(px - pad, py - pad, px + panelW + pad, py + panelH + pad, 0xBB000000);
 
         int curY = py;
-        String title = "⚔ " + war.attackerName() + " vs " + war.defenderName();
-        context.text(font, title, px + (panelW - font.width(title)) / 2, curY, 0xFFFFDD);
+        String title = "⚔ " + myTeamName + " vs " + enemyTeamName;
+        context.text(font, title, px + (panelW - font.width(title)) / 2, curY, 0xFFFFFFDD);
         curY += lineH + 2;
 
-        // Attacker section
-        context.text(font, war.attackerName(), px, curY, 0xFF6666);
+        // My team section (top)
+        context.text(font, myTeamName, px, curY, 0xFFFF6666);
         curY += lineH;
         int nameCol = px, killCol = px + 148, deathCol = px + 172, kdrCol = px + 198;
-        context.text(font, "Player", nameCol, curY, 0x888888);
-        context.text(font, "K", killCol, curY, 0x888888);
-        context.text(font, "D", deathCol, curY, 0x888888);
-        context.text(font, "KDR", kdrCol, curY, 0x888888);
+        context.text(font, "Player", nameCol, curY, 0xFF888888);
+        context.text(font, "K", killCol, curY, 0xFF888888);
+        context.text(font, "D", deathCol, curY, 0xFF888888);
+        context.text(font, "KDR", kdrCol, curY, 0xFF888888);
         curY += lineH;
-        for (WarStateSyncPayload.PlayerStat ps : attackers) {
+        for (WarStateSyncPayload.PlayerStat ps : myTeam) {
             float kdr = ps.deaths() == 0 ? ps.kills() : (float) ps.kills() / ps.deaths();
-            context.text(font, ps.name(), nameCol, curY, 0xFFFFFF);
-            context.text(font, String.valueOf(ps.kills()), killCol, curY, 0x55FF55);
-            context.text(font, String.valueOf(ps.deaths()), deathCol, curY, 0xFF5555);
-            context.text(font, String.format("%.1f", kdr), kdrCol, curY, 0xFFAA00);
+            context.text(font, ps.name(), nameCol, curY, 0xFFFFFFFF);
+            context.text(font, String.valueOf(ps.kills()), killCol, curY, 0xFF55FF55);
+            context.text(font, String.valueOf(ps.deaths()), deathCol, curY, 0xFFFF5555);
+            context.text(font, String.format("%.1f", kdr), kdrCol, curY, 0xFFFFAA00);
             curY += lineH;
         }
-        curY += 2;
 
-        // Defender section
-        context.text(font, war.defenderName(), px, curY, 0x6688FF);
+        // Divider
+        context.fill(px - pad, curY, px + panelW + pad, curY + 1, 0xFF555555);
+        curY += 4;
+
+        // Enemy team section (bottom)
+        context.text(font, enemyTeamName, px, curY, 0xFF6688FF);
         curY += lineH;
-        context.text(font, "Player", nameCol, curY, 0x888888);
-        context.text(font, "K", killCol, curY, 0x888888);
-        context.text(font, "D", deathCol, curY, 0x888888);
-        context.text(font, "KDR", kdrCol, curY, 0x888888);
+        context.text(font, "Player", nameCol, curY, 0xFF888888);
+        context.text(font, "K", killCol, curY, 0xFF888888);
+        context.text(font, "D", deathCol, curY, 0xFF888888);
+        context.text(font, "KDR", kdrCol, curY, 0xFF888888);
         curY += lineH;
-        for (WarStateSyncPayload.PlayerStat ps : defenders) {
+        for (WarStateSyncPayload.PlayerStat ps : enemyTeam) {
             float kdr = ps.deaths() == 0 ? ps.kills() : (float) ps.kills() / ps.deaths();
-            context.text(font, ps.name(), nameCol, curY, 0xFFFFFF);
-            context.text(font, String.valueOf(ps.kills()), killCol, curY, 0x55FF55);
-            context.text(font, String.valueOf(ps.deaths()), deathCol, curY, 0xFF5555);
-            context.text(font, String.format("%.1f", kdr), kdrCol, curY, 0xFFAA00);
+            context.text(font, ps.name(), nameCol, curY, 0xFFFFFFFF);
+            context.text(font, String.valueOf(ps.kills()), killCol, curY, 0xFF55FF55);
+            context.text(font, String.valueOf(ps.deaths()), deathCol, curY, 0xFFFF5555);
+            context.text(font, String.format("%.1f", kdr), kdrCol, curY, 0xFFFFAA00);
             curY += lineH;
         }
     }

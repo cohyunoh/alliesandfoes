@@ -21,6 +21,7 @@ public abstract class PlayerXpInfluenceMixin {
         if (server == null) return;
         Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
         if (alliance == null) return;
-        AllianceProgressionService.get(server).add(alliance.getId(), xp);
+        int influence = xp / 5;
+        if (influence > 0) AllianceProgressionService.get(server).add(alliance.getId(), influence);
     }
 }

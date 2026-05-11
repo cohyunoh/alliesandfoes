@@ -130,7 +130,17 @@
       "Bash(javap \"com/mojang/blaze3d/platform/Window.class\")",
       "Bash(unzip -l \"C:\\\\Users\\\\CO\\\\.gradle\\\\caches\\\\fabric-loom\\\\26.1.2\\\\minecraft-client.jar\")",
       "Bash(unzip -l \"C:\\\\Users\\\\CO\\\\.gradle\\\\caches\\\\modules-2\\\\files-2.1\\\\net.fabricmc.fabric-api\\\\fabric-rendering-v1\\\\23.0.4+c7e428fd4c\\\\b9f9d912a1cd284157d0907779c05cc02f326fc\\\\fabric-rendering-v1-23.0.4+c7e428fd4c.jar\")",
-      "Bash(jar -tf \"C:/Users/CO/.gradle/caches/modules-2/files-2.1/net.fabricmc.fabric-api/fabric-entity-events-v1/3.1.1+1d0ab4303e/478dbc9b3045f2499c181eed1b344676a10b06f3/fabric-entity-events-v1-3.1.1+1d0ab4303e-sources.jar\")"
+      "Bash(jar -tf \"C:/Users/CO/.gradle/caches/modules-2/files-2.1/net.fabricmc.fabric-api/fabric-entity-events-v1/3.1.1+1d0ab4303e/478dbc9b3045f2499c181eed1b344676a10b06f3/fabric-entity-events-v1-3.1.1+1d0ab4303e-sources.jar\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\CO\\\\IdeaProjects\\\\alliesandfoes\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\CO\\\\IdeaProjects\\\\alliesandfoes\" -Recurse -Directory -Name)",
+      "Bash(Select-Object -First 20)",
+      "Bash(javap -p /c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-client.jar)",
+      "Bash(javap -classpath /c/Users/CO/.gradle/caches/fabric-loom/26.1.2/minecraft-client.jar net.minecraft.client.gui.GuiGraphicsExtractor)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\CO\\\\IdeaProjects\\\\alliesandfoes\" -Recurse -Filter \"*.java\")",
+      "Bash(Measure-Object)",
+      "Bash(Select-Object -ExpandProperty Count)",
+      "Bash(Find-FileRecursive C:\\\\Users\\\\CO\\\\IdeaProjects\\\\alliesandfoes\\\\src\\\\main\\\\java *)"
     ]
   }
 }

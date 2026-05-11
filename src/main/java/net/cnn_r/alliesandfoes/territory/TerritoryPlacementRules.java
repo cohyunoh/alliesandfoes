@@ -99,7 +99,7 @@ public final class TerritoryPlacementRules {
             int distance = chebyshevDistance(targetChunk, claim.getChunkKey());
             if (distance <= SAME_ALLIANCE_FOUNDING_SPACING) {
                 return RuleResult.deny(
-                        "Too close to own territory (need " + (SAME_ALLIANCE_FOUNDING_SPACING + 1) + " chunk gap)"
+                        "Too close to own territory\n(need " + (SAME_ALLIANCE_FOUNDING_SPACING + 1) + " chunk gap)"
                 );
             }
         }
@@ -125,7 +125,7 @@ public final class TerritoryPlacementRules {
             int distance = chebyshevDistance(targetChunk, claim.getChunkKey());
             if (distance <= FOREIGN_ALLIANCE_FOUNDING_SPACING) {
                 return RuleResult.deny(
-                        "Too close to foreign territory (need " + (FOREIGN_ALLIANCE_FOUNDING_SPACING + 1) + " chunk gap)"
+                        "Too close to foreign territory\n(need " + (FOREIGN_ALLIANCE_FOUNDING_SPACING + 1) + " chunk gap)"
                 );
             }
         }
