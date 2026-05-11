@@ -23,8 +23,7 @@ public class AllianceCreateScreen extends Screen {
     private static final int SCREEN_MARGIN = 18;
 
     private static final int PANEL_WIDTH = 430;
-    private static final int PREFERRED_PANEL_HEIGHT = 340;
-    private static final int MAX_PANEL_HEIGHT = 340;
+    private static final int MAX_PANEL_HEIGHT = 320;
     private static final int ABSOLUTE_MIN_PANEL_HEIGHT = 258;
 
     private static final int HEADER_HEIGHT = 24;
@@ -42,6 +41,7 @@ public class AllianceCreateScreen extends Screen {
     private static final int SELECT_MARKER_SIZE = 12;
 
     private static final int OVERLAY_COLOR = 0xCC000000;
+    private static final int SHADOW_PAD = 10;
     private static final int SHADOW_COLOR = 0x66000000;
     private static final int BORDER_COLOR = 0xFF8A6A3A;
     private static final int PARCHMENT_BASE_COLOR = 0xFFF3E7C9;
@@ -53,7 +53,6 @@ public class AllianceCreateScreen extends Screen {
 
     private static final int TITLE_TOP_PAD = 8;
     private static final int TITLE_UNDERLINE_GAP = 3;
-    private static final int SHADOW_PAD = 8;
 
     private static final String FOOTER_NOTE = "Choose any eligible players you want to invite when the alliance is created.";
 
@@ -67,6 +66,7 @@ public class AllianceCreateScreen extends Screen {
     private Button clearSelectionButton;
 
     private int scrollOffset = 0;
+    private int panelScrollOffset = 0;
 
     public AllianceCreateScreen(Screen parent, List<AllianceCreationScreenPayload.CandidateEntry> candidates) {
         super(Component.literal("Alliance Charter"));
@@ -176,14 +176,14 @@ public class AllianceCreateScreen extends Screen {
 
     private Layout calculateLayout() {
         int availableWidth = Math.max(220, this.width - SCREEN_MARGIN * 2);
-        int availableHeight = Math.max(ABSOLUTE_MIN_PANEL_HEIGHT, this.height - SCREEN_MARGIN * 2);
-
         int panelWidth = Math.min(PANEL_WIDTH, availableWidth);
-        int panelHeight = Math.min(MAX_PANEL_HEIGHT, availableHeight);
-        panelHeight = Math.max(ABSOLUTE_MIN_PANEL_HEIGHT, Math.min(PREFERRED_PANEL_HEIGHT, panelHeight));
+        int panelHeight = Math.max(ABSOLUTE_MIN_PANEL_HEIGHT, Math.min(MAX_PANEL_HEIGHT, this.height - SCREEN_MARGIN * 2));
 
         int left = (this.width - panelWidth) / 2;
-        int top = (this.height - panelHeight) / 2;
+        int topBase = Math.max(0, (this.height - panelHeight) / 2);
+        int maxPanelScroll = Math.max(0, topBase + panelHeight - this.height + 4);
+        this.panelScrollOffset = Math.max(0, Math.min(maxPanelScroll, this.panelScrollOffset));
+        int top = topBase - this.panelScrollOffset;
         int right = left + panelWidth;
         int bottom = top + panelHeight;
 
@@ -210,10 +210,10 @@ public class AllianceCreateScreen extends Screen {
         int nameBoxY = nameLabelY + this.font.lineHeight + labelToBoxGap;
         int descriptionY = nameBoxY + 20 + boxToDescriptionGap;
         int rosterHeaderY = descriptionY + this.font.lineHeight + descriptionToRosterGap;
-        int toolbarY = rosterHeaderY + this.font.lineHeight + rosterToToolbarGap;
+        int toolbarY = rosterHeaderY + rosterToToolbarGap;
         int topSectionBottom = toolbarY + TOOLBAR_HEIGHT + topSectionBottomPad;
 
-        int bottomButtonY = bottom - 21;
+        int bottomButtonY = bottom - 24;
 
         int footerTextWidth = contentWidth - 16;
         int footerNoteLines = Math.max(1, this.font.split(Component.literal(FOOTER_NOTE), footerTextWidth).size());
@@ -222,15 +222,13 @@ public class AllianceCreateScreen extends Screen {
         int dividerAboveButtonsGap = compact ? 5 : 6;
         int noteToDividerGap = compact ? 5 : 6;
         int selectedToNoteGap = compact ? 10 : 12;
-        int showingToSelectedGap = 11;
         int footerTopPad = 5;
 
         int dividerY = bottomButtonY - dividerAboveButtonsGap;
         int footerNoteY = dividerY - noteToDividerGap - footerNoteHeight;
         int selectedTextY = footerNoteY - selectedToNoteGap;
-        int showingTextY = selectedTextY - showingToSelectedGap;
 
-        int footerSectionTop = showingTextY - footerTopPad;
+        int footerSectionTop = selectedTextY - footerTopPad;
         int footerSectionBottom = dividerY + 1 + dividerAboveButtonsGap;
 
         int listHeaderToFrameGap = compact ? 2 : 4;
@@ -251,17 +249,6 @@ public class AllianceCreateScreen extends Screen {
             listFrameTop -= reduceTop;
             shortage -= reduceTop;
 
-            if (shortage > 0) {
-                int footerReducible = Math.max(0, (selectedTextY - showingTextY) - 9);
-                int reduceFooter = Math.min(shortage, footerReducible);
-                selectedTextY -= reduceFooter;
-                footerNoteY -= reduceFooter;
-                dividerY -= reduceFooter;
-                bottomButtonY -= reduceFooter;
-                footerSectionTop -= reduceFooter;
-                footerSectionBottom -= reduceFooter;
-                listFrameBottom -= reduceFooter;
-            }
         }
 
         if (listFrameBottom < listFrameTop) {
@@ -293,13 +280,14 @@ public class AllianceCreateScreen extends Screen {
                 descriptionY,
                 rosterHeaderY,
                 toolbarY,
-                showingTextY,
                 selectedTextY,
                 footerNoteY,
                 dividerY,
                 bottomButtonY,
                 selectAllButtonWidth,
-                clearButtonWidth
+                clearButtonWidth,
+                panelHeight,
+                maxPanelScroll
         );
     }
 
@@ -348,6 +336,17 @@ public class AllianceCreateScreen extends Screen {
             }
 
             clampScroll(layout);
+            return true;
+        }
+
+        if (layout.maxPanelScroll() > 0) {
+            String savedName = this.allianceNameBox != null ? this.allianceNameBox.getValue() : "";
+            int delta = scrollY < 0 ? 8 : -8;
+            this.panelScrollOffset = Math.max(0, Math.min(layout.maxPanelScroll(), this.panelScrollOffset + delta));
+            this.init();
+            if (this.allianceNameBox != null && !savedName.isEmpty()) {
+                this.allianceNameBox.setValue(savedName);
+            }
             return true;
         }
 
@@ -423,6 +422,20 @@ public class AllianceCreateScreen extends Screen {
         int strongColor = 0xFF241A10;
 
         renderCardBackground(context, layout);
+
+        if (layout.maxPanelScroll() > 0) {
+            int trackX = layout.right() - 5;
+            int trackTop = 4;
+            int trackBottom = this.height - 4;
+            int trackH = trackBottom - trackTop;
+            if (trackH > 10) {
+                context.fill(trackX, trackTop, trackX + 3, trackBottom, 0x33000000);
+                int thumbH = Math.max(10, trackH * this.height / layout.panelHeight());
+                int thumbTop = trackTop + (trackH - thumbH) * this.panelScrollOffset / layout.maxPanelScroll();
+                context.fill(trackX, thumbTop, trackX + 3, thumbTop + thumbH, 0x998A6A3A);
+            }
+        }
+
         renderSections(context, layout);
 
         super.extractRenderState(context, mouseX, mouseY, delta);
@@ -444,22 +457,8 @@ public class AllianceCreateScreen extends Screen {
                 false
         );
 
-        context.text(this.font, "Invite Roster", layout.contentLeft() + 10, layout.rosterHeaderY(), strongColor, false);
-
-        String availableText = "Available: " + this.candidates.size();
-        int availableTextWidth = this.font.width(availableText);
-        context.text(
-                this.font,
-                availableText,
-                layout.contentRight() - availableTextWidth - 10,
-                layout.rosterHeaderY(),
-                accentColor,
-                false
-        );
-
         renderPlayerRows(context, mouseX, mouseY, layout, bodyColor, strongColor, accentColor);
 
-        context.text(this.font, "Showing " + getShowingRangeText(layout), layout.contentLeft() + 8, layout.showingTextY(), accentColor, false);
         context.text(this.font, "Selected: " + this.selectedPlayers.size(), layout.contentLeft() + 8, layout.selectedTextY(), strongColor, false);
 
         context.textWithWordWrap(
@@ -624,7 +623,7 @@ public class AllianceCreateScreen extends Screen {
     private void renderSections(GuiGraphicsExtractor context, Layout layout) {
         context.fill(layout.contentLeft(), layout.topSectionTop(), layout.contentRight(), layout.topSectionBottom(), TOP_SECTION_COLOR);
 
-        context.text(this.font, "Member Roster", layout.contentLeft() + 8, layout.listHeaderY(), 0xFF241A10, false);
+        context.text(this.font, "Player Roster", layout.contentLeft() + 8, layout.listHeaderY(), 0xFF241A10, false);
 
         String listCountText = "Showing " + getShowingRangeText(layout);
         int countWidth = this.font.width(listCountText);
@@ -667,13 +666,14 @@ public class AllianceCreateScreen extends Screen {
             int descriptionY,
             int rosterHeaderY,
             int toolbarY,
-            int showingTextY,
             int selectedTextY,
             int footerNoteY,
             int dividerY,
             int bottomButtonY,
             int selectAllButtonWidth,
-            int clearButtonWidth
+            int clearButtonWidth,
+            int panelHeight,
+            int maxPanelScroll
     ) {
         private int nameBoxX() {
             return this.contentLeft + 10;

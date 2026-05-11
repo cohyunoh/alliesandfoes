@@ -14,9 +14,9 @@ import net.minecraft.network.chat.Component;
 import java.util.List;
 
 public class AllianceJoinRequestScreen extends Screen {
-    private static final int PANEL_WIDTH = 356;
-    private static final int MIN_PANEL_HEIGHT = 244;
-    private static final int MAX_PANEL_HEIGHT = 284;
+    private static final int PANEL_WIDTH = 430;
+    private static final int MIN_PANEL_HEIGHT = 264;
+    private static final int MAX_PANEL_HEIGHT = 320;
     private static final int SCREEN_MARGIN = 18;
 
     private static final int HEADER_HEIGHT = 24;
@@ -25,6 +25,7 @@ public class AllianceJoinRequestScreen extends Screen {
     private static final int CHARS_PER_TICK = 2;
 
     private int textRevealTicks = 0;
+    private int panelScrollOffset = 0;
 
     private final Screen parent;
     private int currentIndex;
@@ -61,11 +62,11 @@ public class AllianceJoinRequestScreen extends Screen {
         AllianceClientState.acknowledgeJoinRequestNotification();
 
         Layout layout = calculateLayout();
-        int navButtonWidth = 52;
+        int navButtonWidth = 64;
         int bottomButtonWidth = (layout.contentWidth() - 12) / 2;
 
         this.prevButton = this.addRenderableWidget(
-                Button.builder(Component.literal("<"), btn -> {
+                Button.builder(Component.literal("Prev"), btn -> {
                     if (this.currentIndex > 0) {
                         this.currentIndex--;
                         this.textRevealTicks = 0;
@@ -75,7 +76,7 @@ public class AllianceJoinRequestScreen extends Screen {
         );
 
         this.nextButton = this.addRenderableWidget(
-                Button.builder(Component.literal(">"), btn -> {
+                Button.builder(Component.literal("Next"), btn -> {
                     if (this.currentIndex < AllianceClientState.getPendingJoinRequestCount() - 1) {
                         this.currentIndex++;
                         this.textRevealTicks = 0;
@@ -176,7 +177,10 @@ public class AllianceJoinRequestScreen extends Screen {
         int panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(this.height - SCREEN_MARGIN * 2, MAX_PANEL_HEIGHT));
 
         int left = (this.width - panelWidth) / 2;
-        int top = (this.height - panelHeight) / 2;
+        int topBase = Math.max(0, (this.height - panelHeight) / 2);
+        int maxPanelScroll = Math.max(0, topBase + panelHeight - this.height + 4);
+        this.panelScrollOffset = Math.max(0, Math.min(maxPanelScroll, this.panelScrollOffset));
+        int top = topBase - this.panelScrollOffset;
         int right = left + panelWidth;
         int bottom = top + panelHeight;
 
@@ -189,7 +193,7 @@ public class AllianceJoinRequestScreen extends Screen {
         int counterY = bodyTop + 6;
 
         int cardTop = bodyTop + 28;
-        int cardBottom = cardTop + 72;
+        int cardBottom = cardTop + 78;
 
         int bottomButtonY = bottom - 24;
         int instructionTop = cardBottom + 12;
@@ -215,7 +219,9 @@ public class AllianceJoinRequestScreen extends Screen {
                 instructionBottom,
                 tintTop,
                 tintBottom,
-                bottomButtonY
+                bottomButtonY,
+                panelHeight,
+                maxPanelScroll
         );
     }
 
@@ -250,12 +256,25 @@ public class AllianceJoinRequestScreen extends Screen {
         context.fill(layout.left(), layout.top(), layout.right(), layout.bottom(), 0xFFF3E7C9);
         context.fill(layout.left() + 4, layout.top() + 4, layout.right() - 4, layout.bottom() - 4, 0xFFF8EFD8);
 
+        if (layout.maxPanelScroll() > 0) {
+            int trackX = layout.right() - 5;
+            int trackTop = 4;
+            int trackBottom = this.height - 4;
+            int trackH = trackBottom - trackTop;
+            if (trackH > 10) {
+                context.fill(trackX, trackTop, trackX + 3, trackBottom, 0x33000000);
+                int thumbH = Math.max(10, trackH * this.height / layout.panelHeight());
+                int thumbTop = trackTop + (trackH - thumbH) * this.panelScrollOffset / layout.maxPanelScroll();
+                context.fill(trackX, thumbTop, trackX + 3, thumbTop + thumbH, 0x998A6A3A);
+            }
+        }
+
         context.fill(
                 layout.contentLeft(),
                 layout.tintTop(),
                 layout.contentRight(),
                 layout.tintBottom(),
-                0x113E6FA6
+                0x11A07A44
         );
 
         super.extractRenderState(context, mouseX, mouseY, delta);
@@ -306,7 +325,7 @@ public class AllianceJoinRequestScreen extends Screen {
                 layout.cardTop(),
                 layout.contentRight() - 4,
                 layout.cardBottom(),
-                0x223E6FA6
+                0x22D9C39A
         );
         context.fill(
                 layout.contentLeft() + 4,
@@ -328,7 +347,7 @@ public class AllianceJoinRequestScreen extends Screen {
                 layout.instructionTop(),
                 layout.contentRight() - 4,
                 layout.instructionBottom(),
-                0x163E6FA6
+                0x16D9C39A
         );
         context.fill(
                 layout.contentLeft() + 4,
@@ -354,7 +373,7 @@ public class AllianceJoinRequestScreen extends Screen {
         context.fill(sealCenterX - 5, sealCenterY - 5, sealCenterX + 5, sealCenterY + 5, sealHighlight);
 
         int faceX = layout.contentLeft() + 18;
-        int faceY = layout.cardTop() + 16;
+        int faceY = layout.cardTop() + 18;
         renderRequesterFace(context, request, faceX, faceY);
 
         int textX = faceX + FACE_SIZE + 12;
@@ -407,6 +426,18 @@ public class AllianceJoinRequestScreen extends Screen {
                 instructionMaxWidth,
                 bodyColor
         );
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        Layout layout = calculateLayout();
+        if (layout.maxPanelScroll() > 0) {
+            int delta = scrollY < 0 ? 8 : -8;
+            this.panelScrollOffset = Math.max(0, Math.min(layout.maxPanelScroll(), this.panelScrollOffset + delta));
+            this.init();
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
@@ -504,7 +535,9 @@ public class AllianceJoinRequestScreen extends Screen {
             int instructionBottom,
             int tintTop,
             int tintBottom,
-            int bottomButtonY
+            int bottomButtonY,
+            int panelHeight,
+            int maxPanelScroll
     ) {
     }
 }

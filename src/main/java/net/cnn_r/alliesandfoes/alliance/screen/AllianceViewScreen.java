@@ -20,7 +20,7 @@ import java.util.UUID;
 public class AllianceViewScreen extends Screen {
     private static final int PANEL_WIDTH = 430;
     private static final int MIN_PANEL_HEIGHT = 250;
-    private static final int MAX_PANEL_HEIGHT = 330;
+    private static final int MAX_PANEL_HEIGHT = 320;
     private static final int SCREEN_MARGIN = 18;
 
     private static final int HEADER_HEIGHT = 24;
@@ -43,6 +43,7 @@ public class AllianceViewScreen extends Screen {
     private Button manageInvitesButton;
 
     private int scrollOffset = 0;
+    private int panelScrollOffset = 0;
 
     private UUID editingRoleForUuid;
     private EditBox roleEditBox;
@@ -126,7 +127,10 @@ public class AllianceViewScreen extends Screen {
         int panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(this.height - (SCREEN_MARGIN * 2), MAX_PANEL_HEIGHT));
 
         int left = (this.width - panelWidth) / 2;
-        int top = (this.height - panelHeight) / 2;
+        int topBase = Math.max(0, (this.height - panelHeight) / 2);
+        int maxPanelScroll = Math.max(0, topBase + panelHeight - this.height + 4);
+        this.panelScrollOffset = Math.max(0, Math.min(maxPanelScroll, this.panelScrollOffset));
+        int top = topBase - this.panelScrollOffset;
         int right = left + panelWidth;
         int bottom = top + panelHeight;
 
@@ -148,7 +152,9 @@ public class AllianceViewScreen extends Screen {
                 contentWidth,
                 bodyTop,
                 footerTop,
-                bottomButtonY
+                bottomButtonY,
+                panelHeight,
+                maxPanelScroll
         );
     }
 
@@ -194,6 +200,13 @@ public class AllianceViewScreen extends Screen {
             }
 
             clampScroll(layout);
+            this.init();
+            return true;
+        }
+
+        if (layout.maxPanelScroll() > 0) {
+            int delta = verticalAmount < 0 ? 8 : -8;
+            this.panelScrollOffset = Math.max(0, Math.min(layout.maxPanelScroll(), this.panelScrollOffset + delta));
             this.init();
             return true;
         }
@@ -432,6 +445,19 @@ public class AllianceViewScreen extends Screen {
         context.fill(layout.left(), layout.top(), layout.right(), layout.bottom(), 0xFFF3E7C9);
         context.fill(layout.left() + 4, layout.top() + 4, layout.right() - 4, layout.bottom() - 4, 0xFFF8EFD8);
 
+        if (layout.maxPanelScroll() > 0) {
+            int trackX = layout.right() - 5;
+            int trackTop = 4;
+            int trackBottom = this.height - 4;
+            int trackH = trackBottom - trackTop;
+            if (trackH > 10) {
+                context.fill(trackX, trackTop, trackX + 3, trackBottom, 0x33000000);
+                int thumbH = Math.max(10, trackH * this.height / layout.panelHeight());
+                int thumbTop = trackTop + (trackH - thumbH) * this.panelScrollOffset / layout.maxPanelScroll();
+                context.fill(trackX, thumbTop, trackX + 3, thumbTop + thumbH, 0x998A6A3A);
+            }
+        }
+
         int tintedBottom = getMemberListBottom(layout) + 36;
 
         context.fill(
@@ -539,7 +565,7 @@ public class AllianceViewScreen extends Screen {
         int footerTextY = rosterBottom + 10;
         int dividerY = footerTextY + this.font.lineHeight + 6;
 
-        context.text(this.font, footerText, layout.contentLeft() + 8, footerTextY, bodyColor, false);
+        context.textWithWordWrap(this.font, Component.literal(footerText), layout.contentLeft() + 8, footerTextY, layout.contentWidth() - 16, bodyColor);
 
         context.fill(
                 layout.contentLeft() + 8,
@@ -669,7 +695,9 @@ public class AllianceViewScreen extends Screen {
             int contentWidth,
             int bodyTop,
             int footerTop,
-            int bottomButtonY
+            int bottomButtonY,
+            int panelHeight,
+            int maxPanelScroll
     ) {
     }
 }

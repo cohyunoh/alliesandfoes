@@ -120,8 +120,11 @@ public class AllianceActionConfirmScreen extends Screen {
         int underlineY = titleY + this.font.lineHeight + 3;
         context.fill(titleX - 4, underlineY, titleX + titleWidth + 4, underlineY + 1, 0x668A6A3A);
 
-        int textY = layout.bodyTop();
+        int dividerY = layout.bottom() - FOOTER_HEIGHT - 8;
 
+        context.fill(layout.contentLeft(), underlineY + 4, layout.contentRight(), dividerY, 0x11A07A44);
+
+        int textY = layout.bodyTop();
         for (FormattedLine line : this.action.buildLines(this.targetName, this.allianceName)) {
             context.text(
                     this.font,
@@ -134,27 +137,20 @@ public class AllianceActionConfirmScreen extends Screen {
             textY += 12;
         }
 
-        int dividerY = layout.bottom() - FOOTER_HEIGHT - 8;
-        context.fill(
-                layout.contentLeft(),
-                dividerY,
-                layout.contentRight(),
-                dividerY + 1,
-                0x668A6A3A
-        );
+        int boxTop = layout.bodyTop() + 40;
+        int boxBottom = dividerY - 8;
+        context.fill(layout.contentLeft() + 4, boxTop,     layout.contentRight() - 4, boxBottom,     0x16D9C39A);
+        context.fill(layout.contentLeft() + 4, boxTop,     layout.contentRight() - 4, boxTop + 1,    0x558A6A3A);
+        context.fill(layout.contentLeft() + 4, boxBottom - 1, layout.contentRight() - 4, boxBottom,  0x558A6A3A);
 
-        if (this.action == ConfirmAction.PROMOTE) {
-            String warning = "You will no longer be the founder.";
-            int warningWidth = this.font.width(warning);
-            context.text(
-                    this.font,
-                    warning,
-                    this.width / 2 - warningWidth / 2,
-                    dividerY - 14,
-                    accentColor,
-                    false
-            );
-        }
+        String warningText = (this.action == ConfirmAction.PROMOTE)
+                ? "You will no longer be the founder."
+                : "This action cannot be undone.";
+        int warningWidth = this.font.width(warningText);
+        int boxMidY = (boxTop + boxBottom) / 2 - this.font.lineHeight / 2;
+        context.text(this.font, warningText, this.width / 2 - warningWidth / 2, boxMidY, accentColor, false);
+
+        context.fill(layout.contentLeft(), dividerY, layout.contentRight(), dividerY + 1, 0x668A6A3A);
     }
 
     @Override
@@ -169,7 +165,7 @@ public class AllianceActionConfirmScreen extends Screen {
         int panelHeight = Math.min(PANEL_HEIGHT, this.height - SCREEN_MARGIN * 2);
 
         int left = (this.width - panelWidth) / 2;
-        int top = (this.height - panelHeight) / 2;
+        int top = Math.max(0, (this.height - panelHeight) / 2);
         int right = left + panelWidth;
         int bottom = top + panelHeight;
 

@@ -335,7 +335,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 // Persistent action bar: show invite prompt while any invite is pending,
                 // unless the map screen is open (player is already handling it).
                 boolean hasPendingInvite = AllianceClientState.hasPendingWarInvites()
-                        || AllianceClientState.hasPendingInvites();
+                        || AllianceClientState.hasPendingInvites()
+                        || AllianceClientState.getPendingJoinRequestCount() > 0;
                 boolean mapOpen = client.screen instanceof MapScreen;
                 if (hasPendingInvite && !mapOpen) {
                     client.gui.setOverlayMessage(

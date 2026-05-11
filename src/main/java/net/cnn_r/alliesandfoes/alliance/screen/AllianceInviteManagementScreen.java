@@ -22,8 +22,7 @@ public class AllianceInviteManagementScreen extends Screen {
     private static final int SCREEN_MARGIN = 18;
 
     private static final int PANEL_WIDTH = 430;
-    private static final int PREFERRED_PANEL_HEIGHT = 340;
-    private static final int MAX_PANEL_HEIGHT = 340;
+    private static final int MAX_PANEL_HEIGHT = 320;
     private static final int ABSOLUTE_MIN_PANEL_HEIGHT = 258;
 
     private static final int HEADER_HEIGHT = 24;
@@ -52,7 +51,7 @@ public class AllianceInviteManagementScreen extends Screen {
 
     private static final int TITLE_TOP_PAD = 8;
     private static final int TITLE_UNDERLINE_GAP = 3;
-    private static final int SHADOW_PAD = 8;
+    private static final int SHADOW_PAD = 10;
 
     private static final String FOOTER_NOTE = "Choose one or more eligible players, then send alliance invitations.";
 
@@ -66,6 +65,7 @@ public class AllianceInviteManagementScreen extends Screen {
     private Button clearSelectionButton;
 
     private int scrollOffset = 0;
+    private int panelScrollOffset = 0;
 
     public AllianceInviteManagementScreen(
             Screen parent,
@@ -162,14 +162,14 @@ public class AllianceInviteManagementScreen extends Screen {
 
     private Layout calculateLayout() {
         int availableWidth = Math.max(220, this.width - SCREEN_MARGIN * 2);
-        int availableHeight = Math.max(ABSOLUTE_MIN_PANEL_HEIGHT, this.height - SCREEN_MARGIN * 2);
-
         int panelWidth = Math.min(PANEL_WIDTH, availableWidth);
-        int panelHeight = Math.min(MAX_PANEL_HEIGHT, availableHeight);
-        panelHeight = Math.max(ABSOLUTE_MIN_PANEL_HEIGHT, Math.min(PREFERRED_PANEL_HEIGHT, panelHeight));
+        int panelHeight = Math.max(ABSOLUTE_MIN_PANEL_HEIGHT, Math.min(MAX_PANEL_HEIGHT, this.height - SCREEN_MARGIN * 2));
 
         int left = (this.width - panelWidth) / 2;
-        int top = (this.height - panelHeight) / 2;
+        int topBase = Math.max(0, (this.height - panelHeight) / 2);
+        int maxPanelScroll = Math.max(0, topBase + panelHeight - this.height + 4);
+        this.panelScrollOffset = Math.max(0, Math.min(maxPanelScroll, this.panelScrollOffset));
+        int top = topBase - this.panelScrollOffset;
         int right = left + panelWidth;
         int bottom = top + panelHeight;
 
@@ -195,10 +195,10 @@ public class AllianceInviteManagementScreen extends Screen {
         int allianceNameY = allianceLabelY + this.font.lineHeight + allianceToSubtitleGap;
         int subtitleY = allianceNameY + this.font.lineHeight + 2;
         int rosterHeaderY = subtitleY + this.font.lineHeight + subtitleToRosterGap;
-        int toolbarY = rosterHeaderY + this.font.lineHeight + rosterToToolbarGap;
+        int toolbarY = rosterHeaderY + rosterToToolbarGap;
         int topSectionBottom = toolbarY + TOOLBAR_HEIGHT + topSectionBottomPad;
 
-        int bottomButtonY = bottom - 21;
+        int bottomButtonY = bottom - 24;
 
         int footerTextWidth = contentWidth - 16;
         int footerNoteLines = Math.max(1, this.font.split(Component.literal(FOOTER_NOTE), footerTextWidth).size());
@@ -207,15 +207,13 @@ public class AllianceInviteManagementScreen extends Screen {
         int dividerAboveButtonsGap = compact ? 5 : 6;
         int noteToDividerGap = compact ? 5 : 6;
         int selectedToNoteGap = compact ? 10 : 12;
-        int showingToSelectedGap = 11;
         int footerTopPad = 5;
 
         int dividerY = bottomButtonY - dividerAboveButtonsGap;
         int footerNoteY = dividerY - noteToDividerGap - footerNoteHeight;
         int selectedTextY = footerNoteY - selectedToNoteGap;
-        int showingTextY = selectedTextY - showingToSelectedGap;
 
-        int footerSectionTop = showingTextY - footerTopPad;
+        int footerSectionTop = selectedTextY - footerTopPad;
         int footerSectionBottom = dividerY + 1 + dividerAboveButtonsGap;
 
         int listHeaderToFrameGap = compact ? 2 : 4;
@@ -236,17 +234,6 @@ public class AllianceInviteManagementScreen extends Screen {
             listFrameTop -= reduceTop;
             shortage -= reduceTop;
 
-            if (shortage > 0) {
-                int footerReducible = Math.max(0, (selectedTextY - showingTextY) - 9);
-                int reduceFooter = Math.min(shortage, footerReducible);
-                selectedTextY -= reduceFooter;
-                footerNoteY -= reduceFooter;
-                dividerY -= reduceFooter;
-                bottomButtonY -= reduceFooter;
-                footerSectionTop -= reduceFooter;
-                footerSectionBottom -= reduceFooter;
-                listFrameBottom -= reduceFooter;
-            }
         }
 
         if (listFrameBottom < listFrameTop) {
@@ -278,13 +265,14 @@ public class AllianceInviteManagementScreen extends Screen {
                 subtitleY,
                 rosterHeaderY,
                 toolbarY,
-                showingTextY,
                 selectedTextY,
                 footerNoteY,
                 dividerY,
                 bottomButtonY,
                 selectAllButtonWidth,
-                clearButtonWidth
+                clearButtonWidth,
+                panelHeight,
+                maxPanelScroll
         );
     }
 
@@ -333,6 +321,13 @@ public class AllianceInviteManagementScreen extends Screen {
             }
 
             clampScroll(layout);
+            return true;
+        }
+
+        if (layout.maxPanelScroll() > 0) {
+            int delta = scrollY < 0 ? 8 : -8;
+            this.panelScrollOffset = Math.max(0, Math.min(layout.maxPanelScroll(), this.panelScrollOffset + delta));
+            this.init();
             return true;
         }
 
@@ -412,6 +407,20 @@ public class AllianceInviteManagementScreen extends Screen {
         int strongColor = 0xFF241A10;
 
         renderCardBackground(context, layout);
+
+        if (layout.maxPanelScroll() > 0) {
+            int trackX = layout.right() - 5;
+            int trackTop = 4;
+            int trackBottom = this.height - 4;
+            int trackH = trackBottom - trackTop;
+            if (trackH > 10) {
+                context.fill(trackX, trackTop, trackX + 3, trackBottom, 0x33000000);
+                int thumbH = Math.max(10, trackH * this.height / layout.panelHeight());
+                int thumbTop = trackTop + (trackH - thumbH) * this.panelScrollOffset / layout.maxPanelScroll();
+                context.fill(trackX, thumbTop, trackX + 3, thumbTop + thumbH, 0x998A6A3A);
+            }
+        }
+
         renderSections(context, layout);
 
         super.extractRenderState(context, mouseX, mouseY, delta);
@@ -437,22 +446,8 @@ public class AllianceInviteManagementScreen extends Screen {
                 false
         );
 
-        context.text(this.font, "Eligible Players", layout.contentLeft() + 10, layout.rosterHeaderY(), strongColor, false);
-
-        String availableText = "Available: " + this.candidates.size();
-        int availableTextWidth = this.font.width(availableText);
-        context.text(
-                this.font,
-                availableText,
-                layout.contentRight() - availableTextWidth - 10,
-                layout.rosterHeaderY(),
-                accentColor,
-                false
-        );
-
         renderPlayerRows(context, mouseX, mouseY, layout, bodyColor, strongColor, accentColor);
 
-        context.text(this.font, "Showing " + getShowingRangeText(layout), layout.contentLeft() + 8, layout.showingTextY(), accentColor, false);
         context.text(this.font, "Selected: " + this.selectedPlayers.size(), layout.contentLeft() + 8, layout.selectedTextY(), strongColor, false);
 
         context.textWithWordWrap(
@@ -660,13 +655,14 @@ public class AllianceInviteManagementScreen extends Screen {
             int subtitleY,
             int rosterHeaderY,
             int toolbarY,
-            int showingTextY,
             int selectedTextY,
             int footerNoteY,
             int dividerY,
             int bottomButtonY,
             int selectAllButtonWidth,
-            int clearButtonWidth
+            int clearButtonWidth,
+            int panelHeight,
+            int maxPanelScroll
     ) {
         private int toolbarLeft() {
             return this.contentLeft + 10;
