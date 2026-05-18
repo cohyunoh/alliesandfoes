@@ -2,10 +2,11 @@ package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteManagementScreen;
-import net.cnn_r.alliesandfoes.keybind.KeyBindings;
-import net.cnn_r.alliesandfoes.alliance.screen.AllianceCreateScreen;
+import net.cnn_r.alliesandfoes.client.screen.CreateAllianceScreen;
+import net.cnn_r.alliesandfoes.client.screen.TerritoryAnchorScreen;
+import net.cnn_r.alliesandfoes.client.screen.ViewAllianceScreen;
+import net.cnn_r.alliesandfoes.item.ModBlocks;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinScreen;
-import net.cnn_r.alliesandfoes.alliance.screen.AllianceViewScreen;
 import net.cnn_r.alliesandfoes.map.MapPersistence;
 import net.cnn_r.alliesandfoes.map.MapRenderMode;
 import net.cnn_r.alliesandfoes.map.MapState;
@@ -17,15 +18,14 @@ import net.cnn_r.alliesandfoes.map.scan.ChunkScanner;
 import net.cnn_r.alliesandfoes.network.*;
 import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
-import net.cnn_r.alliesandfoes.map.MapScreen;
 import net.cnn_r.alliesandfoes.network.WarStateSyncPayload;
+import net.minecraft.client.gui.screens.MenuScreens;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
-import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.toasts.SystemToast;
@@ -119,31 +119,30 @@ public class AlliesandfoesClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(AllianceCreationScreenPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 if (payload.alreadyInAlliance()) {
-                    AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "");
+                    AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "", null);
 
-                    if (context.client().player != null) {
-                        context.client().player.sendSystemMessage(
-                                Component.literal("You are already in alliance: " + payload.currentAllianceName()));
-                    }
+                    context.client().gui.setOverlayMessage(
+                            Component.literal("Already in alliance: " + payload.currentAllianceName())
+                                    .withStyle(ChatFormatting.YELLOW), false);
                     return;
                 }
 
-                context.client().setScreen(new AllianceCreateScreen(
-                        context.client().screen,
-                        payload.candidates()
-                ));
+                Screen current = context.client().screen;
+                if (current instanceof TerritoryAnchorScreen tas) {
+                    tas.beginOpeningCreate();
+                }
+                context.client().setScreen(new CreateAllianceScreen(current, payload.candidates()));
             });
         });
 
         ClientPlayNetworking.registerGlobalReceiver(JoinAllianceScreenPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 if (payload.alreadyInAlliance()) {
-                    AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "");
+                    AllianceClientState.setAllianceState(true, payload.currentAllianceName(), "", null);
 
-                    if (context.client().player != null) {
-                        context.client().player.sendSystemMessage(
-                                Component.literal("You are already in alliance: " + payload.currentAllianceName()));
-                    }
+                    context.client().gui.setOverlayMessage(
+                            Component.literal("Already in alliance: " + payload.currentAllianceName())
+                                    .withStyle(ChatFormatting.YELLOW), false);
                     return;
                 }
 
@@ -166,7 +165,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 );
 
                 context.client().gui.setOverlayMessage(
-                        Component.literal(payload.requesterName() + " wants to join your alliance — Press M to manage")
+                        Component.literal(payload.requesterName() + " wants to join your alliance — open Territory Anchor to manage")
                                 .withStyle(ChatFormatting.GREEN), false);
             });
         });
@@ -176,7 +175,8 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 AllianceClientState.setAllianceState(
                         payload.inAlliance(),
                         payload.allianceName(),
-                        payload.memberRole()
+                        payload.memberRole(),
+                        payload.allianceId()
                 );
                 if (payload.ownerUuid() != null && context.client().player != null) {
                     AllianceClientState.setAllianceDetails(
@@ -205,7 +205,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 }
 
                 if (payload.success()) {
-                    if (context.client().screen instanceof AllianceCreateScreen allianceCreateScreen) {
+                    if (context.client().screen instanceof CreateAllianceScreen allianceCreateScreen) {
                         allianceCreateScreen.onClose();
                     } else if (context.client().screen instanceof AllianceJoinScreen allianceJoinScreen) {
                         allianceJoinScreen.onClose();
@@ -213,7 +213,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 }
             });
         });
-
+/*
         ClientPlayNetworking.registerGlobalReceiver(InviteAllianceManagementScreenPayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
                 if (!payload.allowed()) {
@@ -224,17 +224,11 @@ public class AlliesandfoesClient implements ClientModInitializer {
                     return;
                 }
 
-                Screen parent = context.client().screen;
-                if (parent instanceof AllianceInviteManagementScreen inviteManagementScreen) {
-                    parent = inviteManagementScreen.getParentScreen();
-                }
-
-                context.client().setScreen(new AllianceInviteManagementScreen(
-                        parent,
-                        payload
-                ));
+                context.client().setScreen(new AllianceInviteManagementScreen(payload));
             });
         });
+
+ */
 
         ClientPlayNetworking.registerGlobalReceiver(AllianceInvitePayload.TYPE, (payload, context) -> {
             context.client().execute(() -> {
@@ -264,17 +258,11 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 }
 
                 boolean shouldOpenScreen = consumeAllianceViewScreenOpenRequest()
-                        || context.client().screen instanceof AllianceViewScreen;
+                        || context.client().screen instanceof ViewAllianceScreen;
 
                 if (shouldOpenScreen) {
-                    if (context.client().screen instanceof AllianceViewScreen existing) {
-                        existing.replacePayload(payload);
-                    } else {
-                        context.client().setScreen(new AllianceViewScreen(
-                                context.client().screen,
-                                payload
-                        ));
-                    }
+                    Screen current = context.client().screen;
+                    context.client().setScreen(new ViewAllianceScreen(payload,current));
                     return;
                 }
 
@@ -336,10 +324,9 @@ public class AlliesandfoesClient implements ClientModInitializer {
                 // unless the map screen is open (player is already handling it).
                 boolean hasPendingInvite = AllianceClientState.hasPendingWarInvites()
                         || AllianceClientState.hasPendingInvites();
-                boolean mapOpen = client.screen instanceof MapScreen;
-                if (hasPendingInvite && !mapOpen) {
+                if (hasPendingInvite) {
                     client.gui.setOverlayMessage(
-                            Component.literal("Press M to View Invite").withStyle(ChatFormatting.GOLD), false);
+                            Component.literal("You have a pending invite!").withStyle(ChatFormatting.GOLD), false);
                 }
             }
         });
@@ -413,6 +400,9 @@ public class AlliesandfoesClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(AllianceInfluenceSyncPayload.TYPE, (payload, context) ->
             context.client().execute(() -> MapState.setAllianceInfluenceBalance(payload.balance())));
 
+        ClientPlayNetworking.registerGlobalReceiver(net.cnn_r.alliesandfoes.network.ChunkRevealedPayload.TYPE, (payload, context) ->
+            context.client().execute(() -> MapState.getExploredChunks().addAll(payload.chunks())));
+
         ClientPlayNetworking.registerGlobalReceiver(RollbackEligibleSyncPayload.TYPE, (payload, context) ->
             context.client().execute(() -> {
                 List<ChunkKey> chunks = new ArrayList<>();
@@ -426,7 +416,7 @@ public class AlliesandfoesClient implements ClientModInitializer {
             context.client().execute(() ->
                 MapState.setDeadPets(payload.warId(), payload.petDescriptions(), payload.totalCost())));
 
-        KeyBindings.register();
+        MenuScreens.register(ModBlocks.TERRITORY_ANCHOR_MENU_TYPE, TerritoryAnchorScreen::new);
 
         // Clear all client-side caches when leaving a world so stale data
         // from a previous world never bleeds into the next one.

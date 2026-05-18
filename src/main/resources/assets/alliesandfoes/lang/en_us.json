@@ -1,4 +1,7 @@
 {
-  "key.alliesandfoes.open_map": "Open Map",
-  "category.alliesandfoes": "Allies & Foes"
+  "category.alliesandfoes": "Allies & Foes",
+  "block.alliesandfoes.territory_anchor": "Territory Anchor",
+  "container.alliesandfoes.territory_anchor": "Territory Anchor",
+  "item.alliesandfoes.alliance_recall_stone": "Alliance Recall Stone",
+  "item.alliesandfoes.survey_scroll": "Survey Scroll"
 }

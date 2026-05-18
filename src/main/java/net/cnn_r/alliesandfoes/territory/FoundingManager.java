@@ -2,7 +2,7 @@ package net.cnn_r.alliesandfoes.territory;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
-import net.cnn_r.alliesandfoes.block.TerritoryAnchorBlock;
+import net.cnn_r.alliesandfoes.block.territoryanchor.TerritoryAnchorBlock;
 import net.cnn_r.alliesandfoes.network.TerritoryChunkBatchPayload;
 import net.cnn_r.alliesandfoes.territory.TerritoryManager.ActionResult;
 import net.minecraft.ChatFormatting;
@@ -57,23 +57,23 @@ public class FoundingManager {
     public void tryStartFounding(ServerLevel level, BlockPos pos, ServerPlayer player) {
         String k = key(level, pos);
         if (sessions.containsKey(k)) {
-            player.sendSystemMessage(Component.literal("A ritual is already in progress here.").withStyle(ChatFormatting.RED));
+            player.sendOverlayMessage(Component.literal("A ritual is already in progress here.").withStyle(ChatFormatting.RED));
             return;
         }
 
         Alliance alliance = AllianceManager.get(server).getAllianceFor(player.getUUID());
         if (alliance == null) {
-            player.sendSystemMessage(Component.literal("You must be in an alliance to found territory.").withStyle(ChatFormatting.RED));
+            player.sendOverlayMessage(Component.literal("You must be in an alliance to found territory.").withStyle(ChatFormatting.RED));
             return;
         }
         if (!alliance.getOwnerUuid().equals(player.getUUID())) {
-            player.sendSystemMessage(Component.literal("Only the alliance owner may start a founding ritual.").withStyle(ChatFormatting.RED));
+            player.sendOverlayMessage(Component.literal("Only the alliance owner may start a founding ritual.").withStyle(ChatFormatting.RED));
             return;
         }
 
         ChunkKey chunk = ChunkKey.of(level, new ChunkPos(pos.getX() >> 4, pos.getZ() >> 4));
         if (TerritoryManager.get(server).isClaimed(chunk)) {
-            player.sendSystemMessage(Component.literal("This chunk is already claimed.").withStyle(ChatFormatting.RED));
+            player.sendOverlayMessage(Component.literal("This chunk is already claimed.").withStyle(ChatFormatting.RED));
             return;
         }
 

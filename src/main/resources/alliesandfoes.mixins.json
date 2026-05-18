@@ -3,7 +3,6 @@
 	"package": "net.cnn_r.alliesandfoes.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
-		"InventoryScreenMixin",
 		"ExplosionBlockSnapshotMixin",
 		"ExplosionChestProtectionMixin",
 		"PlayerXpInfluenceMixin"

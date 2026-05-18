@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " P ",
+    "PCP",
+    " P "
+  ],
+  "key": {
+    "P": "minecraft:paper",
+    "C": "minecraft:compass"
+  },
+  "result": {
+    "id": "alliesandfoes:survey_scroll",
+    "count": 3
+  }
+}

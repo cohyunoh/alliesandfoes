@@ -1,5 +1,6 @@
 package net.cnn_r.alliesandfoes.network;
 
+import net.cnn_r.alliesandfoes.alliance.MemberPermission;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -41,6 +42,10 @@ public record AllianceViewPayload(
             buf.writeUtf(member.name());
             buf.writeBoolean(member.owner());
             buf.writeUtf(member.role());
+            buf.writeVarInt(member.permissions().size());
+            for (MemberPermission perm : member.permissions()) {
+                buf.writeUtf(perm.name());
+            }
         }
 
         buf.writeVarInt(payload.pendingInvites().size());
@@ -59,12 +64,16 @@ public record AllianceViewPayload(
         int memberSize = buf.readVarInt();
         List<MemberEntry> members = new ArrayList<>(memberSize);
         for (int i = 0; i < memberSize; i++) {
-            members.add(new MemberEntry(
-                    buf.readUUID(),
-                    buf.readUtf(),
-                    buf.readBoolean(),
-                    buf.readUtf()
-            ));
+            UUID mUuid = buf.readUUID();
+            String mName = buf.readUtf();
+            boolean mOwner = buf.readBoolean();
+            String mRole = buf.readUtf();
+            int permCount = buf.readVarInt();
+            List<MemberPermission> perms = new ArrayList<>(permCount);
+            for (int j = 0; j < permCount; j++) {
+                perms.add(MemberPermission.valueOf(buf.readUtf()));
+            }
+            members.add(new MemberEntry(mUuid, mName, mOwner, mRole, perms));
         }
 
         int inviteSize = buf.readVarInt();
@@ -86,7 +95,7 @@ public record AllianceViewPayload(
         );
     }
 
-    public record MemberEntry(UUID uuid, String name, boolean owner, String role) {
+    public record MemberEntry(UUID uuid, String name, boolean owner, String role, List<MemberPermission> permissions) {
     }
 
     public record PendingInviteEntry(UUID uuid, String name) {

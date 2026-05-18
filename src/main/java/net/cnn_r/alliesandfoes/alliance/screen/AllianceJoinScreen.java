@@ -1,5 +1,6 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
+import net.cnn_r.alliesandfoes.client.ui.ScreenScrollbar;
 import net.cnn_r.alliesandfoes.network.JoinAllianceScreenPayload;
 import net.cnn_r.alliesandfoes.network.RequestJoinAlliancePayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -19,7 +20,7 @@ public class AllianceJoinScreen extends Screen {
     private static final int PANEL_WIDTH = 430;
     private static final int MIN_PANEL_HEIGHT = 250;
     private static final int MAX_PANEL_HEIGHT = 300;
-    private static final int SCREEN_MARGIN = 18;
+    private static final int SCREEN_MARGIN = 0;
 
     private static final int HEADER_HEIGHT = 24;
     private static final int SECTION_PAD = 12;
@@ -34,6 +35,8 @@ public class AllianceJoinScreen extends Screen {
     private Button nextButton;
     private Button requestButton;
     private Button cancelButton;
+
+    private int screenScrollY = 0;
 
     public AllianceJoinScreen(Screen parent, List<JoinAllianceScreenPayload.Entry> alliances) {
         super(Component.literal("Alliance Petition"));
@@ -138,12 +141,23 @@ public class AllianceJoinScreen extends Screen {
         this.onClose();
     }
 
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        int max = ScreenScrollbar.maxOffset(MAX_PANEL_HEIGHT, this.height, SCREEN_MARGIN);
+        if (max > 0) {
+            this.screenScrollY = ScreenScrollbar.clamp(this.screenScrollY + (scrollY < 0 ? 20 : -20), MAX_PANEL_HEIGHT, this.height, SCREEN_MARGIN);
+            this.init();
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
     private Layout calculateLayout() {
         int panelWidth = Math.min(PANEL_WIDTH, this.width - SCREEN_MARGIN * 2);
-        int panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(this.height - SCREEN_MARGIN * 2, MAX_PANEL_HEIGHT));
+        int panelHeight = MAX_PANEL_HEIGHT;
 
         int left = (this.width - panelWidth) / 2;
-        int top = (this.height - panelHeight) / 2;
+        int top = SCREEN_MARGIN - this.screenScrollY;
         int right = left + panelWidth;
         int bottom = top + panelHeight;
 
@@ -254,6 +268,7 @@ public class AllianceJoinScreen extends Screen {
                     bodyColor,
                     false
             );
+            ScreenScrollbar.render(context, layout.right(), this.height, SCREEN_MARGIN, MAX_PANEL_HEIGHT, this.screenScrollY);
             return;
         }
 
@@ -371,6 +386,8 @@ public class AllianceJoinScreen extends Screen {
                 instructionMaxWidth,
                 bodyColor
         );
+
+        ScreenScrollbar.render(context, layout.right(), this.height, SCREEN_MARGIN, MAX_PANEL_HEIGHT, this.screenScrollY);
     }
 
     private int drawCenteredWrappedLine(

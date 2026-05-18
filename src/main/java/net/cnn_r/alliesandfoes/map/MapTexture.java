@@ -12,10 +12,14 @@ public class MapTexture {
     private final int textureSize;
 
     public MapTexture(int textureSize) {
+        this(textureSize, "map_texture");
+    }
+
+    public MapTexture(int textureSize, String textureName) {
         this.textureSize = textureSize;
         this.image = new NativeImage(textureSize, textureSize, false);
-        this.texture = new DynamicTexture(() -> "chunk_map_texture", this.image);
-        this.textureId = Identifier.fromNamespaceAndPath("alliesandfoes", "map_texture");
+        this.texture = new DynamicTexture(() -> textureName, this.image);
+        this.textureId = Identifier.fromNamespaceAndPath("alliesandfoes", textureName);
 
         Minecraft.getInstance().getTextureManager().register(this.textureId, this.texture);
     }

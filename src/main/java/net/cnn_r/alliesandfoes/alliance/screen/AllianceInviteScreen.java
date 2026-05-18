@@ -1,5 +1,6 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
+import net.cnn_r.alliesandfoes.client.ui.ScreenScrollbar;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
 import net.cnn_r.alliesandfoes.network.RespondAllianceInvitePayload;
@@ -17,7 +18,7 @@ public class AllianceInviteScreen extends Screen {
     private static final int PANEL_WIDTH = 356;
     private static final int MIN_PANEL_HEIGHT = 244;
     private static final int MAX_PANEL_HEIGHT = 284;
-    private static final int SCREEN_MARGIN = 18;
+    private static final int SCREEN_MARGIN = 0;
 
     private static final int HEADER_HEIGHT = 24;
     private static final int SECTION_PAD = 12;
@@ -25,6 +26,7 @@ public class AllianceInviteScreen extends Screen {
     private static final int CHARS_PER_TICK = 2;
 
     private int textRevealTicks = 0;
+    private int screenScrollY = 0;
 
     private final Screen parent;
     private int currentIndex;
@@ -167,12 +169,23 @@ public class AllianceInviteScreen extends Screen {
         return AllianceClientState.getPendingInvite(this.currentIndex);
     }
 
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        int max = ScreenScrollbar.maxOffset(MAX_PANEL_HEIGHT, this.height, SCREEN_MARGIN);
+        if (max > 0) {
+            this.screenScrollY = ScreenScrollbar.clamp(this.screenScrollY + (scrollY < 0 ? 20 : -20), MAX_PANEL_HEIGHT, this.height, SCREEN_MARGIN);
+            this.init();
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
     private Layout calculateLayout() {
         int panelWidth = Math.min(PANEL_WIDTH, this.width - SCREEN_MARGIN * 2);
-        int panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(this.height - SCREEN_MARGIN * 2, MAX_PANEL_HEIGHT));
+        int panelHeight = MAX_PANEL_HEIGHT;
 
         int left = (this.width - panelWidth) / 2;
-        int top = (this.height - panelHeight) / 2;
+        int top = SCREEN_MARGIN - this.screenScrollY;
         int right = left + panelWidth;
         int bottom = top + panelHeight;
 
@@ -283,6 +296,7 @@ public class AllianceInviteScreen extends Screen {
                     bodyColor,
                     false
             );
+            ScreenScrollbar.render(context, layout.right(), this.height, SCREEN_MARGIN, MAX_PANEL_HEIGHT, this.screenScrollY);
             return;
         }
 
@@ -403,6 +417,8 @@ public class AllianceInviteScreen extends Screen {
                 instructionMaxWidth,
                 bodyColor
         );
+
+        ScreenScrollbar.render(context, layout.right(), this.height, SCREEN_MARGIN, MAX_PANEL_HEIGHT, this.screenScrollY);
     }
 
     @Override

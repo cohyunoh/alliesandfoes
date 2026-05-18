@@ -16,6 +16,7 @@ public class AllianceClientState {
 
     private static UUID ownerUuid = null;
     private static UUID selfUuid = null;
+    private static UUID allianceId = null;
 
     private static final List<AllianceInvitePayload> pendingInvites = new ArrayList<>();
     private static final List<AllianceJoinRequestPayload> pendingJoinRequests = new ArrayList<>();
@@ -25,10 +26,12 @@ public class AllianceClientState {
 
     private static final List<UUID> pendingWarInviteIds = new ArrayList<>();
 
-    public static void setAllianceState(boolean inAlliance, String allianceName, String memberRole) {
+    public static void setAllianceState(boolean inAlliance, String allianceName, String memberRole,
+                                        UUID allianceId) {
         AllianceClientState.inAlliance = inAlliance;
         AllianceClientState.allianceName = allianceName == null ? "" : allianceName;
         AllianceClientState.memberRole = memberRole == null ? "" : memberRole;
+        AllianceClientState.allianceId = allianceId;
     }
 
     public static void setAllianceDetails(boolean inAlliance, String allianceName, UUID ownerUuid, UUID selfUuid) {
@@ -36,6 +39,10 @@ public class AllianceClientState {
         AllianceClientState.allianceName = allianceName == null ? "" : allianceName;
         AllianceClientState.ownerUuid = ownerUuid;
         AllianceClientState.selfUuid = selfUuid;
+    }
+
+    public static UUID getAllianceId() {
+        return allianceId;
     }
 
     public static boolean isInAlliance() {

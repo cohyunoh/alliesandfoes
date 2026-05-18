@@ -2,8 +2,10 @@ package net.cnn_r.alliesandfoes;
 
 import net.cnn_r.alliesandfoes.alliance.Alliance;
 import net.cnn_r.alliesandfoes.alliance.AllianceManager;
+import net.cnn_r.alliesandfoes.block.territoryanchor.TerritoryAnchorBlockEntity;
 import net.cnn_r.alliesandfoes.network.DeadPetListSyncPayload;
 import net.cnn_r.alliesandfoes.network.RequestPetRevivePayload;
+import net.cnn_r.alliesandfoes.alliance.AllianceDebugCommands;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionCommands;
 import net.cnn_r.alliesandfoes.alliance.progression.AllianceProgressionService;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWar;
@@ -14,16 +16,16 @@ import net.cnn_r.alliesandfoes.territory.TerritoryQueryService;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarCommands;
 import net.cnn_r.alliesandfoes.alliance.war.AllianceWarService;
 import net.cnn_r.alliesandfoes.alliance.war.WarSnapshotService;
-import net.cnn_r.alliesandfoes.block.TerritoryAnchorBlock;
+import net.cnn_r.alliesandfoes.block.territoryanchor.TerritoryAnchorBlock;
 import net.cnn_r.alliesandfoes.item.ModBlocks;
 import net.cnn_r.alliesandfoes.item.ModItems;
 import net.cnn_r.alliesandfoes.territory.FoundingManager;
 import net.cnn_r.alliesandfoes.network.*;
-import net.cnn_r.alliesandfoes.structure.ChunkStructureData;
 import net.cnn_r.alliesandfoes.structure.StructureChunkValueCalculator;
 import net.cnn_r.alliesandfoes.network.DeclareWarRequestPayload;
 import net.cnn_r.alliesandfoes.network.WarStateSyncPayload;
 import net.cnn_r.alliesandfoes.territory.*;
+import net.cnn_r.alliesandfoes.territory.AllianceExploredChunksSavedData;
 import net.cnn_r.alliesandfoes.territory.ChunkKey;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -46,7 +48,6 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -88,6 +89,7 @@ public class Alliesandfoes implements ModInitializer {
 		ModBlocks.register();
 		TerritoryCommands.register();
 		AllianceProgressionCommands.register();
+		AllianceDebugCommands.register();
 		AllianceWarCommands.register();
 
 		registerTerritoryProtection();
@@ -129,6 +131,33 @@ public class Alliesandfoes implements ModInitializer {
 		PayloadTypeRegistry.serverboundPlay().register(RequestRollbackChunkPayload.TYPE, RequestRollbackChunkPayload.STREAM_CODEC);
 		PayloadTypeRegistry.clientboundPlay().register(DeadPetListSyncPayload.TYPE, DeadPetListSyncPayload.STREAM_CODEC);
 		PayloadTypeRegistry.serverboundPlay().register(RequestPetRevivePayload.TYPE, RequestPetRevivePayload.STREAM_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(ChunkRevealedPayload.TYPE, ChunkRevealedPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RenameAnchorPayload.TYPE, RenameAnchorPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RequestFoundingPayload.TYPE, RequestFoundingPayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(RenameAlliancePayload.TYPE, RenameAlliancePayload.STREAM_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(SetMemberPermissionPayload.TYPE, SetMemberPermissionPayload.STREAM_CODEC);
+
+		ServerPlayNetworking.registerGlobalReceiver(RenameAlliancePayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.get(context.server()).renameAlliance(context.server(), context.player(), payload.newName());
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(SetMemberPermissionPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				AllianceManager.get(context.server()).setMemberPermission(
+						context.server(), context.player(), payload.targetUuid(), payload.permission(), payload.enabled());
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RequestFoundingPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				ServerLevel sl = (ServerLevel) context.player().level();
+				BlockPos pos = payload.anchorPos();
+				if (!(sl.getBlockState(pos).getBlock() instanceof TerritoryAnchorBlock)) return;
+				FoundingManager.get(context.server()).tryStartFounding(sl, pos, context.player());
+			});
+		});
 
 		ServerPlayNetworking.registerGlobalReceiver(RequestAllianceCreationScreenPayload.TYPE, (payload, context) -> {
 			context.server().execute(() -> {
@@ -244,6 +273,30 @@ public class Alliesandfoes implements ModInitializer {
 						context.player(),
 						new AllianceCreateResultPayload(result.success(), result.message())
 				);
+			});
+		});
+
+		ServerPlayNetworking.registerGlobalReceiver(RenameAnchorPayload.TYPE, (payload, context) -> {
+			context.server().execute(() -> {
+				TerritoryManager tm = TerritoryManager.get(context.server());
+				TerritoryManager.ActionResult result = tm.renameAnchor(
+						payload.anchorId(), payload.newName(), context.player().getUUID());
+				if (!result.success()) {
+					ServerPlayNetworking.send(context.player(),
+							new MapScreenMessagePayload(result.message()));
+					return;
+				}
+				// Resync claimed chunks so the new anchor name propagates to all clients
+				List<TerritoryClaim> claims = tm.getClaimsForAnchor(payload.anchorId());
+				if (!claims.isEmpty()) {
+					TerritoryQueryService qs = new TerritoryQueryService(tm);
+					List<ChunkKey> chunkKeys = new ArrayList<>();
+					for (TerritoryClaim claim : claims) chunkKeys.add(claim.getChunkKey());
+					TerritoryChunkBatchPayload batch = TerritoryMapSyncService.buildChunkBatch(qs, chunkKeys);
+					for (ServerPlayer online : context.server().getPlayerList().getPlayers()) {
+						ServerPlayNetworking.send(online, batch);
+					}
+				}
 			});
 		});
 
@@ -733,6 +786,12 @@ public class Alliesandfoes implements ModInitializer {
 							AllianceWarService.get(server).broadcastRollbackEligible(w.id());
 							AllianceWarService.get(server).broadcastDeadPets(w.id());
 						});
+				// Sync all previously revealed chunks for this alliance
+				Set<ChunkKey> revealed = AllianceExploredChunksSavedData.get(server)
+						.getRevealedChunks(joinAlliance.getId());
+				if (!revealed.isEmpty()) {
+					ServerPlayNetworking.send(player, new ChunkRevealedPayload(new ArrayList<>(revealed)));
+				}
 			}
 
 			TerritoryManager tm = TerritoryManager.get(server);
@@ -880,19 +939,23 @@ public class Alliesandfoes implements ModInitializer {
 			return true;
 		});
 
-		// Right-clicking a TerritoryAnchorBlock: start ritual or (if active) glow mobs.
+		// Right-clicking a TerritoryAnchorBlock: glow mobs if ritual active, else open the GUI.
 		UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
 			if (!(world instanceof ServerLevel sl)) return InteractionResult.PASS;
 			if (!(player instanceof ServerPlayer sp)) return InteractionResult.PASS;
 			BlockState anchorCheck = world.getBlockState(hitResult.getBlockPos());
 			if (!(anchorCheck.getBlock() instanceof TerritoryAnchorBlock)) return InteractionResult.PASS;
+			BlockPos pos = hitResult.getBlockPos();
+			MinecraftServer server = sl.getServer();
 			if (anchorCheck.getValue(TerritoryAnchorBlock.ACTIVE)) {
-				FoundingManager.get(sl.getServer()).handleAnchorClick(hitResult.getBlockPos(), sl);
-				return InteractionResult.SUCCESS;
-			} else {
-				FoundingManager.get(sl.getServer()).tryStartFounding(sl, hitResult.getBlockPos(), sp);
+				FoundingManager.get(server).handleAnchorClick(pos, sl);
 				return InteractionResult.SUCCESS;
 			}
+			net.minecraft.world.level.block.entity.BlockEntity be = world.getBlockEntity(pos);
+			if (be instanceof TerritoryAnchorBlockEntity tabEntity) {
+				sp.openMenu(tabEntity);
+			}
+			return InteractionResult.SUCCESS;
 		});
 
 		// Block placement: blocked in enemy territory unless at war + snapshot.

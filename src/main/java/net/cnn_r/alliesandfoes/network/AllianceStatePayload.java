@@ -11,7 +11,8 @@ public record AllianceStatePayload(
         boolean inAlliance,
         String allianceName,
         String memberRole,
-        UUID ownerUuid
+        UUID ownerUuid,
+        UUID allianceId
 ) implements CustomPacketPayload {
 
     public static final Type<AllianceStatePayload> TYPE =
@@ -33,6 +34,10 @@ public record AllianceStatePayload(
         if (payload.ownerUuid() != null) {
             buf.writeUUID(payload.ownerUuid());
         }
+        buf.writeBoolean(payload.allianceId() != null);
+        if (payload.allianceId() != null) {
+            buf.writeUUID(payload.allianceId());
+        }
     }
 
     private static AllianceStatePayload read(FriendlyByteBuf buf) {
@@ -43,6 +48,10 @@ public record AllianceStatePayload(
         if (buf.readBoolean()) {
             ownerUuid = buf.readUUID();
         }
-        return new AllianceStatePayload(inAlliance, allianceName, memberRole, ownerUuid);
+        UUID allianceId = null;
+        if (buf.readBoolean()) {
+            allianceId = buf.readUUID();
+        }
+        return new AllianceStatePayload(inAlliance, allianceName, memberRole, ownerUuid, allianceId);
     }
 }

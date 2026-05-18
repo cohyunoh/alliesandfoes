@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public class AllianceSavedData extends SavedData {
@@ -43,6 +44,26 @@ public class AllianceSavedData extends SavedData {
             }
     );
 
+    private static final Codec<LinkedHashSet<MemberPermission>> PERMISSION_SET_CODEC =
+            MemberPermission.CODEC.listOf().xmap(
+                    list -> new LinkedHashSet<>(list),
+                    set -> new ArrayList<>(set)
+            );
+
+    private static final Codec<LinkedHashMap<UUID, LinkedHashSet<MemberPermission>>> PERMISSIONS_MAP_CODEC =
+            Codec.unboundedMap(UUID_CODEC, PERMISSION_SET_CODEC).xmap(
+                    map -> {
+                        LinkedHashMap<UUID, LinkedHashSet<MemberPermission>> ordered = new LinkedHashMap<>();
+                        ordered.putAll(map);
+                        return ordered;
+                    },
+                    map -> {
+                        LinkedHashMap<UUID, LinkedHashSet<MemberPermission>> ordered = new LinkedHashMap<>();
+                        ordered.putAll(map);
+                        return ordered;
+                    }
+            );
+
     private static final Codec<StoredAlliance> STORED_ALLIANCE_CODEC = RecordCodecBuilder.create(instance -> instance.group(
             UUID_CODEC.fieldOf("id").forGetter(StoredAlliance::id),
             Codec.STRING.fieldOf("name").forGetter(StoredAlliance::name),
@@ -50,7 +71,8 @@ public class AllianceSavedData extends SavedData {
             UUID_SET_CODEC.fieldOf("members").forGetter(StoredAlliance::members),
             ROLE_MAP_CODEC.fieldOf("roles").forGetter(StoredAlliance::roles),
             UUID_SET_CODEC.fieldOf("pending_invites").forGetter(StoredAlliance::pendingInvites),
-            UUID_SET_CODEC.fieldOf("pending_join_requests").forGetter(StoredAlliance::pendingJoinRequests)
+            UUID_SET_CODEC.fieldOf("pending_join_requests").forGetter(StoredAlliance::pendingJoinRequests),
+            PERMISSIONS_MAP_CODEC.optionalFieldOf("permissions", new LinkedHashMap<>()).forGetter(StoredAlliance::permissions)
     ).apply(instance, StoredAlliance::new));
 
     private static final Codec<AllianceSavedData> CODEC = STORED_ALLIANCE_CODEC.listOf().xmap(
@@ -112,13 +134,18 @@ public class AllianceSavedData extends SavedData {
             LinkedHashSet<UUID> members,
             LinkedHashMap<UUID, String> roles,
             LinkedHashSet<UUID> pendingInvites,
-            LinkedHashSet<UUID> pendingJoinRequests
+            LinkedHashSet<UUID> pendingJoinRequests,
+            LinkedHashMap<UUID, LinkedHashSet<MemberPermission>> permissions
     ) {
         public static StoredAlliance fromLiveAlliance(Alliance alliance) {
             LinkedHashSet<UUID> members = new LinkedHashSet<>(alliance.getMemberUuids());
             LinkedHashMap<UUID, String> roles = new LinkedHashMap<>(alliance.getMemberRoles());
             LinkedHashSet<UUID> pendingInvites = new LinkedHashSet<>(alliance.getPendingInviteUuids());
             LinkedHashSet<UUID> pendingJoinRequests = new LinkedHashSet<>(alliance.getPendingJoinRequestUuids());
+            LinkedHashMap<UUID, LinkedHashSet<MemberPermission>> permissions = new LinkedHashMap<>();
+            for (Map.Entry<UUID, Set<MemberPermission>> e : alliance.getMemberPermissions().entrySet()) {
+                permissions.put(e.getKey(), new LinkedHashSet<>(e.getValue()));
+            }
 
             return new StoredAlliance(
                     alliance.getId(),
@@ -127,7 +154,8 @@ public class AllianceSavedData extends SavedData {
                     members,
                     roles,
                     pendingInvites,
-                    pendingJoinRequests
+                    pendingJoinRequests,
+                    permissions
             );
         }
 
@@ -154,6 +182,12 @@ public class AllianceSavedData extends SavedData {
 
             for (UUID requesterUuid : this.pendingJoinRequests) {
                 alliance.addPendingJoinRequest(requesterUuid);
+            }
+
+            for (Map.Entry<UUID, LinkedHashSet<MemberPermission>> e : this.permissions.entrySet()) {
+                for (MemberPermission perm : e.getValue()) {
+                    alliance.setPermission(e.getKey(), perm, true);
+                }
             }
 
             return alliance;

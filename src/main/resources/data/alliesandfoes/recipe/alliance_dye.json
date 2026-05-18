@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": ["minecraft:ink_sac", "minecraft:paper"],
+  "result": {
+    "id": "alliesandfoes:alliance_dye",
+    "count": 1
+  }
+}

@@ -437,6 +437,27 @@ public class TerritoryManager {
         }
     }
 
+    public ActionResult renameAnchor(UUID anchorId, String rawName, UUID requesterUuid) {
+        if (anchorId == null) return ActionResult.failure("Anchor ID cannot be null.");
+        TerritoryAnchor anchor = this.anchorsById.get(anchorId);
+        if (anchor == null) return ActionResult.failure("Anchor not found.");
+        Alliance alliance = AllianceManager.get(this.server).getAllianceFor(requesterUuid);
+        if (alliance == null || !anchor.getAllianceId().equals(alliance.getId()))
+            return ActionResult.failure("Not your territory.");
+        if (!alliance.getOwnerUuid().equals(requesterUuid))
+            return ActionResult.failure("Only the founder can rename anchors.");
+        String newName = sanitizeAnchorName(rawName);
+        TerritoryAnchor renamed = new TerritoryAnchor(
+                anchor.getAnchorId(), anchor.getAllianceId(), anchor.getFounderUuid(),
+                newName, anchor.getTier(), anchor.getOrigin(), anchor.getCreatedAt()
+        );
+        this.anchorsById.put(anchorId, renamed);
+        List<TerritoryAnchor> list = this.anchorsByAllianceId.get(alliance.getId());
+        if (list != null) list.replaceAll(a -> a.getAnchorId().equals(anchorId) ? renamed : a);
+        this.save();
+        return ActionResult.success("Anchor renamed to: " + newName, renamed, null, 0);
+    }
+
     public void save() {
         TerritorySavedData.get(this.server).saveSnapshot(
                 this.anchorsById.values(),

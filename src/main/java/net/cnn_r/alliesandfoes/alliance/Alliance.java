@@ -1,5 +1,6 @@
 package net.cnn_r.alliesandfoes.alliance;
 
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -12,12 +13,13 @@ public class Alliance {
     public static final String EXPLORER_ROLE = "Explorer";
 
     private final UUID id;
-    private final String name;
+    private String name;
     private UUID ownerUuid;
     private final Set<UUID> memberUuids = new LinkedHashSet<>();
     private final Set<UUID> pendingInviteUuids = new LinkedHashSet<>();
     private final Map<UUID, String> memberRoles = new LinkedHashMap<>();
     private final Set<UUID> pendingJoinRequestUuids = new LinkedHashSet<>();
+    private final Map<UUID, Set<MemberPermission>> memberPermissions = new LinkedHashMap<>();
 
     public Alliance(UUID id, String name, UUID ownerUuid) {
         this.id = id;
@@ -33,6 +35,10 @@ public class Alliance {
 
     public String getName() {
         return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public UUID getOwnerUuid() {
@@ -77,6 +83,7 @@ public class Alliance {
     public void removeMember(UUID uuid) {
         memberUuids.remove(uuid);
         memberRoles.remove(uuid);
+        memberPermissions.remove(uuid);
     }
 
     public boolean hasMember(UUID uuid) {
@@ -135,6 +142,23 @@ public class Alliance {
 
         String role = sanitizeRole(rawRole);
         memberRoles.put(uuid, role);
+    }
+
+    public Map<UUID, Set<MemberPermission>> getMemberPermissions() {
+        return memberPermissions;
+    }
+
+    public Set<MemberPermission> getPermissions(UUID uuid) {
+        if (uuid.equals(ownerUuid)) {
+            return EnumSet.allOf(MemberPermission.class);
+        }
+        return memberPermissions.computeIfAbsent(uuid, k -> EnumSet.noneOf(MemberPermission.class));
+    }
+
+    public void setPermission(UUID uuid, MemberPermission permission, boolean enabled) {
+        if (uuid.equals(ownerUuid)) return;
+        Set<MemberPermission> perms = memberPermissions.computeIfAbsent(uuid, k -> EnumSet.noneOf(MemberPermission.class));
+        if (enabled) perms.add(permission); else perms.remove(permission);
     }
 
     public static String sanitizeRole(String rawRole) {

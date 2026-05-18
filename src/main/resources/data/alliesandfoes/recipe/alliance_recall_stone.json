@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " C ",
+    "SES",
+    "SSS"
+  ],
+  "key": {
+    "C": "minecraft:compass",
+    "E": "minecraft:ender_pearl",
+    "S": "minecraft:stone"
+  },
+  "result": {
+    "id": "alliesandfoes:alliance_recall_stone"
+  }
+}

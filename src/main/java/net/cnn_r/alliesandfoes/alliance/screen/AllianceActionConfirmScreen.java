@@ -1,5 +1,6 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
+import net.cnn_r.alliesandfoes.client.ui.ScreenScrollbar;
 import net.cnn_r.alliesandfoes.network.KickAllianceMemberPayload;
 import net.cnn_r.alliesandfoes.network.TransferAllianceOwnershipPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -15,7 +16,7 @@ import java.util.UUID;
 public class AllianceActionConfirmScreen extends Screen {
     private static final int PANEL_WIDTH = 300;
     private static final int PANEL_HEIGHT = 170;
-    private static final int SCREEN_MARGIN = 18;
+    private static final int SCREEN_MARGIN = 0;
     private static final int SECTION_PAD = 14;
     private static final int HEADER_HEIGHT = 24;
     private static final int FOOTER_HEIGHT = 38;
@@ -28,6 +29,8 @@ public class AllianceActionConfirmScreen extends Screen {
 
     private Button cancelButton;
     private Button confirmButton;
+
+    private int screenScrollY = 0;
 
     public AllianceActionConfirmScreen(
             Screen parent,
@@ -155,6 +158,8 @@ public class AllianceActionConfirmScreen extends Screen {
                     false
             );
         }
+
+        ScreenScrollbar.render(context, layout.right(), this.height, SCREEN_MARGIN, PANEL_HEIGHT, this.screenScrollY);
     }
 
     @Override
@@ -164,12 +169,23 @@ public class AllianceActionConfirmScreen extends Screen {
         }
     }
 
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        int max = ScreenScrollbar.maxOffset(PANEL_HEIGHT, this.height, SCREEN_MARGIN);
+        if (max > 0) {
+            this.screenScrollY = ScreenScrollbar.clamp(this.screenScrollY + (scrollY < 0 ? 20 : -20), PANEL_HEIGHT, this.height, SCREEN_MARGIN);
+            this.init();
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
     private Layout calculateLayout() {
         int panelWidth = Math.min(PANEL_WIDTH, this.width - SCREEN_MARGIN * 2);
-        int panelHeight = Math.min(PANEL_HEIGHT, this.height - SCREEN_MARGIN * 2);
+        int panelHeight = PANEL_HEIGHT;
 
         int left = (this.width - panelWidth) / 2;
-        int top = (this.height - panelHeight) / 2;
+        int top = SCREEN_MARGIN - this.screenScrollY;
         int right = left + panelWidth;
         int bottom = top + panelHeight;
 

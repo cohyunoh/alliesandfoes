@@ -5,7 +5,6 @@ import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceInviteScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.AllianceJoinRequestScreen;
 import net.cnn_r.alliesandfoes.alliance.screen.WarInviteScreen;
-import net.cnn_r.alliesandfoes.keybind.KeyBindings;
 import net.cnn_r.alliesandfoes.map.cache.ChunkCache;
 import net.cnn_r.alliesandfoes.map.cache.ChunkValueCache;
 import net.cnn_r.alliesandfoes.map.cache.PlayerMarkerCache;
@@ -180,8 +179,13 @@ public class MapScreen extends Screen {
     private static final int CHUNK_VALUE_DEBUG_BG_COLOR = 0xB0000000;
     private static final int CHUNK_VALUE_DEBUG_MIN_WIDTH = 170;
 
-    public MapScreen() {
+    private final Screen returnScreen;
+
+    public MapScreen() { this(null); }
+
+    public MapScreen(Screen returnScreen) {
         super(Component.literal("World Map"));
+        this.returnScreen = returnScreen;
     }
 
     @Override
@@ -1024,10 +1028,6 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent input) {
-        if (KeyBindings.OPEN_MAP != null && KeyBindings.OPEN_MAP.matches(input)) {
-            this.onClose();
-            return true;
-        }
 
         int key = input.key();
         int modifiers = input.modifiers();
@@ -1205,6 +1205,18 @@ public class MapScreen extends Screen {
                 }
                 return true;
             }
+            case 69 -> { // E — rename selected anchor
+                if (this.selectedAnchorId != null
+                        && this.territoryPreviewMode == TerritoryPreviewMode.NONE
+                        && AllianceClientState.isOwner()) {
+                    if (this.minecraft != null) {
+                        this.minecraft.setScreen(
+                                new net.cnn_r.alliesandfoes.alliance.screen.AnchorRenameScreen(
+                                        this, this.selectedAnchorId, this.selectedAnchorName));
+                    }
+                    return true;
+                }
+            }
             case 91, 93 -> { // [ or ] — enter anchor cycle mode
                 if (AllianceClientState.isInAlliance()) {
                     enterAnchorCycleMode();
@@ -1250,6 +1262,15 @@ public class MapScreen extends Screen {
         }
 
         return super.keyPressed(input);
+    }
+
+    @Override
+    public void onClose() {
+        if (returnScreen != null) {
+            this.minecraft.setScreen(returnScreen);
+        } else {
+            super.onClose();
+        }
     }
 
     @Override
@@ -1502,6 +1523,8 @@ public class MapScreen extends Screen {
 
         ChunkValueData valueData = this.chunkValueCache.get(key);
         boolean showValueColors = this.renderer.getZoom() >= VALUE_BORDER_ZOOM_THRESHOLD;
+        boolean chunkRevealed = AllianceMapIntelPolicy.canToggleAdminDebugIntel()
+                || MapState.getExploredChunks().isRevealed(key);
 
         if (territoryData != null && territoryData.claimed()) {
             boolean myAlliance = AllianceClientState.isInAlliance()
@@ -1592,10 +1615,12 @@ public class MapScreen extends Screen {
             borderColor = territoryData.anchorChunk()
                     ? (myAlliance ? ANCHOR_CHUNK_BORDER_COLOR : ENEMY_ANCHOR_BORDER_COLOR)
                     : (myAlliance ? CLAIMED_CHUNK_BORDER_COLOR : ENEMY_CLAIMED_BORDER_COLOR);
-        } else if (valueData != null && showValueColors) {
+        } else if (valueData != null && showValueColors && chunkRevealed) {
             borderColor = hovered
                     ? getOverallValueColor(valueData.getTotalValue())
                     : getOverallValueBorderColorSoft(valueData.getTotalValue());
+        } else if (valueData != null && showValueColors) {
+            borderColor = hovered ? 0xFF888899 : 0x66666677;
         } else {
             if (MapState.getPlayerHasCeiling() && !hovered && MapState.getCurrentMode() != MapRenderMode.END) {
                 return;
@@ -1611,8 +1636,10 @@ public class MapScreen extends Screen {
                 fillColor = territoryData.anchorChunk()
                         ? (myAlliance ? ANCHOR_CHUNK_FILL_COLOR : ENEMY_ANCHOR_FILL_COLOR)
                         : (myAlliance ? CLAIMED_CHUNK_FILL_COLOR : ENEMY_CLAIMED_FILL_COLOR);
-            } else if (valueData != null && showValueColors) {
+            } else if (valueData != null && showValueColors && chunkRevealed) {
                 fillColor = getOverallValueFillColor(valueData.getTotalValue());
+            } else if (valueData != null && showValueColors) {
+                fillColor = 0x33666677;
             } else {
                 fillColor = HOVERED_CHUNK_FILL_COLOR;
             }
@@ -1966,6 +1993,14 @@ public class MapScreen extends Screen {
 
             context.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
             return;
+        }
+        ChunkValueData hoveredValueData = this.chunkValueCache.get(hoveredKey);
+        boolean hoveredChunkRevealed = AllianceMapIntelPolicy.canToggleAdminDebugIntel()
+                || MapState.getExploredChunks().isRevealed(hoveredKey);
+        if (hoveredValueData != null && !hoveredChunkRevealed) {
+            lines.add(Component.literal("Unsurveyed").withColor(0xFF666688).getVisualOrderText());
+            lines.add(Component.literal("Use a Survey Scroll here to reveal this chunk's value.")
+                    .withColor(0xFFAAAAAA).getVisualOrderText());
         }
         if (this.showStructureIntel && AllianceMapIntelPolicy.canToggleAdminDebugIntel()) {
             ChunkValueData valueData = this.chunkValueCache.get(hoveredKey);

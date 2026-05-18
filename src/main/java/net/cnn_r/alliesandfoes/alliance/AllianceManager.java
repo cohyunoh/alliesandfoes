@@ -1,6 +1,7 @@
 package net.cnn_r.alliesandfoes.alliance;
 
 import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
+import net.cnn_r.alliesandfoes.alliance.MemberPermission;
 import net.cnn_r.alliesandfoes.network.AllianceInvitePayload;
 import net.cnn_r.alliesandfoes.network.AllianceJoinRequestPayload;
 import net.cnn_r.alliesandfoes.network.AllianceStatePayload;
@@ -63,7 +64,7 @@ public class AllianceManager {
         Alliance alliance = this.getAllianceFor(player.getUUID());
 
         if (alliance == null) {
-            ServerPlayNetworking.send(player, new AllianceStatePayload(false, "", "", null));
+            ServerPlayNetworking.send(player, new AllianceStatePayload(false, "", "", null, null));
             return;
         }
 
@@ -73,7 +74,8 @@ public class AllianceManager {
                 true,
                 alliance.getName(),
                 memberRole == null ? "" : memberRole,
-                alliance.getOwnerUuid()
+                alliance.getOwnerUuid(),
+                alliance.getId()
         ));
     }
 
@@ -179,12 +181,15 @@ public class AllianceManager {
         for (UUID memberUuid : alliance.getMemberUuids()) {
             String name = knownNames.getOrDefault(memberUuid, memberUuid.toString());
             String role = alliance.getRole(memberUuid);
+            List<net.cnn_r.alliesandfoes.alliance.MemberPermission> perms =
+                    new ArrayList<>(alliance.getPermissions(memberUuid));
 
             members.add(new AllianceViewPayload.MemberEntry(
                     memberUuid,
                     name,
                     memberUuid.equals(alliance.getOwnerUuid()),
-                    role
+                    role,
+                    perms
             ));
         }
 
@@ -206,7 +211,8 @@ public class AllianceManager {
         ));
     }
 
-    public CreationResult createAlliance(MinecraftServer server, ServerPlayer owner, String rawName, Collection<UUID> invitedPlayers) {
+    public CreationResult createAlliance(MinecraftServer server, ServerPlayer owner, String rawName,
+                                         Collection<UUID> invitedPlayers) {
         if (this.isPlayerInAlliance(owner.getUUID())) {
             return CreationResult.failure("You are already in an alliance.");
         }
@@ -651,6 +657,62 @@ public class AllianceManager {
         return ActionResult.success("Updated member role to: " + sanitizedRole);
     }
 
+    public ActionResult renameAlliance(MinecraftServer server, ServerPlayer actor, String rawName) {
+        Alliance alliance = this.getAllianceFor(actor.getUUID());
+        if (alliance == null) return ActionResult.failure("You are not in an alliance.");
+        if (!alliance.getOwnerUuid().equals(actor.getUUID()))
+            return ActionResult.failure("Only the alliance owner can rename the alliance.");
+
+        String newName = rawName == null ? "" : rawName.trim();
+        if (newName.length() < 3) return ActionResult.failure("Alliance name must be at least 3 characters.");
+        if (newName.length() > 24) return ActionResult.failure("Alliance name must be 24 characters or fewer.");
+
+        String normalized = newName.toLowerCase(Locale.ROOT);
+        UUID existing = this.allianceNameToId.get(normalized);
+        if (existing != null && !existing.equals(alliance.getId()))
+            return ActionResult.failure("That alliance name is already taken.");
+
+        this.allianceNameToId.remove(alliance.getName().toLowerCase(Locale.ROOT));
+        alliance.setName(newName);
+        this.allianceNameToId.put(normalized, alliance.getId());
+        this.save();
+        this.syncAllianceMembers(server, alliance);
+        return ActionResult.success("Alliance renamed to: " + newName);
+    }
+
+    public ActionResult setMemberPermission(MinecraftServer server, ServerPlayer actor,
+                                             UUID targetUuid, MemberPermission permission, boolean enabled) {
+        Alliance alliance = this.getAllianceFor(actor.getUUID());
+        if (alliance == null) return ActionResult.failure("You are not in an alliance.");
+        if (!alliance.getOwnerUuid().equals(actor.getUUID()))
+            return ActionResult.failure("Only the alliance owner can change member permissions.");
+        if (!alliance.hasMember(targetUuid))
+            return ActionResult.failure("That player is not a member of your alliance.");
+        if (targetUuid.equals(alliance.getOwnerUuid()))
+            return ActionResult.failure("Cannot change the founder's permissions.");
+
+        alliance.setPermission(targetUuid, permission, enabled);
+        this.save();
+        return ActionResult.success("Permission updated.");
+    }
+
+    public ActionResult debugAddMember(MinecraftServer server, ServerPlayer target, String allianceName) {
+        Alliance alliance = this.getAllianceByName(allianceName);
+        if (alliance == null) {
+            return ActionResult.failure("No alliance named '" + allianceName + "' exists.");
+        }
+        if (this.isPlayerInAlliance(target.getUUID())) {
+            return ActionResult.failure(target.getGameProfile().name() + " is already in an alliance.");
+        }
+        alliance.addMember(target.getUUID());
+        this.playerToAllianceId.put(target.getUUID(), alliance.getId());
+        this.save();
+        this.syncPlayer(target);
+        this.refreshAllianceMembers(server, alliance);
+        target.sendSystemMessage(Component.literal("[Debug] Added to alliance: " + alliance.getName()));
+        return ActionResult.success("Added " + target.getGameProfile().name() + " to alliance: " + alliance.getName());
+    }
+
     public void sendViewScreenToAlliance(MinecraftServer server, Alliance alliance) {
         for (UUID memberUuid : alliance.getMemberUuids()) {
             ServerPlayer player = server.getPlayerList().getPlayer(memberUuid);
@@ -693,7 +755,7 @@ public class AllianceManager {
         }
     }
 
-    private void save() {
+    public void save() {
         AllianceSavedData.get(this.server).saveFromLiveAlliances(this.alliancesById.values());
     }
 

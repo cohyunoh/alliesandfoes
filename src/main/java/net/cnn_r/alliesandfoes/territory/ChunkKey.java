@@ -1,5 +1,7 @@
 package net.cnn_r.alliesandfoes.territory;
 
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -13,6 +15,12 @@ public final class ChunkKey {
     public static final String TAG_DIMENSION = "dimension";
     public static final String TAG_X = "x";
     public static final String TAG_Z = "z";
+
+    public static final Codec<ChunkKey> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            Codec.STRING.fieldOf("dimension").forGetter(ChunkKey::getDimensionId),
+            Codec.INT.fieldOf("x").forGetter(ChunkKey::getChunkX),
+            Codec.INT.fieldOf("z").forGetter(ChunkKey::getChunkZ)
+    ).apply(instance, ChunkKey::new));
 
     private final String dimensionId;
     private final int chunkX;
