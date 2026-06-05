@@ -1,6 +1,5 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
-import net.cnn_r.alliesandfoes.client.ui.ScreenScrollbar;
 import net.cnn_r.alliesandfoes.network.JoinAllianceScreenPayload;
 import net.cnn_r.alliesandfoes.network.RequestJoinAlliancePayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -143,12 +142,6 @@ public class AllianceJoinScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        int max = ScreenScrollbar.maxOffset(MAX_PANEL_HEIGHT, this.height, SCREEN_MARGIN);
-        if (max > 0) {
-            this.screenScrollY = ScreenScrollbar.clamp(this.screenScrollY + (scrollY < 0 ? 20 : -20), MAX_PANEL_HEIGHT, this.height, SCREEN_MARGIN);
-            this.init();
-            return true;
-        }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
@@ -268,7 +261,6 @@ public class AllianceJoinScreen extends Screen {
                     bodyColor,
                     false
             );
-            ScreenScrollbar.render(context, layout.right(), this.height, SCREEN_MARGIN, MAX_PANEL_HEIGHT, this.screenScrollY);
             return;
         }
 
@@ -387,7 +379,6 @@ public class AllianceJoinScreen extends Screen {
                 bodyColor
         );
 
-        ScreenScrollbar.render(context, layout.right(), this.height, SCREEN_MARGIN, MAX_PANEL_HEIGHT, this.screenScrollY);
     }
 
     private int drawCenteredWrappedLine(

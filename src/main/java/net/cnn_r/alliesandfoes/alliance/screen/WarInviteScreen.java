@@ -1,6 +1,5 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
-import net.cnn_r.alliesandfoes.client.ui.ScreenScrollbar;
 import net.cnn_r.alliesandfoes.alliance.AllianceClientState;
 import net.cnn_r.alliesandfoes.map.MapState;
 import net.cnn_r.alliesandfoes.network.RespondWarInvitePayload;
@@ -41,8 +40,6 @@ public class WarInviteScreen extends Screen {
     @Override
     protected void init() {
         this.clearWidgets();
-
-        this.screenScrollY = ScreenScrollbar.clamp(this.screenScrollY, PANEL_HEIGHT, this.height, SCREEN_MARGIN);
         int left = (this.width - PANEL_WIDTH) / 2;
         int top = SCREEN_MARGIN - this.screenScrollY;
         int contentLeft = left + SECTION_PAD;
@@ -167,18 +164,10 @@ public class WarInviteScreen extends Screen {
         context.text(this.font, "Accept bonus: +50 influence", contentLeft, y, 0xFF55FF55, false);
         y += lineH + 4;
         context.text(this.font, "View to inspect the contested chunks on the map.", contentLeft, y, 0xFFAAAAAA, false);
-
-        ScreenScrollbar.render(context, left + PANEL_WIDTH, this.height, SCREEN_MARGIN, PANEL_HEIGHT, this.screenScrollY);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        int max = ScreenScrollbar.maxOffset(PANEL_HEIGHT, this.height, SCREEN_MARGIN);
-        if (max > 0) {
-            this.screenScrollY = ScreenScrollbar.clamp(this.screenScrollY + (scrollY < 0 ? 20 : -20), PANEL_HEIGHT, this.height, SCREEN_MARGIN);
-            this.init();
-            return true;
-        }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 

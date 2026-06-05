@@ -1,9 +1,9 @@
 package net.cnn_r.alliesandfoes.client.screen;
 
 import net.cnn_r.alliesandfoes.alliance.screen.EditMemberScreen;
-import net.cnn_r.alliesandfoes.network.AllianceCreationScreenPayload;
 import net.cnn_r.alliesandfoes.network.AllianceViewPayload;
 import net.cnn_r.alliesandfoes.network.RenameAlliancePayload;
+import net.cnn_r.alliesandfoes.network.RequestInviteAllianceManagementScreenPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -18,7 +18,9 @@ import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
+import java.awt.*;
 import java.util.*;
+import java.util.List;
 
 public class ViewAllianceScreen extends Screen {
 
@@ -80,6 +82,7 @@ public class ViewAllianceScreen extends Screen {
     private EditBox nameEditBox;
     private Button editNameBtn;
     private Button confirmNameBtn;
+    private Button inviteScreenBtn;
     private String currentName;
 
     public ViewAllianceScreen(AllianceViewPayload payload, Screen parent) {
@@ -136,7 +139,11 @@ public class ViewAllianceScreen extends Screen {
                         Button.builder(Component.literal("Edit Name"), btn -> {
                             editingName = true;
                             init();
-                        }).bounds(panelLeft + LEFT_PADDING-1, panelTop + 20, 70, 13).build());
+                        }).bounds(panelLeft + LEFT_PADDING-1, panelTop + 18, 70, 15).build());
+                inviteScreenBtn = this.addRenderableWidget(
+                        Button.builder(Component.literal("+"), btn -> {
+                            ClientPlayNetworking.send(new RequestInviteAllianceManagementScreenPayload());
+                        }).bounds(panelLeft + IMG_WIDTH - 15 - 11, panelTop + 18, 20, 20).build());
             }
         }
 

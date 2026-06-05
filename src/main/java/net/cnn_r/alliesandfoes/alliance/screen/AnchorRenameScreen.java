@@ -1,6 +1,5 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
-import net.cnn_r.alliesandfoes.client.ui.ScreenScrollbar;
 import net.cnn_r.alliesandfoes.network.RenameAnchorPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -38,7 +37,6 @@ public class AnchorRenameScreen extends Screen {
     @Override
     protected void init() {
         this.clearWidgets();
-        this.screenScrollY = ScreenScrollbar.clamp(this.screenScrollY, PANEL_H, this.height, SCREEN_MARGIN);
         int px = (this.width - PANEL_W) / 2;
         int py = SCREEN_MARGIN - this.screenScrollY;
 
@@ -72,14 +70,6 @@ public class AnchorRenameScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        int max = ScreenScrollbar.maxOffset(PANEL_H, this.height, SCREEN_MARGIN);
-        if (max > 0) {
-            String savedValue = this.nameBox != null ? this.nameBox.getValue() : "";
-            this.screenScrollY = ScreenScrollbar.clamp(this.screenScrollY + (scrollY < 0 ? 20 : -20), PANEL_H, this.height, SCREEN_MARGIN);
-            this.init();
-            if (this.nameBox != null) this.nameBox.setValue(savedValue);
-            return true;
-        }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
@@ -98,8 +88,6 @@ public class AnchorRenameScreen extends Screen {
         context.text(this.font, "Rename Anchor", px + 10, py + 8, 0xFF3A2F1B, false);
 
         super.extractRenderState(context, mouseX, mouseY, delta);
-
-        ScreenScrollbar.render(context, px + PANEL_W, this.height, SCREEN_MARGIN, PANEL_H, this.screenScrollY);
     }
 
     @Override

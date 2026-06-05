@@ -1,6 +1,5 @@
 package net.cnn_r.alliesandfoes.alliance.screen;
 
-import net.cnn_r.alliesandfoes.client.ui.ScreenScrollbar;
 import net.cnn_r.alliesandfoes.network.KickAllianceMemberPayload;
 import net.cnn_r.alliesandfoes.network.TransferAllianceOwnershipPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -159,7 +158,6 @@ public class AllianceActionConfirmScreen extends Screen {
             );
         }
 
-        ScreenScrollbar.render(context, layout.right(), this.height, SCREEN_MARGIN, PANEL_HEIGHT, this.screenScrollY);
     }
 
     @Override
@@ -171,12 +169,6 @@ public class AllianceActionConfirmScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        int max = ScreenScrollbar.maxOffset(PANEL_HEIGHT, this.height, SCREEN_MARGIN);
-        if (max > 0) {
-            this.screenScrollY = ScreenScrollbar.clamp(this.screenScrollY + (scrollY < 0 ? 20 : -20), PANEL_HEIGHT, this.height, SCREEN_MARGIN);
-            this.init();
-            return true;
-        }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
